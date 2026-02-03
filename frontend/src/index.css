@@ -1,0 +1,190 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================
+   ARROW PUZZLE - GLOBAL STYLES
+   ============================================ */
+
+/* Base HTML & Body */
+html, body {
+  @apply h-full w-full overflow-hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  @apply h-full w-full;
+}
+
+/* Disable text selection on game elements */
+.no-select {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+/* Touch improvements */
+button, .clickable {
+  @apply cursor-pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* ============================================
+   COMPONENT UTILITIES
+   ============================================ */
+
+/* Glass effect for modals */
+.glass {
+  @apply bg-white/80 backdrop-blur-xl;
+}
+
+/* Premium button style */
+.btn-premium {
+  @apply px-6 py-3 rounded-full font-medium transition-all duration-200;
+  @apply bg-gradient-to-r from-ap-gold to-ap-orange;
+  @apply text-white shadow-lg;
+  @apply hover:shadow-xl hover:scale-105;
+  @apply active:scale-95;
+}
+
+/* Standard button */
+.btn-primary {
+  @apply px-6 py-3 rounded-full font-medium transition-all duration-200;
+  @apply bg-text-primary text-white;
+  @apply hover:bg-gray-800;
+  @apply active:scale-95;
+}
+
+.btn-secondary {
+  @apply px-6 py-3 rounded-full font-medium transition-all duration-200;
+  @apply border-2 border-text-primary text-text-primary;
+  @apply hover:bg-text-primary hover:text-white;
+  @apply active:scale-95;
+}
+
+/* Icon button */
+.btn-icon {
+  @apply p-3 rounded-full transition-colors duration-200;
+  @apply hover:bg-bg-secondary;
+  @apply active:bg-bg-tertiary;
+}
+
+/* ============================================
+   ARROW STYLES
+   ============================================ */
+
+/* Arrow base */
+.arrow-cell {
+  @apply absolute transition-transform duration-100;
+}
+
+/* Arrow body gradient overlay */
+.arrow-gradient {
+  background: linear-gradient(135deg, rgba(255,255,255,0.3) 0%, rgba(0,0,0,0.1) 100%);
+}
+
+/* Error state */
+.arrow-error {
+  @apply animate-shake;
+  filter: drop-shadow(0 0 8px #FF3B30);
+}
+
+/* Hint highlight */
+.arrow-hint {
+  @apply animate-pulse-hint;
+  filter: drop-shadow(0 0 12px #FFD700);
+}
+
+/* Ice arrow overlay */
+.arrow-ice {
+  background: linear-gradient(135deg, rgba(135,206,235,0.5) 0%, rgba(255,255,255,0.8) 100%);
+}
+
+/* ============================================
+   GAME BOARD
+   ============================================ */
+
+.game-board {
+  @apply relative;
+  touch-action: none;
+}
+
+.grid-dot {
+  @apply fill-bg-tertiary;
+}
+
+/* ============================================
+   HEARTS / LIVES
+   ============================================ */
+
+.heart-alive {
+  @apply fill-text-primary stroke-none;
+}
+
+.heart-dead {
+  @apply fill-transparent stroke-bg-tertiary;
+  stroke-width: 2;
+}
+
+/* ============================================
+   MODALS & OVERLAYS
+   ============================================ */
+
+.modal-overlay {
+  @apply fixed inset-0 z-50;
+  @apply bg-white/90 backdrop-blur-sm;
+  @apply flex items-center justify-center;
+  @apply animate-fade-in;
+}
+
+.modal-content {
+  @apply text-center p-8;
+  @apply animate-scale-in;
+}
+
+/* ============================================
+   SCROLLBARS (for shop, leaderboard)
+   ============================================ */
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-white/10 rounded-full;
+}
+
+/* ============================================
+   SAFE AREAS (for notch/home indicator)
+   ============================================ */
+
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.safe-left {
+  padding-left: env(safe-area-inset-left);
+}
+
+.safe-right {
+  padding-right: env(safe-area-inset-right);
+}
+
+/* ============================================
+   NEW: ArcadeApp Styles
+   ============================================ */
+
+.drop-shadow-glow {
+  filter: drop-shadow(0 0 10px rgba(250, 204, 21, 0.5));
+}

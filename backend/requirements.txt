@@ -1,0 +1,39 @@
+# Core
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart
+
+# Database
+sqlalchemy>=2.0.0
+asyncpg
+alembic
+
+# Redis
+redis
+hiredis
+
+# Auth
+pyjwt
+python-jose[cryptography]
+passlib[bcrypt]
+cryptography
+
+# Telegram
+aiogram>=3.0.0
+
+# HTTP
+httpx
+aiohttp
+
+# Validation
+pydantic>=2.0.0
+pydantic-settings
+email-validator
+
+# Security
+slowapi
+python-dotenv
+
+# Utils
+python-dateutil
+pytz
