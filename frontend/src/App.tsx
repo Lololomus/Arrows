@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Users, ClipboardList, Gamepad2, Trophy, ShoppingBag } from 'lucide-react';
 import { useAppStore } from './stores/store';
 import { ParticleBackground } from './components/ParticleBackground';
-import { Header } from './components/Header';
 import { HomeScreen } from './screens/HomeScreen';
 import { GameScreen } from './screens/GameScreen';
 import { ShopScreen } from './screens/ShopScreen';
@@ -54,8 +53,6 @@ export default function App() {
     }
   };
 
-  const pageTitle = activeTab === 'play' ? 'Main Menu' : tabs.find(t => t.id === activeTab)?.label;
-
   return (
     <div className="relative w-full h-screen overflow-hidden bg-slate-900 font-sans select-none">
       <style>{`
@@ -71,12 +68,9 @@ export default function App() {
 
       {/* Main Container */}
       <div className="relative z-10 flex flex-col h-full max-w-md mx-auto shadow-2xl bg-black/20">
-        
-        {/* Top Bar */}
-        <Header title={pageTitle} />
 
         {/* Content Area */}
-        <div className="flex-1 overflow-hidden relative">
+        <div className="flex-1 overflow-hidden relative pt-6 safe-area-top">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}

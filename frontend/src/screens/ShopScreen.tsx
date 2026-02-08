@@ -2,6 +2,36 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ShoppingBag, Sparkles, X, Zap, Gift, Package, CheckCircle, Clock } from 'lucide-react';
 import { useState } from 'react';
 
+// --- ИСПРАВЛЕННЫЕ АНИМАЦИИ (БЕЗ МАСШТАБИРОВАНИЯ) ---
+
+// Контейнер управляет очередью (лесенкой)
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.05, // Задержка 50мс между элементами
+      delayChildren: 0.1
+    }
+  }
+};
+
+// Элемент просто выезжает снизу (y: 20 -> 0). Это убирает эффект "думающего" скейла.
+const itemVariants = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { 
+    opacity: 1, 
+    y: 0, 
+    transition: { 
+      type: "spring", 
+      stiffness: 350, 
+      damping: 25 
+    }
+  }
+};
+
+// --- ДАННЫЕ (ОРИГИНАЛ) ---
+
 const shopItems = [
   // Боксы и наборы
   { 
@@ -146,7 +176,6 @@ const shopItems = [
   },
 ];
 
-// Возможные предметы из Mystery Box
 const mysteryBoxRewards = [
   { id: 2, name: 'Rainbow Skin', emoji: '🌈', rarity: 'rare' },
   { id: 3, name: 'Neon Skin', emoji: '✨', rarity: 'rare' },
@@ -382,7 +411,15 @@ export function ShopScreen() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-24">
         {activeTab === 'shop' ? (
-          <>
+          
+          /* --- SHOP TAB --- */
+          /* Оборачиваем ВЕСЬ таб в motion.div с containerVariants для запуска каскада */
+          <motion.div
+            key="shop"
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+          >
             {/* Header */}
             <div className="mb-6 text-center">
               <div className="relative inline-block">
@@ -407,15 +444,14 @@ export function ShopScreen() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
-                    {items.map((item, i) => {
+                    {items.map((item) => {
                       const styles = rarityStyles[item.rarity as keyof typeof rarityStyles];
 
                       return (
                         <motion.div
                           key={item.id}
-                          initial={{ opacity: 0, scale: 0.9 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          transition={{ delay: i * 0.05, type: 'spring', stiffness: 200 }}
+                          // Используем variants вместо ручного initial/animate
+                          variants={itemVariants} 
                           onClick={() => setSelectedItem(item)}
                           className={`
                             relative rounded-2xl p-4 flex flex-col items-center overflow-hidden
@@ -472,9 +508,17 @@ export function ShopScreen() {
                 </div>
               );
             })}
-          </>
+          </motion.div>
         ) : (
-          <>
+          
+          /* --- INVENTORY TAB --- */
+          /* Тоже оборачиваем для каскадной анимации */
+          <motion.div
+             key="inventory"
+             variants={containerVariants}
+             initial="hidden"
+             animate="visible"
+          >
             {/* Inventory Header */}
             <div className="mb-6 text-center">
               <div className="relative inline-block">
@@ -497,16 +541,14 @@ export function ShopScreen() {
                       <div className="flex-1 h-px bg-gradient-to-r from-white/20 to-transparent ml-2"></div>
                     </div>
                     
-                    {inventoryByCategory.premium.map((item, i) => {
+                    {inventoryByCategory.premium.map((item) => {
                       const styles = rarityStyles[item.rarity as keyof typeof rarityStyles];
                       const daysLeft = item.expiresAt ? getDaysLeft(item.expiresAt) : null;
 
                       return (
                         <motion.div
                           key={item.id}
-                          initial={{ opacity: 0, scale: 0.95 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          transition={{ delay: i * 0.1 }}
+                          variants={itemVariants}
                           className={`
                             relative rounded-2xl p-4 border-2
                             ${styles.border} ${styles.glow}
@@ -558,16 +600,14 @@ export function ShopScreen() {
                     </div>
                     
                     <div className="grid grid-cols-2 gap-3">
-                      {inventoryByCategory.skins.map((item, i) => {
+                      {inventoryByCategory.skins.map((item) => {
                         const styles = rarityStyles[item.rarity as keyof typeof rarityStyles];
                         const isActiveSkin = activeSkin === item.id;
 
                         return (
                           <motion.div
                             key={item.id}
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            transition={{ delay: i * 0.1 }}
+                            variants={itemVariants}
                             className={`
                               relative rounded-2xl p-4 border-2 flex flex-col items-center
                               ${styles.border} ${styles.glow}
@@ -626,15 +666,13 @@ export function ShopScreen() {
                     </div>
                     
                     <div className="space-y-2">
-                      {inventoryByCategory.boosters.map((item, i) => {
+                      {inventoryByCategory.boosters.map((item) => {
                         const styles = rarityStyles[item.rarity as keyof typeof rarityStyles];
 
                         return (
                           <motion.div
                             key={item.id}
-                            initial={{ opacity: 0, x: -20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: i * 0.1 }}
+                            variants={itemVariants}
                             className={`
                               flex items-center gap-3 p-3 rounded-xl border
                               ${styles.border}
@@ -688,7 +726,7 @@ export function ShopScreen() {
                 </button>
               </div>
             )}
-          </>
+          </motion.div>
         )}
       </div>
 
