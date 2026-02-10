@@ -61,32 +61,70 @@ def verify_jwt_token(token: str) -> Optional[int]:
 # ============================================
 
 async def get_current_user(
-    authorization: str = Header(...),
+    authorization: Optional[str] = Header(None),
+    x_dev_user_id: Optional[str] = Header(None, alias="X-Dev-User-Id"),
     db: AsyncSession = Depends(get_db)
 ) -> User:
     """
     Dependency для получения текущего пользователя.
-    БЕЗ МОКОВ!
+    
+    Логика работы:
+    1. Если DEBUG=True и передан заголовок X-Dev-User-Id -> Входим как разработчик (без токена).
+    2. Иначе -> Требуем стандартный Bearer токен.
     """
-    # Проверяем формат
+
+    # --- 1. DEV MODE: Быстрый вход (Bypass) ---
+    if settings.DEBUG and x_dev_user_id:
+        try:
+            telegram_id = int(x_dev_user_id)
+            
+            # Пытаемся найти разработчика в базе
+            result = await db.execute(select(User).where(User.telegram_id == telegram_id))
+            user = result.scalar_one_or_none()
+            
+            # Если разработчика нет в базе - создаем его на лету
+            if not user:
+                print(f"🛠 [Auth] Dev user {telegram_id} not found, creating...")
+                user = User(
+                    telegram_id=telegram_id,
+                    username="dev_user",
+                    first_name="Developer",
+                    current_level=1,
+                    coins=10000,
+                    energy=settings.MAX_ENERGY
+                )
+                db.add(user)
+                stats = UserStats(user=user)
+                db.add(stats)
+                await db.commit()
+                await db.refresh(user)
+                print(f"✅ [Auth] Dev user {telegram_id} created and logged in")
+            
+            return user
+        except ValueError:
+            # Если в заголовке пришел мусор, игнорируем и идем к проверке токена
+            pass
+
+    # --- 2. PROD MODE: Стандартная проверка токена ---
+    if not authorization:
+         raise HTTPException(status_code=401, detail="Missing authorization header")
+
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid authorization header")
     
     token = authorization[7:]
     
-    # Проверяем токен
     user_id = verify_jwt_token(token)
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     
-    # Получаем пользователя
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     
-    # Проверяем бан
+    # Проверка бана
     if getattr(user, 'is_banned', False):
         raise HTTPException(
             status_code=403, 
@@ -108,13 +146,9 @@ async def auth_telegram(
 ):
     """
     Авторизация через Telegram Mini App.
-    
-    БЕЗ МОКОВ! Использует реальную верификацию initData.
+    Использует реальную верификацию initData.
     """
-    # ============================================
-    # ВАЖНО: Верификация Telegram данных
-    # ============================================
-    
+    # Верификация Telegram данных
     telegram_user = validate_telegram_init_data(request.init_data)
     
     if not telegram_user:
@@ -130,10 +164,7 @@ async def auth_telegram(
     
     print(f"✅ [Auth] Telegram user {telegram_id} authenticated")
     
-    # ============================================
     # Ищем или создаём пользователя
-    # ============================================
-    
     result = await db.execute(
         select(User).where(User.telegram_id == telegram_id)
     )
@@ -162,15 +193,12 @@ async def auth_telegram(
     else:
         # Обновляем данные если изменились
         updated = False
-        
         if user.username != username:
             user.username = username
             updated = True
-        
         if user.first_name != first_name:
             user.first_name = first_name
             updated = True
-        
         if user.is_premium != is_premium:
             user.is_premium = is_premium
             updated = True
@@ -179,10 +207,7 @@ async def auth_telegram(
             await db.commit()
             print(f"🔄 [Auth] User {user.id} data updated")
     
-    # ============================================
     # Создаём JWT токен
-    # ============================================
-    
     token = create_jwt_token(user.id)
     
     return AuthResponse(
@@ -215,7 +240,6 @@ async def get_me(user: User = Depends(get_current_user)):
 async def refresh_token(user: User = Depends(get_current_user)):
     """
     Обновить JWT токен.
-    Полезно когда токен скоро истекает.
     """
     token = create_jwt_token(user.id)
     
@@ -235,56 +259,3 @@ async def refresh_token(user: User = Depends(get_current_user)):
             "active_theme": user.active_theme,
         }
     )
-
-
-# ============================================
-# DEV MODE (только для локальной разработки!)
-# ============================================
-
-if settings.DEBUG and settings.ENVIRONMENT == "development":
-    @router.post("/dev/mock")
-    async def dev_mock_auth(db: AsyncSession = Depends(get_db)):
-        """
-        ⚠️ ТОЛЬКО ДЛЯ РАЗРАБОТКИ!
-        Создаёт/получает мок-пользователя.
-        """
-        result = await db.execute(
-            select(User).where(User.telegram_id == 999999)
-        )
-        user = result.scalar_one_or_none()
-        
-        if not user:
-            user = User(
-                telegram_id=999999,
-                username="dev_user",
-                first_name="Developer",
-                current_level=1,
-                coins=10000,
-                energy=settings.MAX_ENERGY
-            )
-            db.add(user)
-            
-            stats = UserStats(user=user)
-            db.add(stats)
-            
-            await db.commit()
-            await db.refresh(user)
-        
-        token = create_jwt_token(user.id)
-        
-        return AuthResponse(
-            token=token,
-            user={
-                "id": user.id,
-                "telegram_id": user.telegram_id,
-                "username": user.username,
-                "first_name": user.first_name,
-                "current_level": user.current_level,
-                "total_stars": user.total_stars,
-                "coins": user.coins,
-                "energy": user.energy,
-                "is_premium": user.is_premium,
-                "active_arrow_skin": user.active_arrow_skin,
-                "active_theme": user.active_theme,
-            }
-        )

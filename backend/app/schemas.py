@@ -5,7 +5,7 @@ Arrow Puzzle - Pydantic Schemas
 """
 
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Union
 from pydantic import BaseModel, Field
 
 
@@ -77,11 +77,14 @@ class Grid(BaseModel):
     """Сетка поля."""
     width: int
     height: int
+    # Поддержка пустых клеток для сложных форм
+    void_cells: List[Cell] = []
 
 
 class LevelMeta(BaseModel):
     """Метаданные уровня."""
-    difficulty: int
+    # Разрешаем число или строку (для совместимости с Godot JSON)
+    difficulty: Union[float, int, str]
     arrow_count: int
     special_arrow_count: int = 0
     dag_depth: int = 1

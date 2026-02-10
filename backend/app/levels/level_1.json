@@ -1,0 +1,47 @@
+{
+	"arrows": [
+		{
+			"cells": [
+				[
+					0,
+					1
+				],
+				[
+					0,
+					0
+				]
+			],
+			"color": "#f8f8f8",
+			"headdirection": "up",
+			"id": 1
+		},
+		{
+			"cells": [
+				[
+					1,
+					0
+				],
+				[
+					1,
+					1
+				]
+			],
+			"color": "#f8f8f8",
+			"headdirection": "down",
+			"id": 3
+		}
+	],
+	"grid": {
+		"height": 2,
+		"shape": "rectangle",
+		"voidcells": [],
+		"width": 2
+	},
+	"meta": {
+		"created": "2026-02-09T15:41:57",
+		"description": "без сложности ",
+		"difficulty": "Легкий",
+		"id": 1,
+		"name": ""
+	}
+}

@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Users, ClipboardList, Gamepad2, Trophy, ShoppingBag } from 'lucide-react';
 import { useAppStore } from './stores/store';
+import { authApi } from './api/client';
 import { ParticleBackground } from './components/ParticleBackground';
 import { HomeScreen } from './screens/HomeScreen';
 import { GameScreen } from './screens/GameScreen';
@@ -10,11 +11,42 @@ import { FriendsScreen } from './screens/FriendsScreen';
 import { TasksScreen } from './screens/TasksScreen';
 import { LeaderboardScreen } from './screens/LeaderboardScreen';
 
+
 type TabId = 'friends' | 'tasks' | 'play' | 'leaderboard' | 'shop';
 
+
 export default function App() {
-  const { screen } = useAppStore();
+  const { screen, setToken, setUser, setError } = useAppStore();
   const [activeTab, setActiveTab] = useState<TabId>('play');
+
+  // 🔐 АВТОРИЗАЦИЯ ПРИ СТАРТЕ
+  useEffect(() => {
+    const authenticate = async () => {
+      try {
+        // Получаем initData из Telegram WebApp
+        const initData = window.Telegram?.WebApp?.initData;
+        
+        if (!initData) {
+          console.warn('⚠️ No Telegram initData - running in dev mode');
+          return; // В DEV режиме сработает X-Dev-User-Id
+        }
+        
+        console.log('🔐 Authenticating...');
+        const response = await authApi.telegram(initData);
+        
+        // Сохраняем токен и пользователя
+        setToken(response.token);
+        setUser(response.user);
+        
+        console.log('✅ Authenticated:', response.user.telegramId);
+      } catch (error) {
+        console.error('❌ Auth failed:', error);
+        setError('Ошибка авторизации');
+      }
+    };
+    
+    authenticate();
+  }, []); // Пустой массив = вызовется ОДИН раз при монтировании
 
   // Если в игре - показываем GameScreen без табов
   if (screen === 'game') {
@@ -25,7 +57,7 @@ export default function App() {
           <GameScreen />
         </div>
       </div>
-    );
+    );    
   }
 
   const tabs = [
@@ -61,6 +93,20 @@ export default function App() {
         .drop-shadow-glow { filter: drop-shadow(0 0 10px rgba(250, 204, 21, 0.5)); }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+        
+        /* 📱 SAFE AREA для iPhone notch и home indicator */
+        .safe-area-top {
+          padding-top: env(safe-area-inset-top, 0px);
+        }
+        .safe-bottom {
+          padding-bottom: env(safe-area-inset-bottom, 0px);
+        }
+        .safe-area-left {
+          padding-left: env(safe-area-inset-left, 0px);
+        }
+        .safe-area-right {
+          padding-right: env(safe-area-inset-right, 0px);
+        }
       `}</style>
 
       {/* Background */}

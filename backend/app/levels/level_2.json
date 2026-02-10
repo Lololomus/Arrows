@@ -1,0 +1,74 @@
+{
+	"arrows": [
+		{
+			"cells": [
+				[
+					0,
+					2
+				],
+				[
+					0,
+					1
+				],
+				[
+					0,
+					0
+				],
+				[
+					1,
+					0
+				],
+				[
+					2,
+					0
+				]
+			],
+			"color": "#f8f8f8",
+			"headdirection": "right",
+			"id": 1
+		},
+		{
+			"cells": [
+				[
+					1,
+					1
+				],
+				[
+					2,
+					1
+				]
+			],
+			"color": "#f8f8f8",
+			"headdirection": "right",
+			"id": 2
+		},
+		{
+			"cells": [
+				[
+					1,
+					2
+				],
+				[
+					2,
+					2
+				]
+			],
+			"color": "#f8f8f8",
+			"headdirection": "right",
+			"id": 3
+		}
+	],
+	"grid": {
+		"height": 3,
+		"shape": "rectangle",
+		"voidcells": [],
+		"width": 3
+	},
+	"meta": {
+		"created": "2026-02-09T15:42:18",
+		"description": "без сложности ",
+		"difficulty": "Нормальный",
+		"id": 2,
+		"name": ""
+	}
+}

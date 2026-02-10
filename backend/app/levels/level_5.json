@@ -1,0 +1,159 @@
+{
+	"arrows": [
+		{
+			"cells": [
+				[
+					1,
+					4
+				],
+				[
+					1,
+					3
+				],
+				[
+					1,
+					2
+				],
+				[
+					1,
+					1
+				],
+				[
+					2,
+					1
+				],
+				[
+					3,
+					1
+				]
+			],
+			"color": "#f8f8f8",
+			"headdirection": "right",
+			"id": 1
+		},
+		{
+			"cells": [
+				[
+					4,
+					1
+				],
+				[
+					4,
+					0
+				],
+				[
+					3,
+					0
+				],
+				[
+					2,
+					0
+				],
+				[
+					1,
+					0
+				],
+				[
+					0,
+					0
+				]
+			],
+			"color": "#f8f8f8",
+			"headdirection": "left",
+			"id": 2
+		},
+		{
+			"cells": [
+				[
+					0,
+					4
+				],
+				[
+					0,
+					3
+				],
+				[
+					0,
+					2
+				],
+				[
+					0,
+					1
+				]
+			],
+			"color": "#f8f8f8",
+			"headdirection": "up",
+			"id": 3
+		},
+		{
+			"cells": [
+				[
+					2,
+					4
+				],
+				[
+					2,
+					3
+				],
+				[
+					2,
+					2
+				]
+			],
+			"color": "#f8f8f8",
+			"headdirection": "up",
+			"id": 4
+		},
+		{
+			"cells": [
+				[
+					3,
+					4
+				],
+				[
+					3,
+					3
+				],
+				[
+					3,
+					2
+				]
+			],
+			"color": "#f8f8f8",
+			"headdirection": "up",
+			"id": 5
+		},
+		{
+			"cells": [
+				[
+					4,
+					2
+				],
+				[
+					4,
+					3
+				],
+				[
+					4,
+					4
+				]
+			],
+			"color": "#f8f8f8",
+			"headdirection": "down",
+			"id": 6
+		}
+	],
+	"grid": {
+		"height": 5,
+		"shape": "rectangle",
+		"voidcells": [],
+		"width": 5
+	},
+	"meta": {
+		"created": "2026-02-09T15:44:12",
+		"description": "",
+		"difficulty": "Легкий",
+		"id": 5,
+		"name": ""
+	}
+}

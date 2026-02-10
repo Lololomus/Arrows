@@ -154,12 +154,48 @@ export const useGameStore = create<GameStore>()(
     (set, get) => ({
       ...initialGameState,
       
-      initLevel: (level, seed, gridSize, arrows) => {
+      initLevel: (level, seed, _ignoredGridSize, arrows) => {
+        // === СТАНДАРТ 1: НОРМАЛИЗАЦИЯ КООРДИНАТ ===
+        // 1. Находим реальные границы контента (Bounding Box)
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+
+        arrows.forEach(arrow => {
+          arrow.cells.forEach(cell => {
+            const cx = Number(cell.x);
+            const cy = Number(cell.y);
+            if (cx < minX) minX = cx;
+            if (cy < minY) minY = cy;
+            if (cx > maxX) maxX = cx;
+            if (cy > maxY) maxY = cy;
+          });
+        });
+
+        // Защита от пустых данных
+        if (minX === Infinity) { minX = 0; maxX = 0; minY = 0; maxY = 0; }
+
+        // 2. Сдвигаем все стрелки к (0,0)
+        const normalizedArrows = arrows.map(arrow => ({
+          ...arrow,
+          cells: arrow.cells.map(cell => ({
+            x: Number(cell.x) - minX,
+            y: Number(cell.y) - minY
+          }))
+        }));
+
+        // 3. Фиксируем размеры сетки строго по контенту
+        const strictWidth = maxX - minX + 1;
+        const strictHeight = maxY - minY + 1;
+
+        console.log(`[System] Level ${level} Normalized: Grid ${strictWidth}x${strictHeight}`);
+
         set({
           level,
           seed,
-          gridSize,
-          arrows,
+          gridSize: { width: strictWidth, height: strictHeight },
+          arrows: normalizedArrows,
           removedArrows: [],
           lives: INITIAL_LIVES,
           moves: 0,
@@ -172,7 +208,6 @@ export const useGameStore = create<GameStore>()(
           flyingArrowId: null,
         });
       },
-      
       removeArrow: (arrowId) => {
         const { arrows, removedArrows, history, lives, hintsRemaining } = get();
         

@@ -21,7 +21,9 @@ from ..schemas import (
     Grid, Arrow, Cell, LevelMeta
 )
 from .auth import get_current_user
-from ..services.generator import generate_level, get_hint as get_hint_arrow
+# Используем загрузчик файлов вместо генератора
+from ..services.level_loader import load_level_from_file
+from ..services.generator import get_hint as get_hint_arrow
 
 
 router = APIRouter(prefix="/game", tags=["game"])
@@ -40,6 +42,10 @@ def calculate_energy_recovery(user: User) -> tuple[int, int]:
         return settings.MAX_ENERGY, 0
     
     now = datetime.utcnow()
+    # Если energy_updated_at None (старые юзеры), ставим сейчас
+    if not user.energy_updated_at:
+        user.energy_updated_at = now
+        
     elapsed = (now - user.energy_updated_at).total_seconds()
     
     # Сколько энергии восстановилось
@@ -93,70 +99,66 @@ async def get_level(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Получить данные уровня.
-    Генерирует уровень с seed = level_num для воспроизводимости.
+    Получить данные уровня из файла.
+    (Unlocked Mode: Доступ открыт ко всем уровням)
     """
     if level_num < 1:
         raise HTTPException(status_code=400, detail="Invalid level number")
     
-    if level_num > user.current_level + 1:
-        raise HTTPException(status_code=403, detail="Level not unlocked")
+    # 🔥 UNLOCKED MODE: Убрали проверку доступа
+    # if level_num > user.current_level + 1:
+    #     raise HTTPException(status_code=403, detail="Level not unlocked")
     
-    # ЛОГИРОВАНИЕ
-    print(f"🎮 Generating level {level_num} for user {user.id}")
+    print(f"🎮 Loading level {level_num} for user {user.id}")
     
-    # TRY-CATCH
+    # Загружаем из файла
+    level_data = load_level_from_file(level_num)
+    
+    # Если уровня нет - 404 (Фронт покажет "Конец контента")
+    if not level_data:
+        print(f"❌ Level {level_num} file not found")
+        raise HTTPException(status_code=404, detail="Level not found (End of content)")
+    
+    print(f"✅ Level {level_num} loaded successfully")
+
+    # Конвертируем в Pydantic схемы
     try:
-        # Генерируем уровень
-        level_data = generate_level(level_num)
-        
-        # ПРОВЕРКА НА КОРРЕКТНОСТЬ
-        if not level_data:
-            raise ValueError("generate_level returned None")
-        
-        if "grid" not in level_data or "arrows" not in level_data:
-            raise ValueError(f"Invalid level_data structure: {level_data.keys()}")
-        
-        if "width" not in level_data["grid"] or "height" not in level_data["grid"]:
-            raise ValueError(f"Invalid grid structure: {level_data['grid']}")
-        
-        #  ЛОГИРОВАНИЕ УСПЕХА
-        print(f"✅ Level {level_num} generated: {level_data['grid']['width']}x{level_data['grid']['height']}, {len(level_data['arrows'])} arrows")
-        
-    except Exception as e:
-        #  ЛОГИРОВАНИЕ ОШИБКИ
-        print(f"❌ Failed to generate level {level_num}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate level: {str(e)}")
-    
-    # Конвертируем в схему
-    try:
-        arrows = [
+        grid_data = level_data["grid"]
+        grid_obj = Grid(
+            width=grid_data["width"], 
+            height=grid_data["height"],
+            void_cells=[Cell(x=c["x"], y=c["y"]) for c in grid_data["void_cells"]]
+        )
+
+        arrows_obj = [
             Arrow(
                 id=a["id"],
                 cells=[Cell(x=c["x"], y=c["y"]) for c in a["cells"]],
                 direction=a["direction"],
-                type=a.get("type", "normal"),
+                type=a["type"],
                 color=a["color"],
-                frozen=a.get("frozen")
-            )
-            for a in level_data["arrows"]
+                frozen=a["frozen"]
+            ) for a in level_data["arrows"]
         ]
-    except Exception as e:
-        print(f"❌ Failed to convert arrows to schema: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to convert level data: {str(e)}")
-    
-    return LevelResponse(
-        level=level_num,
-        seed=level_data["seed"],
-        grid=Grid(width=level_data["grid"]["width"], height=level_data["grid"]["height"]),
-        arrows=arrows,
-        meta=LevelMeta(
+        
+        meta_obj = LevelMeta(
             difficulty=level_data["meta"]["difficulty"],
             arrow_count=level_data["meta"]["arrow_count"],
-            special_arrow_count=level_data["meta"].get("special_arrow_count", 0),
-            dag_depth=level_data["meta"].get("dag_depth", 1)
+            special_arrow_count=0,
+            dag_depth=1
         )
-    )
+
+        return LevelResponse(
+            level=level_num,
+            seed=level_data["seed"],
+            grid=grid_obj,
+            arrows=arrows_obj,
+            meta=meta_obj
+        )
+    except Exception as e:
+        print(f"❌ Serialization error: {e}")
+        raise HTTPException(status_code=500, detail=f"Level data error: {str(e)}")
+
 
 @router.post("/start/{level_num}")
 async def start_level(
@@ -165,8 +167,9 @@ async def start_level(
     db: AsyncSession = Depends(get_db)
 ):
     """Начать уровень - тратит энергию."""
-    if level_num > user.current_level + 1:
-        raise HTTPException(status_code=403, detail="Level not unlocked")
+    # 🔥 UNLOCKED MODE: Убрали проверку доступа
+    # if level_num > user.current_level + 1:
+    #     raise HTTPException(status_code=403, detail="Level not unlocked")
     
     # Проверяем и тратим энергию
     if not await spend_energy(user, db):
@@ -192,56 +195,54 @@ async def complete_level(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Завершить уровень.
-    Верифицирует решение на сервере.
+    Завершить уровень и сохранить прогресс.
     """
     level_num = request.level
     
-    # Проверяем что уровень доступен
-    if level_num > user.current_level + 1:
-        return CompleteResponse(valid=False, error="Level not unlocked")
+    # 🔥 UNLOCKED MODE: Убрали проверку
+    # if level_num > user.current_level + 1:
+    #     return CompleteResponse(valid=False, error="Level not unlocked")
     
-    # Регенерируем уровень для проверки
-    level_data = generate_level(level_num, seed=request.seed)
+    # Загружаем уровень для проверки
+    level_data = load_level_from_file(level_num)
+    if not level_data:
+        return CompleteResponse(valid=False, error="Level data not found on server")
     
-    # Верифицируем последовательность ходов
-    # (упрощённая проверка - на клиенте используем тот же алгоритм)
-    arrows_map = {a["id"]: a for a in level_data["arrows"]}
+    # Валидация ходов
+    arrows_map = {str(a["id"]): a for a in level_data["arrows"]}
     remaining_ids = set(arrows_map.keys())
     
     for move_id in request.moves:
         if move_id not in remaining_ids:
-            return CompleteResponse(valid=False, error="Invalid move sequence")
-        
-        # Проверяем что стрелка свободна (упрощённо)
+            return CompleteResponse(valid=False, error="Invalid arrow ID")
         remaining_ids.remove(move_id)
     
-    # Если все стрелки убраны - победа
     if remaining_ids:
         return CompleteResponse(valid=False, error="Not all arrows removed")
     
-    # Вычисляем награду
+    # Расчет награды
     total_moves = len(request.moves)
     optimal_moves = level_data["meta"]["arrow_count"]
     
-    # Звёзды на основе ошибок (3 жизни макс)
     mistakes = total_moves - optimal_moves
     if mistakes <= 0:
         stars = 3
-    elif mistakes <= 1:
+    elif mistakes <= 2:
         stars = 2
     else:
         stars = 1
     
-    # Монеты
     base_coins = settings.COINS_PER_LEVEL
     star_bonus = stars * settings.COINS_PER_STAR
     coins_earned = base_coins + star_bonus
     
-    # Обновляем прогресс пользователя
+    # 🔥 СОХРАНЕНИЕ ПРОГРЕССА (БУХГАЛТЕР)
     new_level = False
-    if level_num == user.current_level:
-        user.current_level += 1
+    
+    # Если прошли уровень, который равен ИЛИ БОЛЬШЕ текущего максимального -> повышаем планку
+    # Пример: Был на 1, прошел 5 -> Теперь на 6.
+    if level_num >= user.current_level:
+        user.current_level = level_num + 1
         new_level = True
     
     user.total_stars += stars
@@ -256,7 +257,7 @@ async def complete_level(
         stats.levels_completed += 1
         stats.total_moves += total_moves
         stats.total_mistakes += mistakes
-        if mistakes == 0:
+        if mistakes <= 0:
             stats.perfect_levels += 1
     
     # Сохраняем попытку
@@ -330,18 +331,20 @@ async def get_hint(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Получить подсказку - ID следующей безопасной стрелки.
+    Получить подсказку.
     """
-    # Регенерируем уровень
-    level_data = generate_level(request.level, seed=request.seed)
+    # Загружаем уровень
+    level_data = load_level_from_file(request.level)
+    if not level_data:
+        raise HTTPException(status_code=404, detail="Level not found")
     
-    # Находим решение среди оставшихся стрелок
-    remaining = [a for a in level_data["arrows"] if a["id"] in request.remaining_arrows]
+    # Фильтруем оставшиеся стрелки
+    remaining = [a for a in level_data["arrows"] if str(a["id"]) in request.remaining_arrows]
     
     if not remaining:
         raise HTTPException(status_code=400, detail="No arrows remaining")
     
-    # Получаем безопасную стрелку
+    # Получаем безопасную стрелку через алгоритм
     hint_arrow_id = get_hint_arrow(
         remaining, 
         level_data["grid"]["width"], 
@@ -353,6 +356,31 @@ async def get_hint(
 
     return HintResponse(arrow_id=hint_arrow_id)
 
+@router.post("/reset")
+async def reset_progress(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    🛠 DEV: Сброс прогресса пользователя на 1 уровень.
+    """
+    user.current_level = 1
+    user.coins = settings.INITIAL_COINS
+    user.total_stars = 0
+    # user.energy = settings.MAX_ENERGY # Раскомментируй, если нужно сбрасывать и энергию
+    
+    # Очищаем статистику (опционально, но полезно для тестов)
+    result = await db.execute(select(UserStats).where(UserStats.user_id == user.id))
+    stats = result.scalar_one_or_none()
+    if stats:
+        stats.levels_completed = 0
+        stats.total_moves = 0
+        stats.total_mistakes = 0
+    
+    await db.commit()
+    print(f"♻️ User {user.id} progress reset to Level 1")
+    
+    return {"success": True, "level": 1}
 
 @router.post("/undo")
 async def undo_move(

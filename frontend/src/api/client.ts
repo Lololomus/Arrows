@@ -1,7 +1,6 @@
 /**
  * Arrow Puzzle - API Client
- * 
- * HTTP клиент для взаимодействия с backend API.
+ * * HTTP клиент для взаимодействия с backend API.
  */
 
 import { API_URL, API_ENDPOINTS } from '../config/constants';
@@ -18,6 +17,9 @@ import type {
   RewardChannel,
   User,
 } from '../game/types';
+
+// Определяем, запущены ли мы в режиме разработки
+const IS_DEV = import.meta.env.DEV;
 
 // ============================================
 // API ERROR
@@ -49,6 +51,16 @@ async function request<T>(
     ...(token && { Authorization: `Bearer ${token}` }),
     ...options.headers,
   };
+  
+  // 🛠 DEV MODE INJECTION
+  // Если мы локально (IS_DEV) и у нас нет токена (не логинились через ТГ),
+  // то добавляем заголовок разработчика, чтобы бэкенд нас пустил.
+  if (IS_DEV && !token) {
+    // @ts-ignore
+    headers['X-Dev-User-Id'] = '999999';
+    // Можно раскомментировать для отладки, если нужно видеть в консоли
+    // console.debug(`🔧 [API] Dev mode: Injecting X-Dev-User-Id for ${endpoint}`);
+  }
   
   const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,
@@ -121,6 +133,13 @@ export const gameApi = {
   getEnergy: (): Promise<EnergyResponse> =>
     request<EnergyResponse>(API_ENDPOINTS.game.energy),
   
+  /**
+   * Сброс прогресса (DEV)
+   */
+  resetProgress: (): Promise<{ success: boolean }> =>
+    request<{ success: boolean }>(API_ENDPOINTS.game.reset || '/game/reset', { // Fallback если в constants нет пути
+      method: 'POST',
+    }),
   /**
    * Восстановить энергию за рекламу
    */

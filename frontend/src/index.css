@@ -188,3 +188,13 @@ button, .clickable {
 .drop-shadow-glow {
   filter: drop-shadow(0 0 10px rgba(250, 204, 21, 0.5));
 }
+
+/* ============================================
+   GAME FIELD
+   ============================================ */
+
+.game-field {
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(24px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
