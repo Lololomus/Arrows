@@ -1,4 +1,13 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+/**
+ * Arrow Puzzle - Game Screen (FINAL: PHASE 1 + 2 + 3 + 4)
+ * 
+ * Фаза 1: статический import, атомарные селекторы, стабильный handleArrowClick
+ * Фаза 2: engine использует SpatialIndex (прозрачно)
+ * Фаза 3: свитчер SVG ↔ Canvas по размеру поля
+ * Фаза 4: handleArrowClick использует removeArrows() для batch removal
+ */
+
+import { useEffect, useState, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore, useGameStore } from '../stores/store';
 import { GameBoard } from '../components/GameBoard';
@@ -6,32 +15,44 @@ import { gameApi } from '../api/client';
 import { RefreshCw, Lightbulb, RotateCcw, AlertTriangle, Heart, Trash2, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
 import { ANIMATIONS, MAX_CELL_SIZE, MIN_CELL_SIZE } from '../config/constants';
 
+import { processMove, getFreeArrows } from '../game/engine';
+
 import gameBgImage from '../assets/game-bg.jpg?url';
 
+// Grid > порога → Canvas
+const CANVAS_THRESHOLD = 20;
+
+const CanvasBoard = lazy(() => 
+  import('../components/CanvasBoard').then(m => ({ default: m.CanvasBoard }))
+);
+
 export function GameScreen() {
-  const { user, setScreen } = useAppStore();
-  const {
-    gridSize,
-    arrows,
-    lives,
-    status,
-    hintsRemaining,
-    hintedArrowId,
-    history,
-    initLevel,
-    removeArrow,
-    failMove,
-    undo,
-    showHint,
-    clearHint,
-    setStatus,
-    setShakingArrow,
-  } = useGameStore();
+  // === АТОМАРНЫЕ СЕЛЕКТОРЫ ===
+  const user = useAppStore(s => s.user);
+  const setScreen = useAppStore(s => s.setScreen);
+  
+  const gridSize = useGameStore(s => s.gridSize);
+  const arrows = useGameStore(s => s.arrows);
+  const lives = useGameStore(s => s.lives);
+  const status = useGameStore(s => s.status);
+  const hintsRemaining = useGameStore(s => s.hintsRemaining);
+  const hintedArrowId = useGameStore(s => s.hintedArrowId);
+  const history = useGameStore(s => s.history);
+  
+  const initLevel = useGameStore(s => s.initLevel);
+  const removeArrow = useGameStore(s => s.removeArrow);
+  const removeArrows = useGameStore(s => s.removeArrows);
+  const failMove = useGameStore(s => s.failMove);
+  const undo = useGameStore(s => s.undo);
+  const showHint = useGameStore(s => s.showHint);
+  const clearHint = useGameStore(s => s.clearHint);
+  const setStatus = useGameStore(s => s.setStatus);
+  const setShakingArrow = useGameStore(s => s.setShakingArrow);
   
   const [currentLevel, setCurrentLevel] = useState(user?.currentLevel || 1);
   const containerRef = useRef<HTMLDivElement>(null);
   
-  // === ZOOM & PAN STATE ===
+  // === ZOOM & PAN ===
   const [transform, setTransform] = useState({ k: 1, x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
@@ -39,64 +60,50 @@ export function GameScreen() {
   const pinchStartDist = useRef<number | null>(null);
   const pinchStartScale = useRef(1);
 
-  // Состояния UI
   const [confirmAction, setConfirmAction] = useState<'restart' | 'menu' | null>(null);
   const [noMoreLevels, setNoMoreLevels] = useState(false);
   
-  // Загрузка уровня
+  const useCanvas = gridSize.width > CANVAS_THRESHOLD || gridSize.height > CANVAS_THRESHOLD;
+  
   useEffect(() => {
     loadLevel(currentLevel);
-    // Сброс зума при новом уровне
     setTransform({ k: 1, x: 0, y: 0 });
   }, [currentLevel]);
   
-  // === МИНИМАЛЬНЫЙ ОТСТУП (почти в упор к стрелкам) ===
   const baseCellSize = useMemo(() => {
     if (!containerRef.current) return 40;
-    
     const w = containerRef.current.clientWidth;
     const h = containerRef.current.clientHeight;
     if (w === 0 || h === 0) return 40;
     
     const SCREEN_PADDING = 32;
-    const GRID_PADDING_CELLS = 0.4; // Минимальный отступ: 0.2 клетки с каждой стороны
-
+    const GRID_PADDING_CELLS = 0.4;
     const availableW = w - SCREEN_PADDING;
     const availableH = h - SCREEN_PADDING;
-    
     const maxWidth = availableW / (gridSize.width + GRID_PADDING_CELLS);
     const maxHeight = availableH / (gridSize.height + GRID_PADDING_CELLS);
-    
     const newSize = Math.min(maxWidth, maxHeight, MAX_CELL_SIZE);
-    
     return Math.floor(Math.max(newSize, MIN_CELL_SIZE));
   }, [gridSize.width, gridSize.height]);
   
-  // Resize handler
   useEffect(() => {
     const handleResize = () => setTransform(prev => ({ ...prev }));
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // === HANDLERS ДЛЯ ЗУМА И ПАНА ===
+  // === ZOOM HANDLERS ===
 
-  // 1. Mouse Wheel Zoom
-  const handleWheel = (e: React.WheelEvent) => {
-    // Если ctrl не нажат, это просто скролл (хотя у нас overflow hidden, так что зумим всегда)
+  const handleWheel = useCallback((e: React.WheelEvent) => {
     const scaleFactor = e.deltaY > 0 ? 0.9 : 1.1;
-    const newScale = Math.min(Math.max(0.5, transform.k * scaleFactor), 3);
-    
     setTransform(prev => ({
       ...prev,
-      k: newScale
+      k: Math.min(Math.max(0.5, prev.k * scaleFactor), 3)
     }));
-  };
+  }, []);
 
-  // 2. Touch Pinch & Drag
-  const handleTouchStart = (e: React.TouchEvent) => {
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
     if (e.touches.length === 2) {
-      // Pinch start
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY
@@ -104,16 +111,14 @@ export function GameScreen() {
       pinchStartDist.current = dist;
       pinchStartScale.current = transform.k;
     } else if (e.touches.length === 1) {
-      // Drag start
       setIsDragging(true);
       dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       lastTransform.current = { x: transform.x, y: transform.y };
     }
-  };
+  }, [transform.k, transform.x, transform.y]);
 
-  const handleTouchMove = (e: React.TouchEvent) => {
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (e.touches.length === 2 && pinchStartDist.current) {
-      // Pinch move
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY
@@ -121,7 +126,6 @@ export function GameScreen() {
       const scale = pinchStartScale.current * (dist / pinchStartDist.current);
       setTransform(prev => ({ ...prev, k: Math.min(Math.max(0.5, scale), 3) }));
     } else if (e.touches.length === 1 && isDragging) {
-      // Drag move
       const dx = e.touches[0].clientX - dragStart.current.x;
       const dy = e.touches[0].clientY - dragStart.current.y;
       setTransform(prev => ({ 
@@ -130,19 +134,16 @@ export function GameScreen() {
         y: lastTransform.current.y + dy 
       }));
     }
-  };
+  }, [isDragging]);
 
-  const handleTouchEnd = () => {
+  const handleTouchEnd = useCallback(() => {
     setIsDragging(false);
     pinchStartDist.current = null;
-  };
+  }, []);
 
-  // 3. Reset Zoom
-  const resetZoom = () => setTransform({ k: 1, x: 0, y: 0 });
-
-  // ... (Остальной код загрузки уровня, кликов, UI такой же)
-  // ... (Вставь сюда loadLevel, handleArrowClick и т.д. из прошлого файла)
+  const resetZoom = useCallback(() => setTransform({ k: 1, x: 0, y: 0 }), []);
   
+  // === ЗАГРУЗКА УРОВНЯ ===
   const loadLevel = useCallback(async (levelNum: number) => {
     setStatus('loading');
     setNoMoreLevels(false);
@@ -158,51 +159,80 @@ export function GameScreen() {
     }
   }, [initLevel, setStatus, setScreen]);
 
+  // === КЛИК ПО СТРЕЛКЕ (FINAL) ===
+  // Фаза 1: getState() вместо замыкания, статический import
+  // Фаза 4: removeArrows() для batch (бомба/электро = 1 ре-рендер)
   const handleArrowClick = useCallback((arrowId: string) => {
-    if (status !== 'playing') return;
-    const arrow = arrows.find(a => a.id === arrowId);
-    if (!arrow) return;
-    if (hintedArrowId) clearHint();
+    const currentState = useGameStore.getState();
+    const { arrows: currentArrows, status: currentStatus, gridSize: currentGrid, hintedArrowId: currentHint } = currentState;
     
-    import('../game/engine').then(({ processMove }) => {
-        const grid = { width: gridSize.width, height: gridSize.height };
-        const result = processMove(arrow, arrows, grid);
-        if (result.defrosted) return;
-        
-        if (result.collision) {
-          setShakingArrow(arrowId);
-          // @ts-ignore
-          window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('error');
-          setTimeout(() => { setShakingArrow(null); failMove(arrowId); }, ANIMATIONS.arrowError);
-        } else {
-          // @ts-ignore
-          window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('light');
-          removeArrow(arrowId);
-          if (result.bombExplosion?.length) result.bombExplosion.forEach((e: any) => removeArrow(e.id));
-          if (result.electricTarget) removeArrow(result.electricTarget.id as string);
+    if (currentStatus !== 'playing') return;
+    
+    const arrow = currentArrows.find(a => a.id === arrowId);
+    if (!arrow) return;
+    
+    if (currentHint) clearHint();
+    
+    const grid = { width: currentGrid.width, height: currentGrid.height };
+    const result = processMove(arrow, currentArrows, grid);
+    
+    if (result.defrosted) return;
+    
+    if (result.collision) {
+      setShakingArrow(arrowId);
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('error');
+      setTimeout(() => {
+        setShakingArrow(null);
+        failMove(arrowId);
+      }, ANIMATIONS.arrowError);
+    } else {
+      window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('light');
+      
+      // === ФАЗА 4: BATCH REMOVAL ===
+      // Собираем ВСЕ ID для удаления в один массив → один вызов → один ре-рендер
+      const idsToRemove: string[] = [arrowId];
+      
+      if (result.bombExplosion?.length) {
+        for (const exploded of result.bombExplosion) {
+          idsToRemove.push(exploded.id);
         }
-    });
-  }, [arrows, status, gridSize, hintedArrowId, clearHint, setShakingArrow, failMove, removeArrow]);
+        // Тяжёлый haptic для бомбы
+        window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('heavy');
+      }
+      
+      if (result.electricTarget) {
+        idsToRemove.push(result.electricTarget.id);
+      }
+      
+      // Один вызов — один set() — один ре-рендер — одна запись в history
+      if (idsToRemove.length === 1) {
+        removeArrow(arrowId);  // Обычная стрелка — простой путь
+      } else {
+        removeArrows(idsToRemove);  // Batch: бомба/электро
+      }
+    }
+  }, [clearHint, setShakingArrow, failMove, removeArrow, removeArrows]);
 
+  // === ПОДСКАЗКА ===
   const handleHint = useCallback(() => {
-    if (hintsRemaining <= 0) return;
-    import('../game/engine').then(({ getFreeArrows }) => {
-        const free = getFreeArrows(arrows, { width: gridSize.width, height: gridSize.height });
-        if (free.length > 0) showHint(free[0].id);
-    });
-  }, [arrows, gridSize, hintsRemaining, showHint]);
+    const { arrows: currentArrows, gridSize: currentGrid, hintsRemaining: hints } = useGameStore.getState();
+    if (hints <= 0) return;
+    const free = getFreeArrows(currentArrows, { width: currentGrid.width, height: currentGrid.height });
+    if (free.length > 0) showHint(free[0].id);
+  }, [showHint]);
 
-  // Handlers UI
-  const onRestartClick = () => setConfirmAction('restart');
-  const onMenuClick = () => setConfirmAction('menu');
-  const confirmRestart = () => { setConfirmAction(null); loadLevel(currentLevel); };
-  const confirmMenu = () => { setConfirmAction(null); setScreen('home'); };
+  // === UI HANDLERS ===
+  const onRestartClick = useCallback(() => setConfirmAction('restart'), []);
+  const onMenuClick = useCallback(() => setConfirmAction('menu'), []);
+  const confirmRestart = useCallback(() => { setConfirmAction(null); loadLevel(currentLevel); }, [currentLevel, loadLevel]);
+  const confirmMenu = useCallback(() => { setConfirmAction(null); setScreen('home'); }, [setScreen]);
   const handleNextLevel = useCallback(() => setCurrentLevel(prev => prev + 1), []);
-  const handleDevReset = async () => {
+  
+  const handleDevReset = useCallback(async () => {
     if (!confirm('⚠️ СБРОС ПРОГРЕССА (DEV)\n\nВы вернетесь на Уровень 1.\n\nТочно?')) return;
     try { await gameApi.resetProgress(); setCurrentLevel(1); window.location.reload(); } 
     catch (e) { console.error(e); }
-  };
+  }, []);
 
   const livesUI = useMemo(() => (
     <div className="flex gap-1.5">
@@ -214,17 +244,16 @@ export function GameScreen() {
     </div>
   ), [lives]);
 
-  const boardWidth = baseCellSize * gridSize.width;
-  const boardHeight = baseCellSize * gridSize.height;
+  const renderModeLabel = useCanvas ? '🖼 Canvas' : '🎨 SVG';
 
   return (
     <div 
-      className="relative w-full h-screen overflow-hidden font-sans select-none touch-none" // touch-none важно для жестов
+      className="relative w-full h-screen overflow-hidden font-sans select-none touch-none"
       style={{ backgroundImage: `url(${gameBgImage})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: '#1e3a52' }}
     >
-      <div className="relative z-10 flex flex-col h-full mx-auto pointer-events-none"> {/* pointer-events-none чтобы клики проходили к канвасу */}
+      <div className="relative z-10 flex flex-col h-full mx-auto pointer-events-none">
         
-        {/* HEADER (pointer-events-auto чтобы кнопки работали) */}
+        {/* HEADER */}
         <div className="flex justify-center items-center p-4 pt-6 safe-area-top gap-4 pointer-events-auto">
           <div className="bg-slate-800/80 backdrop-blur-md px-6 py-2 rounded-2xl border border-white/10 shadow-lg flex items-center gap-2">
             <span className="text-white/60 text-xs font-medium uppercase tracking-wider">Level</span>
@@ -233,12 +262,15 @@ export function GameScreen() {
           <div className="bg-slate-800/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 shadow-lg">
             {livesUI}
           </div>
+          <div className="bg-slate-800/60 px-3 py-1 rounded-xl border border-white/5">
+            <span className="text-white/40 text-[10px] font-mono">{renderModeLabel} {gridSize.width}×{gridSize.height}</span>
+          </div>
         </div>
         
-        {/* GAME AREA WRAPPER */}
+        {/* GAME AREA */}
         <div 
           ref={containerRef} 
-          className="flex-1 overflow-hidden relative pointer-events-auto" // Включаем события мыши/тача здесь
+          className="flex-1 overflow-hidden relative pointer-events-auto"
           onWheel={handleWheel}
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
@@ -258,50 +290,59 @@ export function GameScreen() {
               <span className="text-white/70 text-sm font-medium">Загрузка...</span>
             </div>
           ) : (
-            <div 
-                className="w-full h-full flex items-center justify-center"
-            >
-                {/* TRANSFORM CONTAINER */}
-                  <div
-                      style={{
-                          transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
-                          transition: isDragging ? 'none' : 'transform 0.2s ease-out',
+            <div className="w-full h-full flex items-center justify-center">
+                <div
+                    style={{
+                        transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
+                        transition: isDragging ? 'none' : 'transform 0.2s ease-out',
+                    }}
+                >
+                  <div 
+                      className="game-field relative rounded-lg overflow-visible transition-all duration-300"
+                      style={{ 
+                          width: (gridSize.width + 0.4) * baseCellSize,
+                          height: (gridSize.height + 0.4) * baseCellSize,
+                          padding: (baseCellSize * 0.2),
                       }}
                   >
-                    <div 
-                        className="game-field relative rounded-lg overflow-visible transition-all duration-300"
-                        style={{ 
-                            // === МИНИМАЛЬНЫЙ ОТСТУП (почти в упор) ===
-                            // Ширина контейнера = (Ширина сетки + 0.4 клетки запаса) * Размер клетки
-                            width: (gridSize.width + 0.4) * baseCellSize,
-                            height: (gridSize.height + 0.4) * baseCellSize,
-                            
-                            // Центрируем сетку внутри: отступ 0.2 клетки с каждой стороны
-                            padding: (baseCellSize * 0.2),
-                        }}
-                    >
+                    {useCanvas ? (
+                      <Suspense fallback={
+                        <div className="flex items-center justify-center" style={{ width: gridSize.width * baseCellSize, height: gridSize.height * baseCellSize }}>
+                          <span className="text-white/50 text-sm">Загрузка Canvas...</span>
+                        </div>
+                      }>
+                        <CanvasBoard
+                          arrows={arrows}
+                          gridSize={gridSize}
+                          cellSize={baseCellSize}
+                          hintedArrowId={hintedArrowId}
+                          onArrowClick={handleArrowClick}
+                        />
+                      </Suspense>
+                    ) : (
                       <GameBoard 
-                          key={`level-${currentLevel}-${gridSize.width}x${gridSize.height}`}
-                          arrows={arrows} 
-                          gridSize={gridSize} 
-                          cellSize={baseCellSize} 
-                          hintedArrowId={hintedArrowId} 
-                          onArrowClick={handleArrowClick} 
+                        key={`level-${currentLevel}-${gridSize.width}x${gridSize.height}`}
+                        arrows={arrows} 
+                        gridSize={gridSize} 
+                        cellSize={baseCellSize} 
+                        hintedArrowId={hintedArrowId} 
+                        onArrowClick={handleArrowClick} 
                       />
+                    )}
                   </div>
                 </div>
             </div>
           )}
           
-          {/* Zoom Controls (Overlay) */}
+          {/* Zoom Controls */}
           <div className="absolute top-4 right-4 flex flex-col gap-2">
-             <button onClick={() => setTransform(p => ({...p, k: p.k + 0.2}))} className="p-2 bg-black/40 rounded-full text-white/70 hover:text-white"><ZoomIn size={20}/></button>
+             <button onClick={() => setTransform(p => ({...p, k: Math.min(3, p.k + 0.2)}))} className="p-2 bg-black/40 rounded-full text-white/70 hover:text-white"><ZoomIn size={20}/></button>
              <button onClick={() => setTransform(p => ({...p, k: Math.max(0.5, p.k - 0.2)}))} className="p-2 bg-black/40 rounded-full text-white/70 hover:text-white"><ZoomOut size={20}/></button>
              <button onClick={resetZoom} className="p-2 bg-black/40 rounded-full text-white/70 hover:text-white"><Maximize size={20}/></button>
           </div>
         </div>
         
-        {/* FOOTER CONTROLS (pointer-events-auto) */}
+        {/* FOOTER */}
         <div className="flex flex-col items-center px-4 pb-8 safe-bottom pointer-events-auto bg-gradient-to-t from-slate-900/80 to-transparent pt-4">
           {!noMoreLevels && (
             <div className="flex justify-center items-center gap-3 w-full max-w-sm">
@@ -312,7 +353,6 @@ export function GameScreen() {
             </div>
           )}
           
-          {/* Navigation & Dev Tools */}
           <div className="flex flex-col items-center gap-2 mt-4 opacity-90 transition-opacity w-full">
               <div className="flex items-center gap-2 text-white/50 text-xs uppercase tracking-widest mb-1">Навигация</div>
               <div className="flex items-center gap-3 bg-slate-900/50 p-2 rounded-xl border border-white/10">
@@ -328,7 +368,6 @@ export function GameScreen() {
         </div>
       </div>
       
-      {/* Modals (Confirm, Victory) - код стандартный, оставляем как есть */}
       <AnimatePresence>
         {confirmAction && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm pointer-events-auto">
