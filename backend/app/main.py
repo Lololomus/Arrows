@@ -24,13 +24,33 @@ from .middleware.security import (
 # LIFESPAN
 # ============================================
 
+def validate_runtime_mode() -> None:
+    """Fail fast on unsafe production configuration."""
+    if settings.is_production:
+        violations: list[str] = []
+        if settings.DEBUG:
+            violations.append("DEBUG must be false in production")
+        if settings.DEV_AUTH_ENABLED:
+            violations.append("DEV_AUTH_ENABLED must be false in production")
+        if violations:
+            joined = "; ".join(violations)
+            raise RuntimeError(f"Unsafe production configuration: {joined}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle events."""
     # Startup
+    validate_runtime_mode()
     print(f"🚀 Starting {settings.APP_NAME}...")
     print(f"🌍 Environment: {settings.ENVIRONMENT}")
-    print(f"🐛 Debug mode: {settings.DEBUG}")
+    print(
+        "🧭 Mode summary: "
+        f"debug={settings.DEBUG} | "
+        f"dev_auth_enabled={settings.DEV_AUTH_ENABLED} | "
+        f"allowlist_size={len(settings.dev_auth_allowlist_ids)} | "
+        f"dev_auto_create={settings.dev_auth_auto_create_enabled}"
+    )
     
     await init_db()
     print("✅ Database initialized")
@@ -144,7 +164,10 @@ async def api_health_check():
     return {
         "status": "ok",
         "version": "1.0.0",
+        "environment": settings.ENVIRONMENT,
         "debug": settings.DEBUG,
+        "dev_auth_enabled": settings.DEV_AUTH_ENABLED,
+        "dev_auth_allowlist_size": len(settings.dev_auth_allowlist_ids),
         "anticheat": settings.ANTICHEAT_ENABLED,
     }
 

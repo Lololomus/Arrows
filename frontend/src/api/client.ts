@@ -20,6 +20,10 @@ import type {
 
 // Определяем, запущены ли мы в режиме разработки
 const IS_DEV = import.meta.env.DEV;
+const DEV_AUTH_ENABLED = ['1', 'true', 'yes', 'on'].includes(
+  String(import.meta.env.VITE_ENABLE_DEV_AUTH || '').toLowerCase()
+);
+const DEV_AUTH_USER_ID = String(import.meta.env.VITE_DEV_AUTH_USER_ID || '').trim();
 
 // ============================================
 // API ERROR
@@ -45,23 +49,29 @@ async function request<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const token = useAppStore.getState().token;
-  
+
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...(token && { Authorization: `Bearer ${token}` }),
     ...options.headers,
   };
-  
-  // 🛠 DEV MODE INJECTION
-  // Если мы локально (IS_DEV) и у нас нет токена (не логинились через ТГ),
-  // то добавляем заголовок разработчика, чтобы бэкенд нас пустил.
-  if (IS_DEV && !token) {
-    // @ts-ignore
-    headers['X-Dev-User-Id'] = '999999';
-    // Можно раскомментировать для отладки, если нужно видеть в консоли
-    // console.debug(`🔧 [API] Dev mode: Injecting X-Dev-User-Id for ${endpoint}`);
+
+  // Dev заголовок передаем только когда это явно включено через env.
+  if (DEV_AUTH_ENABLED && DEV_AUTH_USER_ID) {
+    (headers as Record<string, string>)['X-Dev-User-Id'] = DEV_AUTH_USER_ID;
   }
-  
+
+  if (IS_DEV) {
+    console.log(
+      '🔧 [client] IS_DEV:',
+      IS_DEV,
+      '| DEV_AUTH_ENABLED:',
+      DEV_AUTH_ENABLED,
+      '| headers:',
+      JSON.stringify(headers)
+    );
+  }
+
   const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,
     headers,
@@ -100,6 +110,12 @@ export const authApi = {
       method: 'POST',
       body: JSON.stringify({ init_data: initData }),
     }),
+
+  /**
+   * Получить текущего пользователя (работает и для dev bypass)
+   */
+  getMe: (): Promise<User> =>
+    request<User>(API_ENDPOINTS.auth.me),
 };
 
 // ============================================

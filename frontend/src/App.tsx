@@ -13,6 +13,9 @@ import { LeaderboardScreen } from './screens/LeaderboardScreen';
 
 
 type TabId = 'friends' | 'tasks' | 'play' | 'leaderboard' | 'shop';
+const DEV_AUTH_ENABLED = ['1', 'true', 'yes', 'on'].includes(
+  String(import.meta.env.VITE_ENABLE_DEV_AUTH || '').toLowerCase()
+);
 
 
 export default function App() {
@@ -21,32 +24,52 @@ export default function App() {
 
   // 🔐 АВТОРИЗАЦИЯ ПРИ СТАРТЕ
   useEffect(() => {
+    let cancelled = false;
+
     const authenticate = async () => {
+      setError(null);
       try {
         // Получаем initData из Telegram WebApp
         const initData = window.Telegram?.WebApp?.initData;
         
         if (!initData) {
-          console.warn('⚠️ No Telegram initData - running in dev mode');
-          return; // В DEV режиме сработает X-Dev-User-Id
+          if (DEV_AUTH_ENABLED) {
+            console.warn('⚠️ No Telegram initData - using dev auth fallback');
+            const devUser = await authApi.getMe();
+            if (cancelled) return;
+            setToken(null);
+            setUser(devUser);
+            return;
+          }
+
+          setToken(null);
+          setUser(null);
+          setError('Нужен запуск через Telegram Mini App');
+          return;
         }
         
         console.log('🔐 Authenticating...');
         const response = await authApi.telegram(initData);
-        
+        if (cancelled) return;
+
         // Сохраняем токен и пользователя
         setToken(response.token);
         setUser(response.user);
         
-        console.log('✅ Authenticated:', response.user.telegramId);
+        console.log('✅ Authenticated:', response.user.id);
       } catch (error) {
+        if (cancelled) return;
         console.error('❌ Auth failed:', error);
         setError('Ошибка авторизации');
       }
     };
     
     authenticate();
-  }, []); // Пустой массив = вызовется ОДИН раз при монтировании
+
+    return () => {
+      cancelled = true;
+    };
+  }, [setError, setToken, setUser]); // Пустой массив = вызовется ОДИН раз при монтировании
 
   // Если в игре - показываем GameScreen без табов
   if (screen === 'game') {

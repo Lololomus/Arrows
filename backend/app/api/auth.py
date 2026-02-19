@@ -69,41 +69,55 @@ async def get_current_user(
     Dependency для получения текущего пользователя.
     
     Логика работы:
-    1. Если DEBUG=True и передан заголовок X-Dev-User-Id -> Входим как разработчик (без токена).
+    1. Если включен DEV_AUTH и передан заголовок X-Dev-User-Id -> Входим как разработчик (без токена).
     2. Иначе -> Требуем стандартный Bearer токен.
     """
 
-    # --- 1. DEV MODE: Быстрый вход (Bypass) ---
-    if settings.DEBUG and x_dev_user_id:
+    # --- 1. DEV MODE: Controlled bypass ---
+    if x_dev_user_id is not None:
+        if settings.is_production:
+            raise HTTPException(
+                status_code=403,
+                detail="Development authentication is disabled in production"
+            )
+        if not settings.DEV_AUTH_ENABLED:
+            raise HTTPException(
+                status_code=403,
+                detail="Development authentication is disabled"
+            )
+
         try:
             telegram_id = int(x_dev_user_id)
-            
-            # Пытаемся найти разработчика в базе
-            result = await db.execute(select(User).where(User.telegram_id == telegram_id))
-            user = result.scalar_one_or_none()
-            
-            # Если разработчика нет в базе - создаем его на лету
-            if not user:
-                print(f"🛠 [Auth] Dev user {telegram_id} not found, creating...")
-                user = User(
-                    telegram_id=telegram_id,
-                    username="dev_user",
-                    first_name="Developer",
-                    current_level=1,
-                    coins=10000,
-                    energy=settings.MAX_ENERGY
-                )
-                db.add(user)
-                stats = UserStats(user=user)
-                db.add(stats)
-                await db.commit()
-                await db.refresh(user)
-                print(f"✅ [Auth] Dev user {telegram_id} created and logged in")
-            
-            return user
         except ValueError:
-            # Если в заголовке пришел мусор, игнорируем и идем к проверке токена
-            pass
+            raise HTTPException(status_code=400, detail="Invalid X-Dev-User-Id header")
+
+        if telegram_id not in settings.dev_auth_allowlist_ids:
+            raise HTTPException(status_code=403, detail="Dev user id is not allowlisted")
+
+        result = await db.execute(select(User).where(User.telegram_id == telegram_id))
+        user = result.scalar_one_or_none()
+
+        if not user:
+            if not settings.dev_auth_auto_create_enabled:
+                raise HTTPException(status_code=401, detail="Dev user not found")
+            print(f"🛠 [Auth] Dev user {telegram_id} not found, creating...")
+            user = User(
+                telegram_id=telegram_id,
+                username="dev_user",
+                first_name="Developer",
+                current_level=1,
+                coins=settings.DEV_AUTH_DEFAULT_COINS,
+                energy=min(settings.DEV_AUTH_DEFAULT_ENERGY, settings.MAX_ENERGY),
+                is_premium=False,
+            )
+            db.add(user)
+            stats = UserStats(user=user)
+            db.add(stats)
+            await db.commit()
+            await db.refresh(user)
+            print(f"✅ [Auth] Dev user {telegram_id} created and logged in")
+
+        return user
 
     # --- 2. PROD MODE: Стандартная проверка токена ---
     if not authorization:

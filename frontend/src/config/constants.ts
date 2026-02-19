@@ -210,6 +210,7 @@ export const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
 export const API_ENDPOINTS = {
   auth: {
     telegram: '/auth/telegram',
+    me: '/auth/me',
   },
   game: {
     level: (n: number) => `/game/level/${n}`,
