@@ -14,7 +14,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import type { Arrow, User, GameStatus } from '../game/types';
 import { INITIAL_LIVES, MAX_LIVES, HINTS_PER_LEVEL } from '../config/constants';
-import { rebuildIndex, removeFromIndex, removeFromIndexBatch, globalIndex } from '../game/spatialIndex';
+import { rebuildIndex, removeFromIndex, removeFromIndexBatch } from '../game/spatialIndex';
 
 // ============================================
 // APP STORE (без изменений)
@@ -147,9 +147,14 @@ interface GameStore {
   
   setShakingArrow: (arrowId: string | null) => void;
   setFlyingArrow: (arrowId: string | null) => void;
+
+  activeSkinId: string;
+  ownedSkinIds: string[];
+  setSkin: (skinId: string) => void;
+  purchaseSkin: (skinId: string) => void;
 }
 
-const initialGameState: Omit<GameStore, 'initLevel' | 'removeArrow' | 'removeArrows' | 'failMove' | 'undo' | 'showHint' | 'clearHint' | 'setStatus' | 'reset' | 'setShakingArrow' | 'setFlyingArrow'> = {
+const initialGameState: Omit<GameStore, 'initLevel' | 'removeArrow' | 'removeArrows' | 'failMove' | 'undo' | 'showHint' | 'clearHint' | 'setStatus' | 'reset' | 'setShakingArrow' | 'setFlyingArrow' | 'setSkin' | 'purchaseSkin'> = {
   level: 1,
   seed: 0,
   gridSize: { width: 4, height: 4 },
@@ -164,6 +169,9 @@ const initialGameState: Omit<GameStore, 'initLevel' | 'removeArrow' | 'removeArr
   hintedArrowId: null,
   shakingArrowId: null,
   flyingArrowId: null,
+  // СКИНЫ
+  activeSkinId: 'classic',
+  ownedSkinIds: ['classic'],
 };
 
 export const useGameStore = create<GameStore>()(
@@ -416,6 +424,21 @@ export const useGameStore = create<GameStore>()(
       setFlyingArrow: (arrowId) => {
         set({ flyingArrowId: arrowId });
       },
+      
+      setSkin: (skinId) => {
+        const { ownedSkinIds } = get();
+        if (ownedSkinIds.includes(skinId)) {
+          set({ activeSkinId: skinId });
+        }
+      },
+      
+      purchaseSkin: (skinId) => {
+        const { ownedSkinIds } = get();
+        if (!ownedSkinIds.includes(skinId)) {
+          set({ ownedSkinIds: [...ownedSkinIds, skinId] });
+        }
+      },
+      
     }),
     { name: 'GameStore' }
   )
@@ -440,6 +463,8 @@ export const useHintedArrow = () => useGameStore(s => s.hintedArrowId);
 export const useHintsRemaining = () => useGameStore(s => s.hintsRemaining);
 export const useGameHistory = () => useGameStore(s => s.history);
 export const useShakingArrow = () => useGameStore(s => s.shakingArrowId);
+export const useActiveSkinId = () => useGameStore(s => s.activeSkinId);
+export const useOwnedSkins = () => useGameStore(s => s.ownedSkinIds);
 
 // GameStore — действия
 export const useGameActions = () => useGameStore(s => ({

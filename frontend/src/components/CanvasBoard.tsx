@@ -19,9 +19,10 @@
 
 import { useEffect, useRef, useCallback, useMemo } from 'react';
 import type { Arrow } from '../game/types';
-import { DIRECTIONS, ARROW_EMOJIS, ARROW_GEOMETRY } from '../config/constants';
+import { DIRECTIONS, ARROW_EMOJIS, } from '../config/constants';
 import { useGameStore } from '../stores/store';
 import { hitTestArrow } from '../utils/boardUtils';
+import { useActiveSkin, type GameSkin } from '../game/skins';
 
 // ============================================
 // TYPES
@@ -43,33 +44,21 @@ interface ShakingArrow {
   duration: number;
 }
 
-/** Easing functions */
-const EASING = {
-  /** Ускорение (для вылета) */
-  easeIn: (t: number) => t * t,
-  /** Замедление */
-  easeOut: (t: number) => 1 - (1 - t) * (1 - t),
-  /** Ускорение + замедление */
-  easeInOut: (t: number) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2,
+// /** Easing functions */
+// const EASING = {
+//   /** Ускорение (для вылета) */
+//   easeIn: (t: number) => t * t,
+//   /** Замедление */
+//   easeOut: (t: number) => 1 - (1 - t) * (1 - t),
+//   /** Ускорение + замедление */
+//   easeInOut: (t: number) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2,
   
-  /**
-   * TODO [GEMINI]: Добавить spring easing для сочности:
-   * spring: (t: number, stiffness = 100, damping = 10) => { ... }
-   * Использовать для bounce-эффекта при shake и появлении стрелок.
-   */
-};
-
-// ============================================
-// CONSTANTS
-// ============================================
-
-const FLY_OUT_DURATION = 400;  // ms
-const SHAKE_DURATION = 300;    // ms
-const SHAKE_AMPLITUDE = 4;     // px
-const HINT_GLOW_SPEED = 2;    // cycles per second
-const DOT_COLOR = 'rgba(255,255,255,0.1)';
-const OUTLINE_COLOR = '#FFFFFF';
-const HINT_COLOR = '#FFD700';
+//   /**
+//    * TODO [GEMINI]: Добавить spring easing для сочности:
+//    * spring: (t: number, stiffness = 100, damping = 10) => { ... }
+//    * Использовать для bounce-эффекта при shake и появлении стрелок.
+//    */
+// };
 
 /** 
  * Порог DPR для больших полей (Samsung с DPR=3 на 100×100 → canvas 30,000px).
@@ -97,6 +86,7 @@ export function CanvasBoard({
   onArrowClick,
 }: CanvasBoardProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const skin = useActiveSkin();
   const animFrameRef = useRef<number>(0);
   
   // Анимационное состояние (mutable refs — не вызывают ре-рендер)
@@ -145,11 +135,11 @@ export function CanvasBoard({
         const lastDiff = history[history.length - 1];
         if (lastDiff) {
           const removedArrow = lastDiff.removedArrows.find(a => a.id === prevId);
-          if (removedArrow) {
+        if (removedArrow) {
             flyingArrowsRef.current.push({
               arrow: removedArrow,
               startTime: performance.now(),
-              duration: FLY_OUT_DURATION,
+              duration: skin.animation.flyDuration,
               progress: 0,
             });
           }
@@ -169,10 +159,10 @@ export function CanvasBoard({
       shakingArrowRef.current = {
         arrowId: shakingArrowId,
         startTime: performance.now(),
-        duration: SHAKE_DURATION,
+        duration: skin.animation.shakeDuration,
       };
     }
-  }, [shakingArrowId]);
+  }, [shakingArrowId, skin.animation.shakeDuration]);
 
   // ============================================
   // CLICK / TOUCH HANDLER — O(1) via shared hitTestArrow
@@ -223,10 +213,15 @@ export function CanvasBoard({
       if (!isRunning || !ctx) return;
       
       // Clear
-      ctx.clearRect(0, 0, boardWidth, boardHeight);
+    if (skin.effects.enableTrail) {
+        ctx.fillStyle = skin.colors.gridDotColor.replace(/[\d.]+\)$/g, '0.3)');
+        ctx.fillRect(0, 0, boardWidth, boardHeight);
+      } else {
+        ctx.clearRect(0, 0, boardWidth, boardHeight);
+      }
       
       // 1. Grid dots
-      drawGridDots(ctx, gridSize, cellSize, occupiedCells);
+      drawGridDots(ctx, gridSize, cellSize, occupiedCells, skin);
       
       // 2. Static arrows
       const shaking = shakingArrowRef.current;
@@ -238,13 +233,13 @@ export function CanvasBoard({
         // Shake offset
         if (shakeActive && shaking!.arrowId === arrow.id) {
           const t = (now - shaking!.startTime) / shaking!.duration;
-          offsetX = Math.sin(t * Math.PI * 5) * SHAKE_AMPLITUDE * (1 - t);
+          offsetX = Math.sin(t * Math.PI * skin.animation.shakeFrequency) * skin.animation.shakeAmplitude * (1 - t);
         }
         
         const isHinted = arrow.id === hintedArrowId;
-        const hintPulse = isHinted ? 0.5 + 0.5 * Math.sin(now * 0.001 * HINT_GLOW_SPEED * Math.PI * 2) : 0;
+        const hintPulse = isHinted ? 0.5 + 0.5 * Math.sin(now * 0.001 * skin.animation.hintGlowSpeed * Math.PI * 2) : 0;
         
-        drawArrow(ctx, arrow, cellSize, offsetX, isHinted, hintPulse);
+        drawArrow(ctx, arrow, cellSize, offsetX, isHinted, hintPulse, skin);
       }
       
       // 3. Flying arrows (exit animation)
@@ -262,7 +257,7 @@ export function CanvasBoard({
         }
         
         hasAnimations = true;
-        drawFlyingArrow(ctx, fa, cellSize);
+        drawFlyingArrow(ctx, fa, cellSize, skin);
       }
       
       // Cleanup shake
@@ -303,7 +298,7 @@ export function CanvasBoard({
         // Повторяем логику render (DRY нарушение, но избегаем сложного рефактора)
         // Более чистое решение — вынести render в ref
         ctx!.clearRect(0, 0, boardWidth, boardHeight);
-        drawGridDots(ctx!, gridSize, cellSize, occupiedCells);
+        drawGridDots(ctx!, gridSize, cellSize, occupiedCells, skin);
         
         const shaking = shakingArrowRef.current;
         const shakeActive = shaking && (now - shaking.startTime < shaking.duration);
@@ -312,11 +307,11 @@ export function CanvasBoard({
           let offsetX = 0;
           if (shakeActive && shaking!.arrowId === arrow.id) {
             const t = (now - shaking!.startTime) / shaking!.duration;
-            offsetX = Math.sin(t * Math.PI * 5) * SHAKE_AMPLITUDE * (1 - t);
+            offsetX = Math.sin(t * Math.PI * skin.animation.shakeFrequency) * skin.animation.shakeAmplitude * (1 - t);
           }
           const isHinted = arrow.id === hintedArrowId;
-          const hintPulse = isHinted ? 0.5 + 0.5 * Math.sin(now * 0.001 * HINT_GLOW_SPEED * Math.PI * 2) : 0;
-          drawArrow(ctx!, arrow, cellSize, offsetX, isHinted, hintPulse);
+          const hintPulse = isHinted ? 0.5 + 0.5 * Math.sin(now * 0.001 * skin.animation.hintGlowSpeed * Math.PI * 2) : 0;
+          drawArrow(ctx!, arrow, cellSize, offsetX, isHinted, hintPulse, skin);
         }
         
         const flying = flyingArrowsRef.current;
@@ -324,7 +319,7 @@ export function CanvasBoard({
           const fa = flying[i];
           fa.progress = Math.min(1, (now - fa.startTime) / fa.duration);
           if (fa.progress >= 1) { flying.splice(i, 1); continue; }
-          drawFlyingArrow(ctx!, fa, cellSize);
+          drawFlyingArrow(ctx!, fa, cellSize, skin);
         }
         
         if (shakeActive || flying.length > 0 || hintedArrowId) {
@@ -363,12 +358,13 @@ function drawGridDots(
   ctx: CanvasRenderingContext2D,
   gridSize: { width: number; height: number },
   cellSize: number,
-  occupiedCells: Set<string>
+  occupiedCells: Set<string>,
+  skin: GameSkin
 ) {
   const half = cellSize / 2;
-  const dotR = cellSize * ARROW_GEOMETRY.dotRadius;
+  const dotR = cellSize * skin.geometry.gridDotRadius;
   
-  ctx.fillStyle = DOT_COLOR;
+  ctx.fillStyle = skin.colors.gridDotColor;
   
   for (let y = 0; y < gridSize.height; y++) {
     for (let x = 0; x < gridSize.width; x++) {
@@ -392,16 +388,15 @@ function drawArrow(
   cellSize: number,
   offsetX: number,
   isHinted: boolean,
-  hintPulse: number  // 0..1 для glow-анимации
+  hintPulse: number,  // 0..1 для glow-анимации
+  skin: GameSkin
 ) {
   const dir = DIRECTIONS[arrow.direction];
   const half = cellSize / 2;
-  const STROKE_RATIO = 0.20;
-  const HEAD_GAP_RATIO = 0.25;
-  const strokeWidth = cellSize * STROKE_RATIO;
-  const headGap = cellSize * HEAD_GAP_RATIO;
+  const strokeWidth = cellSize * skin.geometry.bodyStrokeRatio;
+  const headGap = cellSize * skin.geometry.headGapRatio;
   
-  const strokeColor = isHinted ? HINT_COLOR : arrow.color;
+  const strokeColor = isHinted ? skin.colors.hintColor : arrow.color;
   
   // Строим точки тела (от хвоста к голове, подрезая конец)
   const cellsReversed = [...arrow.cells].reverse();
@@ -424,10 +419,10 @@ function drawArrow(
     for (let i = 1; i < points.length; i++) {
       ctx.lineTo(points[i].x, points[i].y);
     }
-    ctx.strokeStyle = OUTLINE_COLOR;
-    ctx.lineWidth = strokeWidth + cellSize * 0.08;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    ctx.strokeStyle = skin.colors.outlineColor;
+    ctx.lineWidth = strokeWidth + cellSize * skin.geometry.outlineExtraRatio;
+    ctx.lineCap = skin.geometry.lineCap;
+    ctx.lineJoin = skin.geometry.lineJoin;
     ctx.stroke();
     
     // Цветная линия
@@ -454,13 +449,13 @@ function drawArrow(
   ctx.rotate(angle);
   
   ctx.beginPath();
-  ctx.moveTo(-cellSize * 0.45, -cellSize * 0.25);
+  ctx.moveTo(-cellSize * skin.geometry.chevronLengthRatio, -cellSize * skin.geometry.chevronSpreadRatio);
   ctx.lineTo(0, 0);
-  ctx.lineTo(-cellSize * 0.45, cellSize * 0.25);
+  ctx.lineTo(-cellSize * skin.geometry.chevronLengthRatio, cellSize * skin.geometry.chevronSpreadRatio);
   ctx.strokeStyle = strokeColor;
-  ctx.lineWidth = strokeWidth * 1.2;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
+  ctx.lineWidth = strokeWidth * skin.geometry.chevronStrokeMultiplier;
+  ctx.lineCap = skin.geometry.lineCap;
+  ctx.lineJoin = skin.geometry.lineJoin;
   ctx.stroke();
   
   ctx.restore();
@@ -468,9 +463,9 @@ function drawArrow(
   // Hint glow
   if (isHinted && hintPulse > 0) {
     ctx.save();
-    ctx.globalAlpha = hintPulse * 0.3;
-    ctx.shadowColor = HINT_COLOR;
-    ctx.shadowBlur = cellSize * 0.5;
+    ctx.globalAlpha = hintPulse * skin.animation.hintGlowAlpha;
+    ctx.shadowColor = skin.colors.hintColor;
+    ctx.shadowBlur = cellSize * skin.animation.hintGlowBlurRatio;
     
     // Перерисуем тело с glow
     if (points.length >= 2) {
@@ -479,8 +474,8 @@ function drawArrow(
       for (let i = 1; i < points.length; i++) {
         ctx.lineTo(points[i].x, points[i].y);
       }
-      ctx.strokeStyle = HINT_COLOR;
-      ctx.lineWidth = strokeWidth * 1.5;
+      ctx.strokeStyle = skin.colors.hintColor;
+      ctx.lineWidth = strokeWidth * skin.animation.hintGlowStrokeMultiplier;
       ctx.lineCap = 'round';
       ctx.stroke();
     }
@@ -516,14 +511,15 @@ function drawArrow(
 function drawFlyingArrow(
   ctx: CanvasRenderingContext2D,
   fa: FlyingArrow,
-  cellSize: number
+  cellSize: number,
+  skin: GameSkin
 ) {
   const { arrow, progress } = fa;
   const dir = DIRECTIONS[arrow.direction];
   
   // Easing + расстояние
-  const easedProgress = EASING.easeIn(progress);
-  const flyDistance = cellSize * 10 * easedProgress;
+  const easedProgress = skin.animation.flyEasing(progress);
+  const flyDistance = cellSize * skin.animation.flyDistanceMultiplier * easedProgress;
   
   // Fade out
   const opacity = 1 - easedProgress;
@@ -535,7 +531,7 @@ function drawFlyingArrow(
   ctx.translate(dir.dx * flyDistance, dir.dy * flyDistance);
   
   // Рисуем стрелку как обычную (без shake, без hint)
-  drawArrow(ctx, arrow, cellSize, 0, false, 0);
+  drawArrow(ctx, arrow, cellSize, 0, false, 0, skin);
   
   ctx.restore();
 }

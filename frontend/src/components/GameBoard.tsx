@@ -14,6 +14,7 @@ import type { Arrow } from '../game/types';
 import { DIRECTIONS, ARROW_EMOJIS, ARROW_GEOMETRY } from '../config/constants';
 import { useGameStore } from '../stores/store';
 import { hitTestArrow } from '../utils/boardUtils';
+import { useActiveSkin, type GameSkin } from '../game/skins';
 
 // ============================================
 // OCCUPANCY MAP — O(1) hit testing
@@ -41,14 +42,16 @@ function buildOccupancyMap(arrows: Arrow[]): Map<string, string> {
 function GridDots({ 
   gridSize, 
   cellSize, 
-  occupiedCells 
+  occupiedCells,
+  skin
 }: { 
   gridSize: { width: number; height: number }; 
   cellSize: number; 
   occupiedCells: Set<string>;
+  skin: GameSkin;
 }) {
   const totalCells = gridSize.width * gridSize.height;
-  const dotR = cellSize * ARROW_GEOMETRY.dotRadius;
+  const dotR = cellSize * skin.geometry.gridDotRadius;
   const half = cellSize / 2;
 
   // Большие поля → паттерн (1 DOM-нода вместо тысяч)
@@ -67,7 +70,7 @@ function GridDots({
               cx={half}
               cy={half}
               r={dotR}
-              fill="rgba(255,255,255,0.1)"
+              fill={skin.colors.gridDotColor}
             />
           </pattern>
         </defs>
@@ -106,7 +109,7 @@ function GridDots({
             cx={x * cellSize + half}
             cy={y * cellSize + half}
             r={dotR}
-            fill="rgba(255,255,255,0.1)"
+            fill={skin.colors.gridDotColor}
           />
         );
       }
@@ -137,7 +140,7 @@ export function GameBoard({
 }: GameBoardProps) {
   // Атомарный селектор — ре-рендер ТОЛЬКО при смене shakingArrowId
   const shakingArrowId = useGameStore(s => s.shakingArrowId);
-  
+  const skin = useActiveSkin();
   const boardWidth = gridSize.width * cellSize;
   const boardHeight = gridSize.height * cellSize;
   
@@ -196,7 +199,8 @@ export function GameBoard({
         <GridDots 
           gridSize={gridSize} 
           cellSize={cellSize} 
-          occupiedCells={occupiedCells} 
+          occupiedCells={occupiedCells}
+          skin={skin}
         />
         
         {/* Arrows — AnimatePresence для exit-анимаций */}
@@ -208,6 +212,7 @@ export function GameBoard({
               cellSize={cellSize}
               isHinted={arrow.id === hintedArrowId}
               isShaking={arrow.id === shakingArrowId}
+              skin={skin}
             />
           ))}
         </AnimatePresence>
@@ -230,6 +235,7 @@ interface ArrowSVGProps {
   cellSize: number;
   isHinted: boolean;
   isShaking: boolean;
+  skin: GameSkin;
 }
 
 /**
@@ -245,16 +251,14 @@ const ArrowSVG = memo(function ArrowSVG({
   cellSize, 
   isHinted, 
   isShaking,
+  skin,
 }: ArrowSVGProps) {
   const dir = DIRECTIONS[arrow.direction];
   const head = arrow.cells[0];
   const half = cellSize / 2;
 
-  const STROKE_RATIO = 0.20;
-  const HEAD_GAP_RATIO = 0.25;
-  
-  const strokeWidth = cellSize * STROKE_RATIO;
-  const headGap = cellSize * HEAD_GAP_RATIO;
+  const strokeWidth = cellSize * skin.geometry.bodyStrokeRatio;
+  const headGap = cellSize * skin.geometry.headGapRatio;
 
   // Путь змейки — memo по arrow.id + cellSize (стабильные deps)
   const pathD = useMemo(() => {
@@ -288,23 +292,23 @@ const ArrowSVG = memo(function ArrowSVG({
 
   const headX = head.x * cellSize + half;
   const headY = head.y * cellSize + half;
-  const strokeColor = isHinted ? '#FFD700' : arrow.color;
+  const strokeColor = isHinted ? skin.colors.hintColor : arrow.color;
 
-  const exitTransition = { duration: 0.4, ease: "easeIn" as const };
+  const exitTransition = { duration: skin.animation.flyDuration / 1000, ease: "easeIn" as const };
 
   return (
     <motion.g
       style={{ cursor: 'pointer' }}
-      animate={{ x: isShaking ? [0, -4, 4, -4, 4, 0] : 0 }}
-      transition={{ duration: 0.3 }}
+      animate={{ x: isShaking ? [0, -skin.animation.shakeAmplitude, skin.animation.shakeAmplitude, -skin.animation.shakeAmplitude, skin.animation.shakeAmplitude, 0] : 0 }}
+      transition={{ duration: skin.animation.shakeDuration / 1000 }}
     >
       {/* Белая подложка */}
       <motion.path
         d={pathD}
-        stroke="#FFFFFF"
-        strokeWidth={strokeWidth + cellSize * 0.08}
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        stroke={skin.colors.outlineColor}
+        strokeWidth={strokeWidth + cellSize * skin.geometry.outlineExtraRatio}
+        strokeLinecap={skin.geometry.lineCap as any}
+        strokeLinejoin={skin.geometry.lineJoin as any}
         fill="none"
         initial={{ strokeDasharray: `${bodyLength} 20000`, strokeDashoffset: 0, opacity: 1 }}
         animate={{ strokeDashoffset: 0, opacity: 1 }}
@@ -317,8 +321,8 @@ const ArrowSVG = memo(function ArrowSVG({
         d={pathD}
         stroke={strokeColor}
         strokeWidth={strokeWidth}
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        strokeLinecap={skin.geometry.lineCap as any}
+        strokeLinejoin={skin.geometry.lineJoin as any}
         fill="none"
         initial={{ strokeDasharray: `${bodyLength} 20000`, strokeDashoffset: 0, opacity: 1 }}
         animate={{ strokeDashoffset: 0, opacity: 1 }}
@@ -334,11 +338,11 @@ const ArrowSVG = memo(function ArrowSVG({
         transition={exitTransition}
       >
         <path
-          d={`M -${cellSize * 0.45} -${cellSize * 0.25} L 0 0 L -${cellSize * 0.45} ${cellSize * 0.25}`}
+          d={`M -${cellSize * skin.geometry.chevronLengthRatio} -${cellSize * skin.geometry.chevronSpreadRatio} L 0 0 L -${cellSize * skin.geometry.chevronLengthRatio} ${cellSize * skin.geometry.chevronSpreadRatio}`}
           stroke={strokeColor}
-          strokeWidth={strokeWidth * 1.2} 
-          strokeLinecap="round"
-          strokeLinejoin="round"
+          strokeWidth={strokeWidth * skin.geometry.chevronStrokeMultiplier} 
+          strokeLinecap={skin.geometry.lineCap as any}
+          strokeLinejoin={skin.geometry.lineJoin as any}
           fill="none"
           transform={`translate(${headX}, ${headY}) rotate(${dir.angle})`}
         />
@@ -366,6 +370,7 @@ const ArrowSVG = memo(function ArrowSVG({
     prev.arrow.frozen === next.arrow.frozen &&
     prev.cellSize === next.cellSize &&
     prev.isHinted === next.isHinted &&
-    prev.isShaking === next.isShaking
+    prev.isShaking === next.isShaking &&
+    prev.skin.id === next.skin.id
   );
 });

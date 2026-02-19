@@ -15,7 +15,7 @@
  */
 
 import type { Arrow, Cell, Grid } from './types';
-import { DIRECTIONS, type Direction } from '../config/constants';
+import { DIRECTIONS } from '../config/constants';
 
 // ============================================
 // SPATIAL INDEX
