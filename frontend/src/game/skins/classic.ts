@@ -74,8 +74,8 @@ export const ClassicSkin: GameSkin = {
     enableFlyParticles: false,
     flyParticleCount: 0,
     enableAppearParticles: false,
-    enableAppearAnimation: false,
-    appearStaggerDelay: 20,
-    appearDuration: 200,
+    enableAppearAnimation: true,
+    appearStaggerDelay: 15,      // Задержка между стрелками
+    appearDuration: 250,         // Длительность вырастания
   },
 };

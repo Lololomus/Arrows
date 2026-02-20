@@ -1,82 +1,70 @@
 /**
- * Arrow Puzzle - Canvas Board Renderer (PHASE 3)
- * 
- * Canvas 2D рендерер для больших полей (grid > 20).
- * Заменяет SVG + Framer Motion + AnimatePresence на:
- * - Один <canvas> элемент (0 DOM-нод на стрелки)
- * - requestAnimationFrame loop
- * - Ручная анимация вылета/shake/hint
- * - Viewport culling (рисуем только видимое)
- * - HiDPI (devicePixelRatio) support
- * 
- * Производительность:
- * - 500 стрелок на 100×100: ~2-3ms per frame (vs ~100ms+ SVG)
- * - 10,000 grid dots: <0.5ms (один цикл fillRect)
- * - Hit testing: O(1) через globalIndex
- * 
- * TODO [GEMINI]: Улучшить визуал анимаций (см. TODO-блоки внизу файла)
+ * Arrow Puzzle - Canvas Board Renderer (VIEWPORT CANVAS)
+ *
+ * АРХИТЕКТУРА:
+ *   Canvas = размер viewport (контейнера), НЕ размер поля.
+ *   Камера (pan/zoom) работает через ctx.setTransform() внутри render loop.
+ *   Никакого <motion.div> сверху → никакого мыла при зуме.
+ *
+ * ОТЛИЧИЯ ОТ ПРЕДЫДУЩЕЙ ВЕРСИИ:
+ *   - Canvas.width/height = контейнер × DPR (фиксированный, не dynamic)
+ *   - Камера: springX/Y/Scale читаются через .get() в каждом кадре
+ *   - Hit testing: инверсия камеры (screen → world → grid)
+ *   - Viewport culling: по реальной видимой области камеры
+ *   - DPR = window.devicePixelRatio (простой, без Dynamic DPR hack)
+ *   - ResizeObserver для отслеживания размера контейнера
+ *
+ * Сохранено:
+ *   - LOD (упрощённая отрисовка при отдалении)
+ *   - Cinematic sweep intro
+ *   - Shake-анимация
+ *   - Hint glow пульсация
+ *   - Скин-система (все значения из skin)
  */
 
 import { useEffect, useRef, useCallback, useMemo } from 'react';
 import type { Arrow } from '../game/types';
-import { DIRECTIONS, ARROW_EMOJIS, } from '../config/constants';
+import { DIRECTIONS, ARROW_EMOJIS } from '../config/constants';
 import { useGameStore } from '../stores/store';
-import { hitTestArrow } from '../utils/boardUtils';
 import { useActiveSkin, type GameSkin } from '../game/skins';
+import type { MotionValue } from 'framer-motion';
+import { globalIndex } from '../game/spatialIndex';
 
 // ============================================
 // TYPES
 // ============================================
 
-/** Стрелка в процессе вылета */
-interface FlyingArrow {
-  arrow: Arrow;
-  startTime: number;
-  duration: number;        // ms
-  /** Прогресс 0→1 */
-  progress: number;
-}
-
-/** Стрелка с shake-анимацией */
 interface ShakingArrow {
   arrowId: string;
   startTime: number;
   duration: number;
 }
 
-// /** Easing functions */
-// const EASING = {
-//   /** Ускорение (для вылета) */
-//   easeIn: (t: number) => t * t,
-//   /** Замедление */
-//   easeOut: (t: number) => 1 - (1 - t) * (1 - t),
-//   /** Ускорение + замедление */
-//   easeInOut: (t: number) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2,
-  
-//   /**
-//    * TODO [GEMINI]: Добавить spring easing для сочности:
-//    * spring: (t: number, stiffness = 100, damping = 10) => { ... }
-//    * Использовать для bounce-эффекта при shake и появлении стрелок.
-//    */
-// };
-
-/** 
- * Порог DPR для больших полей (Samsung с DPR=3 на 100×100 → canvas 30,000px).
- * Ограничиваем до 2 чтобы не словить OOM.
- */
-const MAX_DPR_LARGE_GRID = 2;
-
-// ============================================
-// COMPONENT
-// ============================================
-
-interface CanvasBoardProps {
+export interface CanvasBoardProps {
   arrows: Arrow[];
   gridSize: { width: number; height: number };
   cellSize: number;
   hintedArrowId: string | null;
   onArrowClick: (arrowId: string) => void;
+  /** Камера — Framer Motion spring MotionValues */
+  springX: MotionValue<number>;
+  springY: MotionValue<number>;
+  springScale: MotionValue<number>;
 }
+
+// ============================================
+// CONSTANTS
+// ============================================
+
+/** Ниже этого порога (cellSize × zoom, px) включается LOD */
+const LOD_THRESHOLD = 12;
+
+/** Отступ padding-ячеек вокруг сетки (в долях cellSize, как было в GameScreen) */
+const GRID_PADDING_CELLS = 0.4;
+
+// ============================================
+// COMPONENT
+// ============================================
 
 export function CanvasBoard({
   arrows,
@@ -84,32 +72,31 @@ export function CanvasBoard({
   cellSize,
   hintedArrowId,
   onArrowClick,
+  springX,
+  springY,
+  springScale,
 }: CanvasBoardProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const skin = useActiveSkin();
   const animFrameRef = useRef<number>(0);
-  
-  // Анимационное состояние (mutable refs — не вызывают ре-рендер)
-  const flyingArrowsRef = useRef<FlyingArrow[]>([]);
+
   const shakingArrowRef = useRef<ShakingArrow | null>(null);
-  const prevArrowIdsRef = useRef<Set<string>>(new Set());
-  
-  // Атомарный селектор для shakingArrowId
+  const levelStartTimeRef = useRef<number>(performance.now());
   const shakingArrowId = useGameStore(s => s.shakingArrowId);
-  
-  const boardWidth = gridSize.width * cellSize;
-  const boardHeight = gridSize.height * cellSize;
-  
-  // DPR с ограничением для больших полей
-  const dpr = useMemo(() => {
-    const rawDpr = window.devicePixelRatio || 1;
-    const totalCells = gridSize.width * gridSize.height;
-    if (totalCells > 2500) return Math.min(rawDpr, MAX_DPR_LARGE_GRID);
-    return rawDpr;
-  }, [gridSize.width, gridSize.height]);
-  
-  // Occupancy map для grid dots (какие ячейки заняты)
-  const occupiedCells = useMemo(() => {
+
+  // Размер контейнера (обновляется через ResizeObserver)
+  const containerSizeRef = useRef({ w: window.innerWidth, h: window.innerHeight });
+
+  const dpr = window.devicePixelRatio || 1;
+
+  // Размеры поля в world-координатах (включая padding)
+  const totalBoardW = (gridSize.width + GRID_PADDING_CELLS) * cellSize;
+  const totalBoardH = (gridSize.height + GRID_PADDING_CELLS) * cellSize;
+  const boardPadding = cellSize * (GRID_PADDING_CELLS / 2); // 0.2 * cellSize
+
+  // Set ТЕКУЩИХ занятых ячеек (пересчитывается при удалении стрелки)
+  const currentOccupied = useMemo(() => {
     const set = new Set<string>();
     for (const arrow of arrows) {
       for (const cell of arrow.cells) {
@@ -119,41 +106,20 @@ export function CanvasBoard({
     return set;
   }, [arrows]);
 
-  // ============================================
-  // DETECT REMOVED ARROWS → START FLY ANIMATION
-  // ============================================
-  
-  useEffect(() => {
-    const currentIds = new Set(arrows.map(a => a.id));
-    const prevIds = prevArrowIdsRef.current;
-    
-    // Найти удалённые стрелки
-    for (const prevId of prevIds) {
-      if (!currentIds.has(prevId)) {
-        // Фаза 4: HistoryDiff хранит removedArrows[] напрямую
-        const history = useGameStore.getState().history;
-        const lastDiff = history[history.length - 1];
-        if (lastDiff) {
-          const removedArrow = lastDiff.removedArrows.find(a => a.id === prevId);
-        if (removedArrow) {
-            flyingArrowsRef.current.push({
-              arrow: removedArrow,
-              startTime: performance.now(),
-              duration: skin.animation.flyDuration,
-              progress: 0,
-            });
-          }
-        }
-      }
-    }
-    
-    prevArrowIdsRef.current = currentIds;
-  }, [arrows]);
+  // Set НАЧАЛЬНЫХ ячеек уровня — фиксируется при монтировании.
+  // Компонент ремонтируется через key={canvas-${level}}, поэтому ref = снимок при старте.
+  // Подложка и контур поля рисуются по этому set (никогда не сжимаются).
+  // Точки рисуются на initialCells минус currentOccupied (освободившиеся места).
+  const initialCellsRef = useRef<Set<string>>(currentOccupied);
+  // Обновляем только если initialCells пустой (первый рендер до arrows) → подхватим при появлении
+  if (initialCellsRef.current.size === 0 && currentOccupied.size > 0) {
+    initialCellsRef.current = currentOccupied;
+  }
 
-  // ============================================
-  // DETECT SHAKE
-  // ============================================
-  
+  // levelStartTimeRef сбрасывается автоматически при ремаунте (key={canvas-${level}})
+  // НЕ привязываем к arrows.length — иначе sweep перезапускается при удалении стрелки
+
+  // Shake tracking
   useEffect(() => {
     if (shakingArrowId) {
       shakingArrowRef.current = {
@@ -165,222 +131,396 @@ export function CanvasBoard({
   }, [shakingArrowId, skin.animation.shakeDuration]);
 
   // ============================================
-  // CLICK / TOUCH HANDLER — O(1) via shared hitTestArrow
+  // HIT TESTING (инверсия камеры: screen → grid)
   // ============================================
-  
+
+  const screenToGrid = useCallback((clientX: number, clientY: number): { x: number; y: number } | null => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+
+    const rect = canvas.getBoundingClientRect();
+    const localX = clientX - rect.left;
+    const localY = clientY - rect.top;
+
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const camX = springX.get();
+    const camY = springY.get();
+    const camScale = springScale.get();
+
+    // Инверсия камеры: screen → world (центрированные координаты)
+    const worldX = (localX - cx - camX) / camScale;
+    const worldY = (localY - cy - camY) / camScale;
+
+    // World → grid (world (0,0) = центр доски)
+    const gridLocalX = worldX + totalBoardW / 2 - boardPadding;
+    const gridLocalY = worldY + totalBoardH / 2 - boardPadding;
+
+    const gx = Math.floor(gridLocalX / cellSize);
+    const gy = Math.floor(gridLocalY / cellSize);
+
+    if (gx < 0 || gx >= gridSize.width || gy < 0 || gy >= gridSize.height) return null;
+    return { x: gx, y: gy };
+  }, [springX, springY, springScale, cellSize, gridSize.width, gridSize.height, totalBoardW, totalBoardH, boardPadding]);
+
   const handleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const arrowId = hitTestArrow(
-      e.clientX, e.clientY, e.currentTarget,
-      cellSize, gridSize.width, gridSize.height
-    );
+    const cell = screenToGrid(e.clientX, e.clientY);
+    if (!cell) return;
+    const arrowId = globalIndex.getArrowAt(cell.x, cell.y);
     if (arrowId) onArrowClick(arrowId);
-  }, [cellSize, gridSize.width, gridSize.height, onArrowClick]);
+  }, [screenToGrid, onArrowClick]);
 
   const handleTouch = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
     if (e.changedTouches.length !== 1) return;
     const touch = e.changedTouches[0];
-    const arrowId = hitTestArrow(
-      touch.clientX, touch.clientY, e.currentTarget,
-      cellSize, gridSize.width, gridSize.height
-    );
+    const cell = screenToGrid(touch.clientX, touch.clientY);
+    if (!cell) return;
+    const arrowId = globalIndex.getArrowAt(cell.x, cell.y);
     if (arrowId) {
       e.preventDefault();
       onArrowClick(arrowId);
     }
-  }, [cellSize, gridSize.width, gridSize.height, onArrowClick]);
+  }, [screenToGrid, onArrowClick]);
+
+  // ============================================
+  // RESIZE OBSERVER — следим за размером контейнера
+  // ============================================
+
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        containerSizeRef.current = {
+          w: entry.contentRect.width,
+          h: entry.contentRect.height,
+        };
+        // Будим Canvas если спит — нужно перерисовать в новом размере
+        if (animFrameRef.current === 0) {
+          animFrameRef.current = requestAnimationFrame(() => {});
+        }
+      }
+    });
+    observer.observe(wrapper);
+
+    // Начальный замер
+    containerSizeRef.current = { w: wrapper.clientWidth, h: wrapper.clientHeight };
+
+    return () => observer.disconnect();
+  }, []);
 
   // ============================================
   // RENDER LOOP
   // ============================================
-  
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
-    // HiDPI setup
-    canvas.width = boardWidth * dpr;
-    canvas.height = boardHeight * dpr;
-    canvas.style.width = `${boardWidth}px`;
-    canvas.style.height = `${boardHeight}px`;
-    ctx.scale(dpr, dpr);
 
     let isRunning = true;
-    
+
     function render(now: number) {
-      if (!isRunning || !ctx) return;
-      
-      // Clear
-    if (skin.effects.enableTrail) {
-        ctx.fillStyle = skin.colors.gridDotColor.replace(/[\d.]+\)$/g, '0.3)');
-        ctx.fillRect(0, 0, boardWidth, boardHeight);
-      } else {
-        ctx.clearRect(0, 0, boardWidth, boardHeight);
+      if (!isRunning || !ctx || !canvas) return;
+
+      // --- Размеры контейнера (логические px) ---
+      const { w: cw, h: ch } = containerSizeRef.current;
+      if (cw === 0 || ch === 0) {
+        animFrameRef.current = requestAnimationFrame(render);
+        return;
       }
-      
-      // 1. Grid dots
-      drawGridDots(ctx, gridSize, cellSize, occupiedCells, skin);
-      
-      // 2. Static arrows
+
+      // --- Ресайз физического буфера если нужно ---
+      const targetW = Math.round(cw * dpr);
+      const targetH = Math.round(ch * dpr);
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+        canvas.style.width = `${cw}px`;
+        canvas.style.height = `${ch}px`;
+      }
+
+      // --- Читаем камеру из spring'ов ---
+      const camX = springX.get();
+      const camY = springY.get();
+      const camScale = springScale.get();
+
+      // --- Clear (в физических пикселях) ---
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // --- Камера: DPR → translate to center + pan → scale ---
+      // После этого (0,0) = центр viewport + pan offset, масштаб = camScale
+      ctx.setTransform(
+        dpr, 0, 0, dpr, 0, 0
+      );
+      ctx.translate(cw / 2 + camX, ch / 2 + camY);
+      ctx.scale(camScale, camScale);
+      // Сдвиг к началу сетки: world (0,0) = центр доски → grid origin
+      ctx.translate(-totalBoardW / 2 + boardPadding, -totalBoardH / 2 + boardPadding);
+      // Теперь (0,0) = ячейка (0,0) сетки. Рисуем как раньше.
+
+      // --- Intro sweep ---
+      const elapsedSinceStart = now - levelStartTimeRef.current;
+      const introDuration = 1000;
+      let progress = Math.max(0, Math.min(1, elapsedSinceStart / introDuration));
+      const isIntro = skin.effects.enableAppearAnimation && progress < 1;
+
+      // LOD: отключаем обводки если ячейка < 12px на экране
+      const isLOD = (cellSize * camScale) < LOD_THRESHOLD;
+
+      ctx.save();
+
+      // Sweep mask (в координатах сетки)
+      if (isIntro) {
+        const ease = 1 - Math.pow(1 - progress, 3);
+        const bw = gridSize.width * cellSize;
+        const bh = gridSize.height * cellSize;
+        const maxRadius = Math.max(0.1, Math.hypot(bw, bh));
+
+        ctx.beginPath();
+        ctx.arc(bw / 2, bh / 2, maxRadius * ease, 0, Math.PI * 2);
+        ctx.clip();
+      }
+
+      // --- Viewport culling ---
+      const visibleArrows = getVisibleArrowsFromCamera(
+        arrows, cw, ch, camX, camY, camScale,
+        totalBoardW, totalBoardH, boardPadding, cellSize
+      );
+
+      // 0. Подложка — blob вокруг НАЧАЛЬНЫХ ячеек (не сжимается при удалении)
+      drawBoardBackground(ctx, gridSize, cellSize, initialCellsRef.current);
+
+      // 1. Grid dots — только на освободившихся ячейках (были стрелки → удалены)
+      drawGridDots(ctx, cellSize, initialCellsRef.current, currentOccupied, skin);
+
+      // 2. Стрелки
+      let hasAnimations = isIntro;
       const shaking = shakingArrowRef.current;
       const shakeActive = shaking && (now - shaking.startTime < shaking.duration);
-      
-      for (const arrow of arrows) {
+      if (shakeActive) hasAnimations = true;
+
+      for (let i = 0; i < visibleArrows.length; i++) {
+        const arrow = visibleArrows[i];
+
         let offsetX = 0;
-        
-        // Shake offset
         if (shakeActive && shaking!.arrowId === arrow.id) {
           const t = (now - shaking!.startTime) / shaking!.duration;
           offsetX = Math.sin(t * Math.PI * skin.animation.shakeFrequency) * skin.animation.shakeAmplitude * (1 - t);
         }
-        
+
         const isHinted = arrow.id === hintedArrowId;
-        const hintPulse = isHinted ? 0.5 + 0.5 * Math.sin(now * 0.001 * skin.animation.hintGlowSpeed * Math.PI * 2) : 0;
-        
-        drawArrow(ctx, arrow, cellSize, offsetX, isHinted, hintPulse, skin);
+        const hintPulse = isHinted
+          ? 0.5 + 0.5 * Math.sin(now * 0.001 * skin.animation.hintGlowSpeed * Math.PI * 2)
+          : 0;
+
+        drawArrow(ctx, arrow, cellSize, offsetX, isHinted, hintPulse, skin, isLOD);
       }
-      
-      // 3. Flying arrows (exit animation)
-      const flying = flyingArrowsRef.current;
-      let hasAnimations = false;
-      
-      for (let i = flying.length - 1; i >= 0; i--) {
-        const fa = flying[i];
-        const elapsed = now - fa.startTime;
-        fa.progress = Math.min(1, elapsed / fa.duration);
-        
-        if (fa.progress >= 1) {
-          flying.splice(i, 1);
-          continue;
-        }
-        
-        hasAnimations = true;
-        drawFlyingArrow(ctx, fa, cellSize, skin);
-      }
-      
-      // Cleanup shake
-      if (shakeActive) hasAnimations = true;
+
+      ctx.restore(); // Снимаем sweep clip
+
       if (shaking && !shakeActive) shakingArrowRef.current = null;
-      
-      // Continue loop if animating, otherwise stop and wait for next state change
+
+      // --- Scheduling ---
       if (hasAnimations || hintedArrowId) {
         animFrameRef.current = requestAnimationFrame(render);
       } else {
-        animFrameRef.current = 0;
+        animFrameRef.current = 0; // Засыпаем 😴
       }
     }
-    
+
     // Первый кадр
     animFrameRef.current = requestAnimationFrame(render);
-    
-    return () => {
-      isRunning = false;
-      if (animFrameRef.current) {
-        cancelAnimationFrame(animFrameRef.current);
+
+    // === Wake-up подписки: будим Canvas если пружины двигаются ===
+    const wakeUp = () => {
+      if (animFrameRef.current === 0 && isRunning) {
+        animFrameRef.current = requestAnimationFrame(render);
       }
     };
-  }, [arrows, gridSize, cellSize, occupiedCells, hintedArrowId, boardWidth, boardHeight, dpr]);
+    const unsubX = springX.on('change', wakeUp);
+    const unsubY = springY.on('change', wakeUp);
+    const unsubScale = springScale.on('change', wakeUp);
 
-  // Перезапуск рендер-лупа при shake/fly (если был остановлен)
+    return () => {
+      isRunning = false;
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      unsubX();
+      unsubY();
+      unsubScale();
+    };
+  }, [
+    arrows, gridSize, cellSize, currentOccupied, hintedArrowId,
+    totalBoardW, totalBoardH, boardPadding, dpr, skin,
+    springX, springY, springScale,
+  ]);
+
+  // Пинок render loop для shake (если спит)
   useEffect(() => {
     if (shakingArrowId && animFrameRef.current === 0) {
+      shakingArrowRef.current = {
+        arrowId: shakingArrowId,
+        startTime: performance.now(),
+        duration: skin.animation.shakeDuration,
+      };
+      // Запускаем loop
       const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      
-      // Трюк: пнуть перерисовку через лёгкий стейт-чейндж
-      // На самом деле useEffect выше пересоздаст loop при изменении arrows
-      // Но shake может прийти без изменения arrows — нужен ручной пинок
-      function kickRender(now: number) {
-        // Повторяем логику render (DRY нарушение, но избегаем сложного рефактора)
-        // Более чистое решение — вынести render в ref
-        ctx!.clearRect(0, 0, boardWidth, boardHeight);
-        drawGridDots(ctx!, gridSize, cellSize, occupiedCells, skin);
-        
-        const shaking = shakingArrowRef.current;
-        const shakeActive = shaking && (now - shaking.startTime < shaking.duration);
-        
-        for (const arrow of arrows) {
-          let offsetX = 0;
-          if (shakeActive && shaking!.arrowId === arrow.id) {
-            const t = (now - shaking!.startTime) / shaking!.duration;
-            offsetX = Math.sin(t * Math.PI * skin.animation.shakeFrequency) * skin.animation.shakeAmplitude * (1 - t);
-          }
-          const isHinted = arrow.id === hintedArrowId;
-          const hintPulse = isHinted ? 0.5 + 0.5 * Math.sin(now * 0.001 * skin.animation.hintGlowSpeed * Math.PI * 2) : 0;
-          drawArrow(ctx!, arrow, cellSize, offsetX, isHinted, hintPulse, skin);
-        }
-        
-        const flying = flyingArrowsRef.current;
-        for (let i = flying.length - 1; i >= 0; i--) {
-          const fa = flying[i];
-          fa.progress = Math.min(1, (now - fa.startTime) / fa.duration);
-          if (fa.progress >= 1) { flying.splice(i, 1); continue; }
-          drawFlyingArrow(ctx!, fa, cellSize, skin);
-        }
-        
-        if (shakeActive || flying.length > 0 || hintedArrowId) {
-          animFrameRef.current = requestAnimationFrame(kickRender);
-        } else {
-          animFrameRef.current = 0;
-          if (shaking) shakingArrowRef.current = null;
-        }
+      if (canvas) {
+        animFrameRef.current = requestAnimationFrame(() => {});
       }
-      
-      animFrameRef.current = requestAnimationFrame(kickRender);
     }
-  }, [shakingArrowId]);
+  }, [shakingArrowId, skin.animation.shakeDuration]);
+
+  // ============================================
+  // RENDER — canvas заполняет весь контейнер
+  // ============================================
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{ width: boardWidth, height: boardHeight, cursor: 'pointer' }}
-      onClick={handleClick}
-      onTouchEnd={handleTouch}
-    />
+    <div
+      ref={wrapperRef}
+      style={{ width: '100%', height: '100%', position: 'absolute', inset: 0 }}
+    >
+      <canvas
+        ref={canvasRef}
+        style={{ display: 'block', cursor: 'pointer' }}
+        onClick={handleClick}
+        onTouchEnd={handleTouch}
+      />
+    </div>
   );
 }
 
 // ============================================
-// DRAWING FUNCTIONS (вынесены для чистоты)
+// VIEWPORT CULLING (камера-aware)
 // ============================================
 
 /**
- * Рисует сетку точек.
- * 10,000 точек за <0.5ms — просто цикл fillRect.
- * Точки появляются на месте ушедших стрелок автоматически:
- * рисуем ВСЕ точки, стрелки рисуются поверх.
+ * Фильтрует стрелки по видимой области камеры.
+ * Работает в world-координатах (до grid transform).
+ */
+function getVisibleArrowsFromCamera(
+  arrows: Arrow[],
+  containerW: number,
+  containerH: number,
+  camX: number,
+  camY: number,
+  camScale: number,
+  totalBoardW: number,
+  totalBoardH: number,
+  boardPadding: number,
+  cellSize: number,
+): Arrow[] {
+  // Если масштаб показывает всё поле — пропускаем culling
+  if (camScale <= 1) return arrows;
+
+  // Viewport bounds в grid-координатах
+  const halfVpW = containerW / 2 / camScale;
+  const halfVpH = containerH / 2 / camScale;
+
+  // Центр viewport в world = (-camX/camScale, -camY/camScale)
+  // Grid offset: world(0,0) = центр доски, grid(0,0) = world(-totalBoardW/2+padding, ...)
+  const vpCenterInGridX = -camX / camScale + totalBoardW / 2 - boardPadding;
+  const vpCenterInGridY = -camY / camScale + totalBoardH / 2 - boardPadding;
+
+  const vpLeft = vpCenterInGridX - halfVpW;
+  const vpRight = vpCenterInGridX + halfVpW;
+  const vpTop = vpCenterInGridY - halfVpH;
+  const vpBottom = vpCenterInGridY + halfVpH;
+
+  const margin = cellSize * 2; // Запас чтобы стрелки не "обрезались" на краю
+
+  return arrows.filter(arrow =>
+    arrow.cells.some(cell => {
+      const px = cell.x * cellSize;
+      const py = cell.y * cellSize;
+      return (
+        px >= vpLeft - margin &&
+        px <= vpRight + margin &&
+        py >= vpTop - margin &&
+        py <= vpBottom + margin
+      );
+    })
+  );
+}
+
+// ============================================
+// DRAWING FUNCTIONS
+// ============================================
+
+/**
+ * Подложка поля — тёмный blob который плотно обвивает области со стрелками.
+ * 
+ * Алгоритм:
+ * 1. Берём occupiedCells напрямую (без dilation — плотно по контуру)
+ * 2. Каждая ячейка = roundRect с маленьким pad и радиусом
+ * 3. Overlap между соседними ячейками скрывает внутренние скругления
+ * 4. Только настоящие внешние углы (без соседей) показывают мягкое закругление
+ */
+function drawBoardBackground(
+  ctx: CanvasRenderingContext2D,
+  _gridSize: { width: number; height: number },
+  cellSize: number,
+  occupiedCells: Set<string>,
+) {
+  if (occupiedCells.size === 0) return;
+
+  // pad: небольшой перехлёст для бесшовного слияния соседних ячеек
+  // radius: маленький — скрыт в overlap, виден только на внешних углах
+  const pad = cellSize * 0.15;
+  const radius = cellSize * 0.22;
+
+  ctx.save();
+  ctx.beginPath();
+  for (const key of occupiedCells) {
+    const [x, y] = key.split(',').map(Number);
+    ctx.roundRect(
+      x * cellSize - pad,
+      y * cellSize - pad,
+      cellSize + pad * 2,
+      cellSize + pad * 2,
+      radius,
+    );
+  }
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.65)';
+  ctx.fill();
+  ctx.restore();
+}
+
+/**
+ * Точки сетки — рисуются ТОЛЬКО на освободившихся ячейках.
+ * 
+ * initialCells: ячейки при загрузке уровня (полный контур).
+ * currentOccupied: ячейки где стрелки ещё стоят.
+ * 
+ * Точка появляется когда: ячейка есть в initialCells, но нет в currentOccupied.
+ * Ячейки за пределами initialCells — всегда пустота (ни точек, ни подложки).
  */
 function drawGridDots(
   ctx: CanvasRenderingContext2D,
-  gridSize: { width: number; height: number },
   cellSize: number,
-  occupiedCells: Set<string>,
-  skin: GameSkin
+  initialCells: Set<string>,
+  currentOccupied: Set<string>,
+  skin: GameSkin,
 ) {
   const half = cellSize / 2;
   const dotR = cellSize * skin.geometry.gridDotRadius;
-  
+
   ctx.fillStyle = skin.colors.gridDotColor;
-  
-  for (let y = 0; y < gridSize.height; y++) {
-    for (let x = 0; x < gridSize.width; x++) {
-      // Не рисуем под стрелками (опционально — можно убрать для "проступания")
-      if (occupiedCells.has(`${x},${y}`)) continue;
-      
-      ctx.beginPath();
-      ctx.arc(x * cellSize + half, y * cellSize + half, dotR, 0, Math.PI * 2);
-      ctx.fill();
-    }
+  for (const key of initialCells) {
+    // Рисуем точку только если ячейка освободилась
+    if (currentOccupied.has(key)) continue;
+    const [x, y] = key.split(',').map(Number);
+    ctx.beginPath();
+    ctx.arc(x * cellSize + half, y * cellSize + half, dotR, 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 
 /**
- * Рисует статичную стрелку (тело + outline + голова + emoji).
- * Визуально идентична SVG-версии из GameBoard.tsx.
+ * Рендер одной стрелки. LOD = упрощённый режим (без обводки/шеврона).
  */
 function drawArrow(
   ctx: CanvasRenderingContext2D,
@@ -388,66 +528,108 @@ function drawArrow(
   cellSize: number,
   offsetX: number,
   isHinted: boolean,
-  hintPulse: number,  // 0..1 для glow-анимации
-  skin: GameSkin
+  hintPulse: number,
+  skin: GameSkin,
+  isLOD: boolean,
 ) {
   const dir = DIRECTIONS[arrow.direction];
   const half = cellSize / 2;
   const strokeWidth = cellSize * skin.geometry.bodyStrokeRatio;
   const headGap = cellSize * skin.geometry.headGapRatio;
-  
   const strokeColor = isHinted ? skin.colors.hintColor : arrow.color;
-  
-  // Строим точки тела (от хвоста к голове, подрезая конец)
+
   const cellsReversed = [...arrow.cells].reverse();
   const points = cellsReversed.map(c => ({
     x: c.x * cellSize + half + offsetX,
     y: c.y * cellSize + half,
   }));
-  
+
   if (points.length > 1) {
     const last = points[points.length - 1];
     last.x -= dir.dx * headGap;
     last.y -= dir.dy * headGap;
   }
-  
-  // Рисуем тело
-  if (points.length >= 2) {
-    // Белая подложка
+
+  const buildPath = () => {
     ctx.beginPath();
     ctx.moveTo(points[0].x, points[0].y);
     for (let i = 1; i < points.length; i++) {
       ctx.lineTo(points[i].x, points[i].y);
     }
+  };
+
+  // === LOD: дешёвая отрисовка при сильном отдалении ===
+  // Линия + мини-шеврон (направление видно даже при 5000 стрелках)
+  if (isLOD) {
+    if (points.length >= 2) {
+      buildPath();
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = strokeWidth * 1.5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+
+    // Мини-шеврон: маленький треугольник на голове стрелки
+    const head = arrow.cells[0];
+    const hx = head.x * cellSize + half + offsetX;
+    const hy = head.y * cellSize + half;
+    const sz = cellSize * 0.3; // Размер треугольника (меньше чем полный шеврон)
+
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.rotate(dir.angle * (Math.PI / 180));
+    ctx.beginPath();
+    ctx.moveTo(sz * 0.4, 0);           // Кончик
+    ctx.lineTo(-sz * 0.4, -sz * 0.4);  // Верхний ус
+    ctx.lineTo(-sz * 0.4, sz * 0.4);   // Нижний ус
+    ctx.closePath();
+    ctx.fillStyle = strokeColor;
+    ctx.fill();
+    ctx.restore();
+
+    return;
+  }
+
+  // === ВЫСОКАЯ ДЕТАЛИЗАЦИЯ ===
+  if (points.length >= 2) {
+    // Белая подложка
+    buildPath();
     ctx.strokeStyle = skin.colors.outlineColor;
     ctx.lineWidth = strokeWidth + cellSize * skin.geometry.outlineExtraRatio;
     ctx.lineCap = skin.geometry.lineCap;
     ctx.lineJoin = skin.geometry.lineJoin;
     ctx.stroke();
-    
+
     // Цветная линия
-    ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
-    for (let i = 1; i < points.length; i++) {
-      ctx.lineTo(points[i].x, points[i].y);
-    }
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = strokeWidth;
+    buildPath();
+    ctx.strokeStyle = isHinted && hintPulse > 0 ? skin.colors.hintColor : strokeColor;
+    ctx.lineWidth = isHinted && hintPulse > 0 ? strokeWidth * skin.animation.hintGlowStrokeMultiplier : strokeWidth;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.stroke();
+
+    if (isHinted && hintPulse > 0) {
+      ctx.save();
+      ctx.globalAlpha = hintPulse * skin.animation.hintGlowAlpha;
+      ctx.shadowColor = skin.colors.hintColor;
+      ctx.shadowBlur = cellSize * skin.animation.hintGlowBlurRatio;
+      ctx.stroke();
+      ctx.restore();
+    } else {
+      ctx.stroke();
+    }
   }
-  
-  // Голова (шеврон) — идентична SVG
+
+  // Голова (шеврон)
   const head = arrow.cells[0];
   const headX = head.x * cellSize + half + offsetX;
   const headY = head.y * cellSize + half;
   const angle = dir.angle * (Math.PI / 180);
-  
+
   ctx.save();
   ctx.translate(headX, headY);
   ctx.rotate(angle);
-  
+
   ctx.beginPath();
   ctx.moveTo(-cellSize * skin.geometry.chevronLengthRatio, -cellSize * skin.geometry.chevronSpreadRatio);
   ctx.lineTo(0, 0);
@@ -457,33 +639,10 @@ function drawArrow(
   ctx.lineCap = skin.geometry.lineCap;
   ctx.lineJoin = skin.geometry.lineJoin;
   ctx.stroke();
-  
+
   ctx.restore();
-  
-  // Hint glow
-  if (isHinted && hintPulse > 0) {
-    ctx.save();
-    ctx.globalAlpha = hintPulse * skin.animation.hintGlowAlpha;
-    ctx.shadowColor = skin.colors.hintColor;
-    ctx.shadowBlur = cellSize * skin.animation.hintGlowBlurRatio;
-    
-    // Перерисуем тело с glow
-    if (points.length >= 2) {
-      ctx.beginPath();
-      ctx.moveTo(points[0].x, points[0].y);
-      for (let i = 1; i < points.length; i++) {
-        ctx.lineTo(points[i].x, points[i].y);
-      }
-      ctx.strokeStyle = skin.colors.hintColor;
-      ctx.lineWidth = strokeWidth * skin.animation.hintGlowStrokeMultiplier;
-      ctx.lineCap = 'round';
-      ctx.stroke();
-    }
-    
-    ctx.restore();
-  }
-  
-  // Emoji для спецстрелок
+
+  // Спец-символы (bomb, ice, etc.)
   if (arrow.type !== 'normal') {
     ctx.font = `${cellSize * 0.5}px serif`;
     ctx.textAlign = 'center';
@@ -491,230 +650,3 @@ function drawArrow(
     ctx.fillText(ARROW_EMOJIS[arrow.type], headX, headY);
   }
 }
-
-/**
- * Рисует вылетающую стрелку (exit-анимация).
- * 
- * Стрелка смещается в направлении полёта с easeIn,
- * одновременно fade out.
- * 
- * TODO [GEMINI]: Добавить trail-эффект за вылетающей стрелкой:
- * - При каждом кадре рисовать полупрозрачную копию стрелки
- *   с уменьшающейся opacity на предыдущих позициях
- * - Или particle burst в начальной точке
- * 
- * TODO [GEMINI]: Spring easing вместо easeIn для более "сочного" вылета:
- * - Лёгкий pullback в начале (стрелка чуть сжимается назад)
- * - Затем резкий выброс вперёд
- * - Формула: t < 0.15 ? -sin(t/0.15 * PI) * 0.1 : easeIn((t-0.15)/0.85) * 1.1
- */
-function drawFlyingArrow(
-  ctx: CanvasRenderingContext2D,
-  fa: FlyingArrow,
-  cellSize: number,
-  skin: GameSkin
-) {
-  const { arrow, progress } = fa;
-  const dir = DIRECTIONS[arrow.direction];
-  
-  // Easing + расстояние
-  const easedProgress = skin.animation.flyEasing(progress);
-  const flyDistance = cellSize * skin.animation.flyDistanceMultiplier * easedProgress;
-  
-  // Fade out
-  const opacity = 1 - easedProgress;
-  
-  ctx.save();
-  ctx.globalAlpha = opacity;
-  
-  // Смещаем всё в направлении полёта
-  ctx.translate(dir.dx * flyDistance, dir.dy * flyDistance);
-  
-  // Рисуем стрелку как обычную (без shake, без hint)
-  drawArrow(ctx, arrow, cellSize, 0, false, 0, skin);
-  
-  ctx.restore();
-}
-
-// ============================================
-// VIEWPORT CULLING (для зума)
-// ============================================
-
-/**
- * Фильтрует стрелки, попадающие в видимую область.
- * Используется при зуме — рисуем только то, что видно.
- * 
- * TODO [GEMINI]: Интегрировать в CanvasBoard при зуме > 1:
- * 1. Получить viewport из parent transform (translate + scale)
- * 2. Вычислить видимый прямоугольник в grid-координатах
- * 3. Фильтровать arrows через getVisibleArrows()
- * 4. Передать отфильтрованный массив в render loop
- * 
- * Пример интеграции:
- * ```
- * // В GameScreen, перед передачей arrows в CanvasBoard:
- * const visibleArrows = useMemo(() => {
- *   if (transform.k <= 1) return arrows; // Нет зума — показать все
- *   const vp = getViewportRect(containerRef, transform, cellSize);
- *   return getVisibleArrows(arrows, vp, cellSize);
- * }, [arrows, transform, cellSize]);
- * ```
- */
-export function getVisibleArrows(
-  arrows: Arrow[],
-  viewport: { x: number; y: number; w: number; h: number },
-  cellSize: number
-): Arrow[] {
-  const margin = cellSize * 2; // Запас чтобы не обрезать стрелки на краю
-  
-  return arrows.filter(arrow =>
-    arrow.cells.some(cell => {
-      const px = cell.x * cellSize;
-      const py = cell.y * cellSize;
-      return (
-        px >= viewport.x - margin &&
-        px <= viewport.x + viewport.w + margin &&
-        py >= viewport.y - margin &&
-        py <= viewport.y + viewport.h + margin
-      );
-    })
-  );
-}
-
-/**
- * Вычисляет видимый прямоугольник в пиксельных координатах поля.
- * 
- * TODO [GEMINI]: Вынести в utils, использовать вместе с getVisibleArrows.
- */
-export function getViewportRect(
-  containerWidth: number,
-  containerHeight: number,
-  transform: { k: number; x: number; y: number }
-): { x: number; y: number; w: number; h: number } {
-  // transform: CSS translate(x,y) scale(k)
-  // Видимая область в координатах поля = инверсия CSS-трансформа
-  return {
-    x: -transform.x / transform.k,
-    y: -transform.y / transform.k,
-    w: containerWidth / transform.k,
-    h: containerHeight / transform.k,
-  };
-}
-
-// ============================================
-// TODO: GEMINI — визуальные улучшения
-// ============================================
-
-/**
- * TODO [GEMINI — приоритет ВЫСОКИЙ]: Particle эффекты
- * 
- * Canvas позволяет легко рисовать сотни частиц без нагрузки.
- * Добавить систему частиц для:
- * 
- * 1. Вылет стрелки — искры/пыль в начальной позиции:
- *    ```
- *    interface Particle {
- *      x: number; y: number;
- *      vx: number; vy: number;
- *      life: number; maxLife: number;
- *      color: string; size: number;
- *    }
- *    
- *    function spawnParticles(x, y, color, count = 8) {
- *      for (let i = 0; i < count; i++) {
- *        const angle = Math.random() * Math.PI * 2;
- *        const speed = 1 + Math.random() * 3;
- *        particles.push({
- *          x, y,
- *          vx: Math.cos(angle) * speed,
- *          vy: Math.sin(angle) * speed,
- *          life: 1, maxLife: 0.3 + Math.random() * 0.3,
- *          color, size: 2 + Math.random() * 3,
- *        });
- *      }
- *    }
- *    ```
- * 
- * 2. Бомба — shockwave кольцо + разлетающиеся осколки:
- *    - Кольцо: расширяющийся arc с decreasing lineWidth
- *    - Осколки: particles с высокой скоростью от центра
- * 
- * 3. Электро — lightning bolt (зигзаг линия):
- *    ```
- *    function drawLightning(ctx, from, to, segments = 8) {
- *      ctx.beginPath();
- *      ctx.moveTo(from.x, from.y);
- *      const dx = (to.x - from.x) / segments;
- *      const dy = (to.y - from.y) / segments;
- *      for (let i = 1; i < segments; i++) {
- *        const jitter = (Math.random() - 0.5) * cellSize * 0.5;
- *        ctx.lineTo(from.x + dx * i + jitter, from.y + dy * i + jitter);
- *      }
- *      ctx.lineTo(to.x, to.y);
- *      ctx.strokeStyle = '#FFD700';
- *      ctx.lineWidth = 3;
- *      ctx.shadowColor = '#FFD700';
- *      ctx.shadowBlur = 10;
- *      ctx.stroke();
- *    }
- *    ```
- * 
- * 4. Лёд — кристаллы разлетаются при разморозке:
- *    - Треугольные particles с голубым цветом
- *    - Gravity + rotation
- */
-
-/**
- * TODO [GEMINI — приоритет СРЕДНИЙ]: Trail эффект за вылетающей стрелкой
- * 
- * Самый простой вариант — не полностью очищать canvas:
- * ```
- * // В render loop, вместо ctx.clearRect(...):
- * ctx.fillStyle = 'rgba(30, 58, 82, 0.3)'; // Цвет фона с alpha
- * ctx.fillRect(0, 0, boardWidth, boardHeight);
- * ```
- * Это создаёт эффект "размазывания" — стрелка оставляет шлейф.
- * НО: ломает grid dots и статичные стрелки (они тоже размазываются).
- * 
- * Правильный вариант — отдельный canvas слой для trail:
- * ```
- * <canvas ref={bgCanvasRef} /> <!-- dots + static arrows -->
- * <canvas ref={fxCanvasRef} /> <!-- flying + particles (с trail) -->
- * ```
- */
-
-/**
- * TODO [GEMINI — приоритет НИЗКИЙ]: Smooth appear при загрузке уровня
- * 
- * При initLevel стрелки появляются мгновенно. Для сочности:
- * 1. Добавить флаг `isAppearing` в CanvasBoard state
- * 2. При первом рендере — каждая стрелка scale 0→1 с задержкой по index:
- *    ```
- *    const delay = index * 20; // ms
- *    const elapsed = now - levelStartTime - delay;
- *    if (elapsed < 0) continue; // Ещё не появилась
- *    const scale = Math.min(1, elapsed / 200);
- *    ctx.save();
- *    ctx.translate(centerX, centerY);
- *    ctx.scale(scale, scale);
- *    ctx.translate(-centerX, -centerY);
- *    drawArrow(...);
- *    ctx.restore();
- *    ```
- */
-
-// ============================================
-// TODO: CODEX — тесты
-// ============================================
-
-/**
- * TODO [CODEX]:
- * 1. Проверить что drawArrow рисует то же что SVG ArrowSVG (визуальный snapshot тест)
- * 2. Hit test accuracy: клик в центр клетки → правильный arrowId
- * 3. Hit test edge: клик на границе двух стрелок → ближайшая
- * 4. Flying animation: progress 0 = стрелка на месте, progress 1 = за экраном
- * 5. Shake animation: не смещает стрелку после завершения (offsetX = 0)
- * 6. DPR: canvas.width = boardWidth * dpr, style.width = boardWidth
- * 7. Memory: 1000 fly animations → старые удаляются (splice)
- * 8. Performance: 500 стрелок render < 5ms (console.time в render loop)
- */

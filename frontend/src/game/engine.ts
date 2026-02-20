@@ -21,7 +21,6 @@ import {
   SpatialIndex, 
   globalIndex, 
   getPathCached, 
-  clearPathCache 
 } from './spatialIndex';
 
 // ============================================
