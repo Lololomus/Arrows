@@ -91,6 +91,8 @@ const PREVIEW_MARKER_OUTLINE_COLOR = 'rgba(255, 255, 255, 0.9)';
 const PREVIEW_CHECK_SIZE_RATIO = 0.24;
 const PREVIEW_CROSS_SIZE_RATIO = 0.28;
 const PREVIEW_MARKER_STROKE_MULTIPLIER = 1.15;
+const INTRO_MIN_DIM_FOR_SWEEP = 10;
+const INTRO_SWEEP_DURATION_MS = 650;
 
 // ============================================
 // COMPONENT
@@ -405,9 +407,12 @@ export function CanvasBoard({
 
       // Intro sweep
       const elapsedSinceStart = now - levelStartTimeRef.current;
-      const introDuration = 1000;
-      let progress = Math.max(0, Math.min(1, elapsedSinceStart / introDuration));
-      const isIntro = skin.effects.enableAppearAnimation && progress < 1;
+      const maxGridDim = Math.max(gridSize.width, gridSize.height);
+      const shouldRunIntroSweep = skin.effects.enableAppearAnimation && maxGridDim >= INTRO_MIN_DIM_FOR_SWEEP;
+      const progress = shouldRunIntroSweep
+        ? Math.max(0, Math.min(1, elapsedSinceStart / INTRO_SWEEP_DURATION_MS))
+        : 1;
+      const isIntro = shouldRunIntroSweep && progress < 1;
       const isLOD = (cellSize * camScale) < LOD_THRESHOLD;
 
       ctx.save();

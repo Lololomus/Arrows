@@ -21,6 +21,80 @@ import { FXOverlay } from '../components/FXOverlay';
 
 import gameBgImage from '../assets/game-bg.jpg?url';
 
+type ZoomBounds = { minScale: number; maxScale: number; fitScale: number };
+type PanBounds = { minX: number; maxX: number; minY: number; maxY: number };
+type ZoomSource = 'wheel' | 'pinch' | 'button';
+
+const GRID_PADDING_CELLS = 0.4;
+const ZOOM_OUT_MARGIN_RATIO = 0.10;
+const PAN_EDGE_SLACK_RATIO = 0.15;
+const MIN_ABS_SCALE = 0.35;
+const MIN_VISIBLE_CELLS = 7;
+const MAX_ABS_SCALE = 4.0;
+const ZOOM_EPS = 0.001;
+const INTRO_MIN_DIM_FOR_BLOCK = 10;
+const INTRO_INPUT_LOCK_MS = 650;
+const INTRO_ZOOM_DELAY_MS = 350;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function computeZoomBounds(
+  viewW: number,
+  viewH: number,
+  gridSize: { width: number; height: number },
+  baseCellSize: number,
+): ZoomBounds {
+  const boardPixelW = (gridSize.width + GRID_PADDING_CELLS) * baseCellSize;
+  const boardPixelH = (gridSize.height + GRID_PADDING_CELLS) * baseCellSize;
+  const safeW = Math.max(1, viewW - 64);
+  const safeH = Math.max(1, viewH - 64);
+
+  const fitScale = Math.min(safeW / boardPixelW, safeH / boardPixelH, 1);
+  const minScale = Math.max(MIN_ABS_SCALE, fitScale / (1 + ZOOM_OUT_MARGIN_RATIO));
+  const maxScaleByVisibleCells = Math.min(safeW, safeH) / (Math.max(baseCellSize, 1) * MIN_VISIBLE_CELLS);
+  const maxScale = clamp(maxScaleByVisibleCells, minScale + 0.2, MAX_ABS_SCALE);
+
+  return { minScale, maxScale, fitScale };
+}
+
+function computePanBounds(
+  viewW: number,
+  viewH: number,
+  boardPixelW: number,
+  boardPixelH: number,
+  scale: number,
+): PanBounds {
+  const overflowX = (boardPixelW * scale - viewW) / 2;
+  const overflowY = (boardPixelH * scale - viewH) / 2;
+
+  // Extra pan breathing room near clamp edges; tune independently from zoom-out limit.
+  const edgeSlackX = viewW * PAN_EDGE_SLACK_RATIO;
+  const edgeSlackY = viewH * PAN_EDGE_SLACK_RATIO;
+
+  const maxPanX = overflowX > 0 ? overflowX + edgeSlackX : 0;
+  const maxPanY = overflowY > 0 ? overflowY + edgeSlackY : 0;
+
+  return {
+    minX: -maxPanX,
+    maxX: maxPanX,
+    minY: -maxPanY,
+    maxY: maxPanY,
+  };
+}
+
+function clampPan(x: number, y: number, bounds: PanBounds): { x: number; y: number } {
+  return {
+    x: clamp(x, bounds.minX, bounds.maxX),
+    y: clamp(y, bounds.minY, bounds.maxY),
+  };
+}
+
 export function GameScreen() {
   const user = useAppStore(s => s.user);
   const setScreen = useAppStore(s => s.setScreen);
@@ -47,6 +121,10 @@ export function GameScreen() {
 
   const [currentLevel, setCurrentLevel] = useState(user?.currentLevel || 1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [containerSize, setContainerSize] = useState({
+    w: window.innerWidth,
+    h: window.innerHeight,
+  });
 
   // === FRAMER MOTION CAMERA PHYSICS ===
   const cameraX = useMotionValue(0);
@@ -64,26 +142,99 @@ export function GameScreen() {
   const lastTransform = useRef({ x: 0, y: 0 });
   const pinchStartDist = useRef<number | null>(null);
   const pinchStartScale = useRef(1);
+  const lastZoomTsRef = useRef(performance.now());
 
   const [confirmAction, setConfirmAction] = useState<'restart' | 'menu' | null>(null);
   const [noMoreLevels, setNoMoreLevels] = useState(false);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateSize = () => {
+      setContainerSize({
+        w: container.clientWidth || window.innerWidth,
+        h: container.clientHeight || window.innerHeight,
+      });
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(container);
+    window.addEventListener('resize', updateSize);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateSize);
+    };
+  }, []);
 
   // cellSize вычисляется чтобы уровень влез на экран при scale=1
   const baseCellSize = useMemo(() => {
-    if (!containerRef.current) return 40;
-    const w = containerRef.current.clientWidth;
-    const h = containerRef.current.clientHeight;
+    const w = containerSize.w || window.innerWidth;
+    const h = containerSize.h || window.innerHeight;
     if (w === 0 || h === 0) return 40;
 
     const SCREEN_PADDING = 32;
-    const GRID_PADDING_CELLS = 0.4;
     const availableW = w - SCREEN_PADDING;
     const availableH = h - SCREEN_PADDING;
     const maxWidth = availableW / (gridSize.width + GRID_PADDING_CELLS);
     const maxHeight = availableH / (gridSize.height + GRID_PADDING_CELLS);
     const newSize = Math.min(maxWidth, maxHeight, MAX_CELL_SIZE);
     return Math.floor(Math.max(newSize, MIN_CELL_SIZE));
-  }, [gridSize.width, gridSize.height]);
+  }, [containerSize.w, containerSize.h, gridSize.width, gridSize.height]);
+
+  const viewW = containerSize.w || window.innerWidth;
+  const viewH = containerSize.h || window.innerHeight;
+  const boardPixelW = (gridSize.width + GRID_PADDING_CELLS) * baseCellSize;
+  const boardPixelH = (gridSize.height + GRID_PADDING_CELLS) * baseCellSize;
+
+  const zoomBounds = useMemo(
+    () => computeZoomBounds(viewW, viewH, { width: gridSize.width, height: gridSize.height }, baseCellSize),
+    [viewW, viewH, gridSize.width, gridSize.height, baseCellSize],
+  );
+
+  const clampPanToBounds = useCallback((x: number, y: number, scale: number) => {
+    const panBounds = computePanBounds(viewW, viewH, boardPixelW, boardPixelH, scale);
+    return clampPan(x, y, panBounds);
+  }, [viewW, viewH, boardPixelW, boardPixelH]);
+
+  const applyScaleImmediate = useCallback((targetScale: number) => {
+    const boundedScale = clamp(targetScale, zoomBounds.minScale, zoomBounds.maxScale);
+    cameraScale.set(boundedScale);
+    const pan = clampPanToBounds(cameraX.get(), cameraY.get(), boundedScale);
+    cameraX.set(pan.x);
+    cameraY.set(pan.y);
+    lastZoomTsRef.current = performance.now();
+  }, [zoomBounds.minScale, zoomBounds.maxScale, cameraScale, cameraX, cameraY, clampPanToBounds]);
+
+  const applyScaleWithRateLimit = useCallback((targetScale: number, nowMs: number, _source: ZoomSource) => {
+    const currentScale = cameraScale.get();
+    const boundedTarget = clamp(targetScale, zoomBounds.minScale, zoomBounds.maxScale);
+    const levelFactor = clamp((Math.max(gridSize.width, gridSize.height) - 4) / 16, 0, 1);
+    const zoomInRate = lerp(0.9, 1.6, levelFactor);
+    const zoomOutRate = lerp(1.2, 2.0, levelFactor);
+    const dtSec = clamp((nowMs - lastZoomTsRef.current) / 1000, 1 / 120, 0.1);
+    const rate = boundedTarget >= currentScale ? zoomInRate : zoomOutRate;
+    const maxDelta = rate * dtSec;
+    const delta = clamp(boundedTarget - currentScale, -maxDelta, maxDelta);
+    const nextScale = clamp(currentScale + delta, zoomBounds.minScale, zoomBounds.maxScale);
+
+    if (Math.abs(nextScale - currentScale) > ZOOM_EPS) {
+      cameraScale.set(nextScale);
+      const pan = clampPanToBounds(cameraX.get(), cameraY.get(), nextScale);
+      cameraX.set(pan.x);
+      cameraY.set(pan.y);
+    }
+
+    lastZoomTsRef.current = nowMs;
+  }, [
+    cameraScale, cameraX, cameraY, zoomBounds.minScale, zoomBounds.maxScale,
+    gridSize.width, gridSize.height, clampPanToBounds,
+  ]);
+
+  useEffect(() => {
+    applyScaleImmediate(cameraScale.get());
+  }, [zoomBounds.minScale, zoomBounds.maxScale, viewW, viewH, applyScaleImmediate, cameraScale]);
 
   // === ЗАГРУЗКА УРОВНЯ ===
   const loadLevel = useCallback(async (levelNum: number) => {
@@ -108,15 +259,12 @@ export function GameScreen() {
   useEffect(() => {
     if (status !== 'playing') return;
 
-    const screenW = containerRef.current?.clientWidth || window.innerWidth;
-    const screenH = containerRef.current?.clientHeight || window.innerHeight;
-    const boardPixelW = (gridSize.width + 0.4) * baseCellSize;
-    const boardPixelH = (gridSize.height + 0.4) * baseCellSize;
+    const fitAllScale = zoomBounds.fitScale;
+    const playScaleRaw = Math.min((viewW - 64) / (10 * baseCellSize), (viewH - 64) / (10 * baseCellSize), 1.5);
 
     // Масштаб чтобы влез весь уровень
-    const fitAllScale = Math.min((screenW - 64) / boardPixelW, (screenH - 64) / boardPixelH, 1);
+    const playScale = clamp(playScaleRaw, zoomBounds.minScale, zoomBounds.maxScale);
     // Масштаб для комфортной игры (~10x10 ячеек на экране)
-    const playScale = Math.min((screenW - 64) / (10 * baseCellSize), (screenH - 64) / (10 * baseCellSize), 1.5);
 
     // Жёсткий сброс камеры
     springX.jump(0);
@@ -124,36 +272,57 @@ export function GameScreen() {
     springScale.jump(fitAllScale);
     cameraX.set(0);
     cameraY.set(0);
-    cameraScale.set(fitAllScale);
+    applyScaleImmediate(fitAllScale);
 
-    setIsIntroAnimating(true);
+    const maxGridDim = Math.max(gridSize.width, gridSize.height);
+    const shouldLockInputForIntro = maxGridDim >= INTRO_MIN_DIM_FOR_BLOCK;
+    setIsIntroAnimating(shouldLockInputForIntro);
 
     // Ждём sweep-волну, затем зумим
     const t1 = setTimeout(() => {
       const finalScale = (gridSize.width > 12 || gridSize.height > 12) ? playScale : fitAllScale;
-      cameraScale.set(finalScale);
-    }, 1000);
+      cameraX.set(0);
+      cameraY.set(0);
+      applyScaleImmediate(finalScale);
+    }, shouldLockInputForIntro ? INTRO_ZOOM_DELAY_MS : 0);
+
+    if (!shouldLockInputForIntro) {
+      return () => { clearTimeout(t1); };
+    }
 
     const t2 = setTimeout(() => {
       setIsIntroAnimating(false);
-    }, 2000);
+    }, INTRO_INPUT_LOCK_MS);
 
     return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [status, gridSize.width, gridSize.height, baseCellSize, cameraX, cameraY, cameraScale, springX, springY, springScale]);
+  }, [
+    status, gridSize.width, gridSize.height, baseCellSize,
+    zoomBounds.fitScale, zoomBounds.minScale, zoomBounds.maxScale, viewW, viewH,
+    cameraX, cameraY, springX, springY, springScale, applyScaleImmediate,
+  ]);
 
   // === ZOOM / PAN HANDLERS ===
   const handleWheel = useCallback((e: React.WheelEvent) => {
     if (isIntroAnimating) return;
-    const scaleFactor = e.deltaY > 0 ? 0.9 : 1.1;
-    cameraScale.set(Math.min(Math.max(0.2, cameraScale.get() * scaleFactor), 3));
-  }, [cameraScale, isIntroAnimating]);
+    if (e.cancelable) e.preventDefault();
+
+    const normalized = clamp(-e.deltaY, -120, 120) / 120;
+    if (Math.abs(normalized) < ZOOM_EPS) return;
+
+    const currentScale = cameraScale.get();
+    const targetScale = currentScale * Math.pow(1.12, normalized);
+    applyScaleWithRateLimit(targetScale, performance.now(), 'wheel');
+  }, [cameraScale, isIntroAnimating, applyScaleWithRateLimit]);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     if (isIntroAnimating) return;
     if (e.touches.length === 2) {
+      setIsDragging(false);
       const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      if (dist <= 0) return;
       pinchStartDist.current = dist;
       pinchStartScale.current = cameraScale.get();
+      lastZoomTsRef.current = performance.now();
     } else if (e.touches.length === 1) {
       setIsDragging(true);
       dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
@@ -163,22 +332,32 @@ export function GameScreen() {
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (isIntroAnimating) return;
-    if (e.touches.length === 2 && pinchStartDist.current) {
+    if (e.touches.length === 2 && pinchStartDist.current && pinchStartDist.current > 0) {
       const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-      const scale = pinchStartScale.current * (dist / pinchStartDist.current);
-      cameraScale.set(Math.min(Math.max(0.2, scale), 3));
+      if (dist <= 0) return;
+      const targetScale = pinchStartScale.current * (dist / pinchStartDist.current);
+      applyScaleWithRateLimit(targetScale, performance.now(), 'pinch');
     } else if (e.touches.length === 1 && isDragging) {
       const dx = e.touches[0].clientX - dragStart.current.x;
       const dy = e.touches[0].clientY - dragStart.current.y;
-      cameraX.set(lastTransform.current.x + dx);
-      cameraY.set(lastTransform.current.y + dy);
+      const pan = clampPanToBounds(lastTransform.current.x + dx, lastTransform.current.y + dy, cameraScale.get());
+      cameraX.set(pan.x);
+      cameraY.set(pan.y);
     }
-  }, [isDragging, cameraScale, cameraX, cameraY, isIntroAnimating]);
+  }, [isDragging, cameraScale, cameraX, cameraY, isIntroAnimating, applyScaleWithRateLimit, clampPanToBounds]);
 
-  const handleTouchEnd = useCallback(() => {
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      setIsDragging(true);
+      dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      lastTransform.current = { x: cameraX.get(), y: cameraY.get() };
+      pinchStartDist.current = null;
+      return;
+    }
+
     setIsDragging(false);
     pinchStartDist.current = null;
-  }, []);
+  }, [cameraX, cameraY]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (isIntroAnimating) return;
@@ -194,10 +373,11 @@ export function GameScreen() {
     if (isDragging && !isIntroAnimating) {
       const dx = e.clientX - dragStart.current.x;
       const dy = e.clientY - dragStart.current.y;
-      cameraX.set(lastTransform.current.x + dx);
-      cameraY.set(lastTransform.current.y + dy);
+      const pan = clampPanToBounds(lastTransform.current.x + dx, lastTransform.current.y + dy, cameraScale.get());
+      cameraX.set(pan.x);
+      cameraY.set(pan.y);
     }
-  }, [isDragging, cameraX, cameraY, isIntroAnimating]);
+  }, [isDragging, cameraX, cameraY, cameraScale, isIntroAnimating, clampPanToBounds]);
 
   const handleMouseUp = useCallback(() => setIsDragging(false), []);
 
@@ -205,11 +385,22 @@ export function GameScreen() {
     if (isIntroAnimating) return;
     cameraX.set(0);
     cameraY.set(0);
-    const screenW = containerRef.current?.clientWidth || window.innerWidth;
-    const boardPixelW = (gridSize.width + 0.4) * baseCellSize;
-    const fitAllScale = Math.min((screenW - 64) / boardPixelW, 1);
-    cameraScale.set(fitAllScale);
-  }, [cameraX, cameraY, cameraScale, isIntroAnimating, gridSize.width, baseCellSize]);
+    applyScaleImmediate(zoomBounds.fitScale);
+  }, [cameraX, cameraY, isIntroAnimating, applyScaleImmediate, zoomBounds.fitScale]);
+
+  const handleZoomIn = useCallback(() => {
+    if (isIntroAnimating) return;
+    const step = clamp((zoomBounds.maxScale - zoomBounds.minScale) * 0.12, 0.08, 0.25);
+    const target = cameraScale.get() + step;
+    applyScaleWithRateLimit(target, performance.now(), 'button');
+  }, [isIntroAnimating, zoomBounds.maxScale, zoomBounds.minScale, cameraScale, applyScaleWithRateLimit]);
+
+  const handleZoomOut = useCallback(() => {
+    if (isIntroAnimating) return;
+    const step = clamp((zoomBounds.maxScale - zoomBounds.minScale) * 0.12, 0.08, 0.25);
+    const target = cameraScale.get() - step;
+    applyScaleWithRateLimit(target, performance.now(), 'button');
+  }, [isIntroAnimating, zoomBounds.maxScale, zoomBounds.minScale, cameraScale, applyScaleWithRateLimit]);
 
   // === КЛИК ПО СТРЕЛКЕ ===
   const handleArrowClick = useCallback((arrowId: string) => {
@@ -327,6 +518,7 @@ export function GameScreen() {
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
+          onTouchCancel={handleTouchEnd}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
@@ -361,8 +553,8 @@ export function GameScreen() {
 
           {/* Zoom Controls */}
           <div className="absolute top-4 right-4 flex flex-col gap-2 z-20">
-             <button onClick={() => cameraScale.set(Math.min(3, cameraScale.get() + 0.2))} className="p-2 bg-black/40 rounded-full text-white/70 hover:text-white"><ZoomIn size={20}/></button>
-             <button onClick={() => cameraScale.set(Math.max(0.2, cameraScale.get() - 0.2))} className="p-2 bg-black/40 rounded-full text-white/70 hover:text-white"><ZoomOut size={20}/></button>
+             <button onClick={handleZoomIn} className="p-2 bg-black/40 rounded-full text-white/70 hover:text-white"><ZoomIn size={20}/></button>
+             <button onClick={handleZoomOut} className="p-2 bg-black/40 rounded-full text-white/70 hover:text-white"><ZoomOut size={20}/></button>
              <button onClick={resetZoom} className="p-2 bg-black/40 rounded-full text-white/70 hover:text-white"><Maximize size={20}/></button>
           </div>
         </div>
