@@ -174,6 +174,7 @@ async def auth_telegram(
     telegram_id = telegram_user["id"]
     username = telegram_user.get("username")
     first_name = telegram_user.get("first_name")
+    photo_url = telegram_user.get("photo_url")
     is_premium = telegram_user.get("is_premium", False)
     
     print(f"✅ [Auth] Telegram user {telegram_id} authenticated")
@@ -190,6 +191,7 @@ async def auth_telegram(
             telegram_id=telegram_id,
             username=username,
             first_name=first_name,
+            photo_url=photo_url,
             coins=settings.INITIAL_COINS,
             energy=settings.MAX_ENERGY,
             is_premium=is_premium,
@@ -213,6 +215,9 @@ async def auth_telegram(
         if user.first_name != first_name:
             user.first_name = first_name
             updated = True
+        if user.photo_url != photo_url:
+            user.photo_url = photo_url
+            updated = True
         if user.is_premium != is_premium:
             user.is_premium = is_premium
             updated = True
@@ -231,6 +236,7 @@ async def auth_telegram(
             "telegram_id": user.telegram_id,
             "username": user.username,
             "first_name": user.first_name,
+            "photo_url": user.photo_url,
             "current_level": user.current_level,
             "total_stars": user.total_stars,
             "coins": user.coins,
@@ -264,6 +270,7 @@ async def refresh_token(user: User = Depends(get_current_user)):
             "telegram_id": user.telegram_id,
             "username": user.username,
             "first_name": user.first_name,
+            "photo_url": user.photo_url,
             "current_level": user.current_level,
             "total_stars": user.total_stars,
             "coins": user.coins,

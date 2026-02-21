@@ -244,6 +244,7 @@ const rarityStyles = {
 };
 
 export function ShopScreen() {
+  const isComingSoon = true;
   const userBalance = { coins: 1250, stars: 75 };
   const [activeTab, setActiveTab] = useState<'shop' | 'inventory'>('shop');
   const [selectedItem, setSelectedItem] = useState<typeof shopItems[0] | null>(null);
@@ -355,6 +356,53 @@ export function ShopScreen() {
     }
     return items;
   };
+
+  if (isComingSoon) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="sticky top-0 bg-gray-900/90 backdrop-blur-xl px-4 py-4 border-b border-white/10 z-20">
+          <div className="flex items-center justify-center">
+            <div className="flex items-center gap-2 bg-gradient-to-r from-yellow-500/20 to-amber-600/20 px-4 py-2 rounded-full border border-yellow-500/30">
+              <span className="text-2xl">💰</span>
+              <div className="flex flex-col">
+                <span className="text-white font-bold text-lg leading-none">{userBalance.coins.toLocaleString()}</span>
+                <span className="text-yellow-400/60 text-[10px] uppercase tracking-wider">монет</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="px-4 pt-4">
+          <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-1 mb-4 flex relative border border-white/10">
+            <div className="absolute top-1 bottom-1 left-1 w-[calc(50%-6px)] bg-white/10 rounded-xl shadow-sm" />
+            <button
+              disabled
+              className="flex-1 py-3 text-sm font-bold z-10 text-white/70 cursor-not-allowed"
+            >
+              <ShoppingBag size={16} className="inline mr-1 mb-1" />
+              Магазин
+            </button>
+            <button
+              disabled
+              className="flex-1 py-3 text-sm font-bold z-10 text-white/50 cursor-not-allowed"
+            >
+              <Package size={16} className="inline mr-1 mb-1" />
+              Инвентарь
+            </button>
+          </div>
+        </div>
+
+        <div className="relative flex-1 overflow-hidden px-4 pb-24">
+          <div className="absolute inset-0 rounded-3xl border border-white/10 bg-gray-950/85 backdrop-blur-md flex items-center justify-center">
+            <div className="text-center">
+              <div className="text-white font-black text-5xl tracking-wider uppercase">СКОРО</div>
+              <p className="text-white/60 text-sm mt-3">Магазин и инвентарь временно недоступны</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col">

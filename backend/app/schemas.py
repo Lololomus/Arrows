@@ -33,6 +33,7 @@ class UserBase(BaseModel):
     telegram_id: int
     username: Optional[str] = None
     first_name: Optional[str] = None
+    photo_url: Optional[str] = None
 
 
 class UserResponse(BaseModel):
@@ -41,6 +42,7 @@ class UserResponse(BaseModel):
     telegram_id: int
     username: Optional[str]
     first_name: Optional[str]
+    photo_url: Optional[str]
     current_level: int
     total_stars: int
     coins: int

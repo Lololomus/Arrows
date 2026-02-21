@@ -28,7 +28,7 @@ export const ClassicSkin: GameSkin = {
   icon: '🎯',
 
   geometry: {
-    bodyStrokeRatio: 0.20,
+    bodyStrokeRatio: 0.16,
     outlineExtraRatio: 0.08,
     headGapRatio: 0.25,
     chevronLengthRatio: 0.45,

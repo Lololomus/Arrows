@@ -27,6 +27,7 @@ class User(Base):
     telegram_id = Column(BigInteger, unique=True, nullable=False, index=True)
     username = Column(String(64), nullable=True)
     first_name = Column(String(128), nullable=True)
+    photo_url = Column(String(512), nullable=True)
     
     # Прогресс
     current_level = Column(Integer, default=1)
@@ -71,6 +72,7 @@ class User(Base):
             "telegram_id": self.telegram_id,
             "username": self.username,
             "first_name": self.first_name,
+            "photo_url": self.photo_url,
             "current_level": self.current_level,
             "total_stars": self.total_stars,
             "coins": self.coins,

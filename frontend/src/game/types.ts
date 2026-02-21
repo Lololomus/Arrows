@@ -139,6 +139,7 @@ export interface User {
   telegramId: number;
   username: string | null;
   firstName: string | null;
+  photo_url?: string | null;
   
   // Прогресс
   currentLevel: number;
