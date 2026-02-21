@@ -133,6 +133,9 @@ interface GameStore {
   shakingArrowId: string | null;
   flyingArrowId: string | null;
   
+  /** Стрелки заблокированные после ошибки (краснеют, нельзя кликать) */
+  blockedArrowIds: string[];
+  
   initLevel: (level: number, seed: number, gridSize: { width: number; height: number }, arrows: Arrow[]) => void;
   /** Удалить одну стрелку (обычный ход) */
   removeArrow: (arrowId: string) => void;
@@ -147,6 +150,11 @@ interface GameStore {
   
   setShakingArrow: (arrowId: string | null) => void;
   setFlyingArrow: (arrowId: string | null) => void;
+  
+  /** Заблокировать стрелку после ошибки */
+  blockArrow: (arrowId: string) => void;
+  /** Разблокировать стрелки (путь освободился) */
+  unblockArrows: (arrowIds: string[]) => void;
 
   activeSkinId: string;
   ownedSkinIds: string[];
@@ -154,7 +162,7 @@ interface GameStore {
   purchaseSkin: (skinId: string) => void;
 }
 
-const initialGameState: Omit<GameStore, 'initLevel' | 'removeArrow' | 'removeArrows' | 'failMove' | 'undo' | 'showHint' | 'clearHint' | 'setStatus' | 'reset' | 'setShakingArrow' | 'setFlyingArrow' | 'setSkin' | 'purchaseSkin'> = {
+const initialGameState: Omit<GameStore, 'initLevel' | 'removeArrow' | 'removeArrows' | 'failMove' | 'undo' | 'showHint' | 'clearHint' | 'setStatus' | 'reset' | 'setShakingArrow' | 'setFlyingArrow' | 'blockArrow' | 'unblockArrows' | 'setSkin' | 'purchaseSkin'> = {
   level: 1,
   seed: 0,
   gridSize: { width: 4, height: 4 },
@@ -169,6 +177,7 @@ const initialGameState: Omit<GameStore, 'initLevel' | 'removeArrow' | 'removeArr
   hintedArrowId: null,
   shakingArrowId: null,
   flyingArrowId: null,
+  blockedArrowIds: [],
   // СКИНЫ
   activeSkinId: 'classic',
   ownedSkinIds: ['classic'],
@@ -228,6 +237,7 @@ export const useGameStore = create<GameStore>()(
           hintedArrowId: null,
           shakingArrowId: null,
           flyingArrowId: null,
+          blockedArrowIds: [],
         });
       },
 
@@ -414,6 +424,7 @@ export const useGameStore = create<GameStore>()(
           lives: INITIAL_LIVES,
           hintsRemaining: HINTS_PER_LEVEL,
           hintedArrowId: null,
+          blockedArrowIds: [],
         });
       },
       
@@ -423,6 +434,19 @@ export const useGameStore = create<GameStore>()(
       
       setFlyingArrow: (arrowId) => {
         set({ flyingArrowId: arrowId });
+      },
+      
+      blockArrow: (arrowId) => {
+        const { blockedArrowIds } = get();
+        if (!blockedArrowIds.includes(arrowId)) {
+          set({ blockedArrowIds: [...blockedArrowIds, arrowId] });
+        }
+      },
+      
+      unblockArrows: (arrowIds) => {
+        if (arrowIds.length === 0) return;
+        const toRemove = new Set(arrowIds);
+        set({ blockedArrowIds: get().blockedArrowIds.filter(id => !toRemove.has(id)) });
       },
       
       setSkin: (skinId) => {
@@ -463,6 +487,7 @@ export const useHintedArrow = () => useGameStore(s => s.hintedArrowId);
 export const useHintsRemaining = () => useGameStore(s => s.hintsRemaining);
 export const useGameHistory = () => useGameStore(s => s.history);
 export const useShakingArrow = () => useGameStore(s => s.shakingArrowId);
+export const useBlockedArrows = () => useGameStore(s => s.blockedArrowIds);
 export const useActiveSkinId = () => useGameStore(s => s.activeSkinId);
 export const useOwnedSkins = () => useGameStore(s => s.ownedSkinIds);
 
@@ -479,4 +504,6 @@ export const useGameActions = () => useGameStore(s => ({
   reset: s.reset,
   setShakingArrow: s.setShakingArrow,
   setFlyingArrow: s.setFlyingArrow,
+  blockArrow: s.blockArrow,
+  unblockArrows: s.unblockArrows,
 }));

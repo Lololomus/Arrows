@@ -119,16 +119,16 @@ export default function App() {
         
         /* 📱 SAFE AREA для iPhone notch и home indicator */
         .safe-area-top {
-          padding-top: env(safe-area-inset-top, 0px);
+          padding-top: var(--app-safe-top);
         }
         .safe-bottom {
-          padding-bottom: env(safe-area-inset-bottom, 0px);
+          padding-bottom: var(--app-safe-bottom);
         }
         .safe-area-left {
-          padding-left: env(safe-area-inset-left, 0px);
+          padding-left: var(--app-safe-left);
         }
         .safe-area-right {
-          padding-right: env(safe-area-inset-right, 0px);
+          padding-right: var(--app-safe-right);
         }
       `}</style>
 
@@ -218,3 +218,4 @@ export default function App() {
     </div>
   );
 }
+

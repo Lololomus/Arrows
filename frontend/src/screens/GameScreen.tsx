@@ -16,7 +16,7 @@ import { CanvasBoard } from '../components/CanvasBoard';
 import { gameApi } from '../api/client';
 import { RefreshCw, Lightbulb, RotateCcw, AlertTriangle, Heart, Trash2, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
 import { ANIMATIONS, MAX_CELL_SIZE, MIN_CELL_SIZE } from '../config/constants';
-import { processMove, getFreeArrows } from '../game/engine';
+import { processMove, getFreeArrows, isArrowBlocked } from '../game/engine';
 import { FXOverlay } from '../components/FXOverlay';
 
 import gameBgImage from '../assets/game-bg.jpg?url';
@@ -42,6 +42,8 @@ export function GameScreen() {
   const clearHint = useGameStore(s => s.clearHint);
   const setStatus = useGameStore(s => s.setStatus);
   const setShakingArrow = useGameStore(s => s.setShakingArrow);
+  const blockArrow = useGameStore(s => s.blockArrow);
+  const unblockArrows = useGameStore(s => s.unblockArrows);
 
   const [currentLevel, setCurrentLevel] = useState(user?.currentLevel || 1);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -230,6 +232,7 @@ export function GameScreen() {
 
     if (result.collision) {
       setShakingArrow(arrowId);
+      blockArrow(arrowId);
       window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('error');
       setTimeout(() => {
         setShakingArrow(null);
@@ -247,8 +250,23 @@ export function GameScreen() {
 
       if (idsToRemove.length === 1) removeArrow(arrowId);
       else removeArrows(idsToRemove);
+
+      // Авто-разблокировка: проверяем blocked стрелки после удаления
+      requestAnimationFrame(() => {
+        const state = useGameStore.getState();
+        const blocked = state.blockedArrowIds;
+        if (blocked.length === 0) return;
+        const currentArrows = state.arrows;
+        const currentGrid = { width: state.gridSize.width, height: state.gridSize.height };
+        const toUnblock = blocked.filter(id => {
+          const a = currentArrows.find(ar => ar.id === id);
+          if (!a) return true; // стрелка удалена — чистим
+          return !isArrowBlocked(a, currentArrows, currentGrid);
+        });
+        if (toUnblock.length > 0) unblockArrows(toUnblock);
+      });
     }
-  }, [clearHint, setShakingArrow, failMove, removeArrow, removeArrows, isIntroAnimating]);
+  }, [clearHint, setShakingArrow, blockArrow, unblockArrows, failMove, removeArrow, removeArrows, isIntroAnimating]);
 
   const handleHint = useCallback(() => {
     if (isIntroAnimating) return;
