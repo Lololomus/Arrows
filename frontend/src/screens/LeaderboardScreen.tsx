@@ -1,7 +1,21 @@
-import { useState, useMemo, useRef, useEffect, forwardRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Trophy, Gift, User, Gamepad2, Target } from 'lucide-react';
+// ===== 📄 ФАЙЛ: frontend/src/screens/LeaderboardScreen.tsx =====
+import { useState, useMemo, useRef, useEffect, useCallback, memo } from 'react';
+import { motion } from 'framer-motion';
+import { Trophy, Gift, Gamepad2, Target } from 'lucide-react';
 import { useAppStore } from '../stores/store';
+import { StarParticles } from '../components/ui/StarParticles';
+
+// --- ХЕЛПЕРЫ ДЛЯ TELEGRAM ---
+const triggerHaptic = (style: 'light' | 'medium' | 'heavy' | 'selection') => {
+  const tg = (window as any).Telegram?.WebApp;
+  if (!tg?.HapticFeedback) return;
+  
+  if (style === 'selection') {
+    tg.HapticFeedback.selectionChanged();
+  } else {
+    tg.HapticFeedback.impactOccurred(style);
+  }
+};
 
 // --- ТИПЫ И ДАННЫЕ ---
 interface Player {
@@ -11,6 +25,14 @@ interface Player {
   prize?: string;
   avatarSeed: number;
 }
+
+const RANK_STYLES: Record<number, { bg: string; border: string; rankClass: string; icon: string; particleColor?: string }> = {
+  1: { bg: 'bg-[#3f3113]', border: 'border-[#ca8a04]/30', rankClass: 'text-yellow-400 drop-shadow-glow', icon: '👑', particleColor: '255, 215, 0' },
+  2: { bg: 'bg-[#2c303a]', border: 'border-[#94a3b8]/30', rankClass: 'text-gray-300', icon: '🥈', particleColor: '176, 196, 222' },
+  3: { bg: 'bg-[#402314]', border: 'border-[#ea580c]/30', rankClass: 'text-orange-400', icon: '🥉', particleColor: '205, 127, 50' },
+};
+
+const DEFAULT_RANK_STYLE = { bg: 'bg-white/5', border: 'border-white/5', rankClass: 'text-white/40', icon: '', particleColor: undefined };
 
 const generateLeaderboard = (count: number): Player[] => {
   return Array.from({ length: count }).map((_, i) => ({
@@ -23,14 +45,14 @@ const generateLeaderboard = (count: number): Player[] => {
 };
 
 // --- КОМПОНЕНТ: ASYNC AVATAR ---
-const AsyncAvatar = ({ seed, rank }: { seed: number, rank: number }) => {
+const AsyncAvatar = memo(({ seed, rank, photoUrl }: { seed: number, rank?: number, photoUrl?: string }) => {
   const [loaded, setLoaded] = useState(false);
 
   return (
-    <div className={`w-12 h-12 rounded-full overflow-hidden shrink-0 ring-2 relative ${rank <= 3 ? 'ring-white/20' : 'ring-transparent'}`}>
-      <div className={`absolute inset-0 bg-white/10 ${!loaded ? 'animate-pulse' : ''}`} />
+    <div className={`w-12 h-12 rounded-full overflow-hidden shrink-0 ring-2 relative bg-[#1A1A24] ${rank && rank <= 3 ? 'ring-white/10' : 'ring-transparent'}`}>
+      <div className={`absolute inset-0 bg-white/5 ${!loaded && !photoUrl ? 'animate-pulse' : ''}`} />
       <img 
-        src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}`} 
+        src={photoUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}`} 
         alt="avatar"
         loading="lazy"
         decoding="async"
@@ -39,112 +61,280 @@ const AsyncAvatar = ({ seed, rank }: { seed: number, rank: number }) => {
       />
     </div>
   );
-};
+});
+AsyncAvatar.displayName = 'AsyncAvatar';
 
-// --- КОМПОНЕНТ: СТРОКА ИГРОКА ---
-const LeaderboardItem = forwardRef<HTMLDivElement, { player: Player, index: number, styles: any }>(
-  ({ player, index, styles }, ref) => {
-    return (
-      <motion.div
-        ref={ref}
-        layout
-        initial={{ opacity: 0, x: -20, scale: 0.95 }}
-        animate={{ opacity: 1, x: 0, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.2 } }}
-        transition={{ 
-          delay: (index % 12) * 0.05, 
-          duration: 0.4,
-          type: "spring",
-          stiffness: 400,
-          damping: 30
-        }}
-        // ДОБАВЛЕНО: mb-3 для увеличения пространства между юзерами
-        className={`
-          flex items-center p-4 rounded-2xl border relative overflow-hidden h-[82px] mb-3 last:mb-0
-          ${styles.bg} ${styles.border}
-        `}
-      >
-        {styles.glow && (
-          <div className={`absolute inset-0 pointer-events-none ${styles.glow} opacity-50`} />
+// --- КОМПОНЕНТ: ЭЛЕМЕНТ ТОП-3 ---
+const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Player, index: number, animateEntry: boolean }) => {
+  const styles = RANK_STYLES[player.rank];
+  const [isStamped, setIsStamped] = useState(!animateEntry);
+  const [showShockwave, setShowShockwave] = useState(false);
+
+  const handleStampComplete = useCallback(() => {
+    if (!animateEntry) return; 
+    setIsStamped(true);
+    setShowShockwave(true);
+    if (player.rank === 1) triggerHaptic('heavy');
+    else if (player.rank === 2) triggerHaptic('medium');
+    else triggerHaptic('light');
+  }, [player.rank, animateEntry]);
+
+  return (
+    <motion.div
+      initial={animateEntry ? { opacity: 0, scale: 2.5, y: -40 } : false}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      transition={animateEntry ? { delay: index * 0.3, type: "spring", stiffness: 350, damping: 24, mass: 1 } : { duration: 0 }} 
+      onAnimationComplete={handleStampComplete}
+      className={`flex items-center p-4 rounded-2xl border relative overflow-hidden h-[82px] mb-3 ${styles.bg} ${styles.border} shadow-lg`}
+    >
+      {showShockwave && (
+        <motion.div
+          initial={{ opacity: 0.8, scale: 0.8 }}
+          animate={{ opacity: 0, scale: 2 }}
+          transition={{ duration: 0.5, ease: "easeOut" }}
+          className="absolute inset-0 bg-white/30 rounded-2xl pointer-events-none z-10"
+        />
+      )}
+      {isStamped && styles.particleColor && (
+        <div className="absolute inset-0 z-0 opacity-80 mix-blend-screen pointer-events-none overflow-hidden">
+          <StarParticles colorRGB={styles.particleColor} count={30} speed={0.35} />
+        </div>
+      )}
+      <div className="flex items-center justify-center w-8 mr-2 relative z-20 shrink-0">
+        <span className="text-2xl drop-shadow-md">{styles.icon}</span>
+      </div>
+      <div className="relative z-20 mr-3">
+        <AsyncAvatar seed={player.avatarSeed} rank={player.rank} />
+      </div>
+      <div className="flex-1 min-w-0 relative z-20 py-1">
+        <div className="text-white text-base font-bold truncate">{player.username}</div>
+        {player.prize && (
+          <div className="flex items-center gap-1 mt-0.5">
+            <Gift size={12} className="text-purple-400" />
+            <span className="text-[10px] font-bold uppercase tracking-wider bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+              {player.prize}
+            </span>
+          </div>
         )}
+      </div>
+      <div className="font-mono text-base font-black relative z-20 text-yellow-400 drop-shadow-md">
+        {player.score.toLocaleString()}
+      </div>
+    </motion.div>
+  );
+});
+TopLeaderboardItem.displayName = 'TopLeaderboardItem';
 
-        <div className="flex items-center justify-center w-8 mr-2 relative z-10 shrink-0">
-          {styles.icon ? (
-            <span className="text-2xl drop-shadow-md">{styles.icon}</span>
-          ) : (
-            <span className={`font-bold text-lg ${styles.rank}`}>{player.rank}</span>
-          )}
-        </div>
+// --- КОМПОНЕНТ: ОБЫЧНЫЙ ЭЛЕМЕНТ ТОП-4+ ---
+const RegularLeaderboardItem = memo(({ player }: { player: Player }) => {
+  const styles = DEFAULT_RANK_STYLE;
+  return (
+    <div className={`flex items-center p-4 rounded-2xl border relative overflow-hidden h-[82px] mb-3 ${styles.bg} ${styles.border}`}>
+      <div className="flex items-center justify-center w-8 mr-2 relative z-10 shrink-0">
+        <span className={`font-bold text-lg ${styles.rankClass}`}>{player.rank}</span>
+      </div>
+      <div className="relative z-10 mr-3">
+        <AsyncAvatar seed={player.avatarSeed} rank={player.rank} />
+      </div>
+      <div className="flex-1 min-w-0 relative z-10 py-1">
+        <div className="text-white text-base font-bold truncate">{player.username}</div>
+      </div>
+      <div className="font-mono text-base font-black relative z-10 text-yellow-400/80">
+        {player.score.toLocaleString()}
+      </div>
+    </div>
+  );
+});
+RegularLeaderboardItem.displayName = 'RegularLeaderboardItem';
 
-        <div className="relative z-10 mr-3">
-          <AsyncAvatar seed={player.avatarSeed} rank={player.rank} />
-        </div>
+// --- КОМПОНЕНТ: ДИНАМИЧЕСКИЙ ФУТЕР ТЕКУЩЕГО ИГРОКА ---
+const CARD_GAP_PX = 12;
+const BOTTOM_NAV_SELECTOR = '[data-bottom-nav]';
 
-        <div className="flex-1 min-w-0 relative z-10 py-1">
-          <div className="text-white text-base font-bold truncate">{player.username}</div>
-          {player.prize && (
-            <div className="flex items-center gap-1 mt-0.5">
-              <Gift size={12} className="text-purple-400" />
-              <span className="text-[10px] font-bold uppercase tracking-wider bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-                {player.prize}
-              </span>
-            </div>
-          )}
-        </div>
+const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger }: { user: any, isDocked: boolean, pulseTrigger?: number }) => {
+  const currentUserRank = useMemo(() => ({
+    rank: 101,
+    username: user?.username || user?.first_name || 'Вы',
+    score: 150,
+    avatarSeed: user?.id || 999,
+    photoUrl: user?.photo_url || user?.photoUrl 
+  }), [user]);
+  const [isPulseActive, setIsPulseActive] = useState(false);
 
-        <div className={`font-mono text-base font-black relative z-10 ${player.rank <= 3 ? 'text-yellow-400' : 'text-white/60'}`}>
-          {player.score.toLocaleString()}
-        </div>
-      </motion.div>
-    );
-  }
-);
+  useEffect(() => {
+    if (!isDocked || pulseTrigger === undefined) return;
+    setIsPulseActive(true);
+    const timeout = window.setTimeout(() => setIsPulseActive(false), 560);
+    return () => window.clearTimeout(timeout);
+  }, [isDocked, pulseTrigger]);
 
-LeaderboardItem.displayName = 'LeaderboardItem';
+  const baseDocked = {
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    borderColor: 'rgba(96, 165, 250, 0.35)',
+    boxShadow: '0 0 10px rgba(96, 165, 250, 0.25)',
+    scale: 1,
+  };
+
+  const floating = {
+    backgroundColor: 'rgba(26, 26, 36, 1)',
+    borderColor: 'rgba(59, 130, 246, 0.5)',
+    boxShadow: '0 10px 40px rgba(0,0,0,0.8)',
+    scale: 1.02,
+  };
+
+  const pulseDocked = {
+    backgroundColor: ['rgba(255, 255, 255, 0.07)', 'rgba(255, 255, 255, 0.10)', 'rgba(255, 255, 255, 0.07)'],
+    borderColor: ['rgba(59, 130, 246, 0.45)', 'rgba(34, 211, 238, 0.95)', 'rgba(96, 165, 250, 0.35)'],
+    boxShadow: ['0 0 0 rgba(0,0,0,0)', '0 0 22px rgba(34, 211, 238, 0.45)', '0 0 10px rgba(96, 165, 250, 0.25)'],
+    scale: [1.02, 1.015, 1],
+  };
+
+  return (
+    <motion.div
+      animate={isDocked ? (isPulseActive ? pulseDocked : baseDocked) : floating}
+      transition={isPulseActive ? { duration: 0.55, ease: 'easeOut', times: [0, 0.5, 1] } : { duration: 0.25, ease: "easeOut" }}
+      className="relative overflow-hidden rounded-2xl border-2 flex items-center h-[82px] p-4 pointer-events-auto"
+    >
+      <motion.div
+        animate={{ opacity: isDocked ? 0 : 0.6 }}
+        transition={{ duration: 0.25, ease: "easeOut" }}
+        className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-blue-500/10 via-blue-400/5 to-transparent skew-x-12"
+      />
+
+      <div className="flex flex-col items-center justify-center w-8 mr-2 leading-none relative z-10 shrink-0">
+         <span className="text-white/40 font-bold text-[10px] uppercase mb-1">Место</span>
+         <span className={`font-black tracking-tighter transition-colors ${isDocked ? 'text-blue-200 text-sm' : 'text-cyan-300 text-sm drop-shadow-md'}`}>
+           #{currentUserRank.rank.toLocaleString()}
+         </span>
+      </div>
+
+      <div className="relative z-10 mr-3">
+        <AsyncAvatar seed={currentUserRank.avatarSeed} photoUrl={currentUserRank.photoUrl} />
+      </div>
+
+      <div className="flex-1 min-w-0 relative z-10 py-1">
+        <div className="text-white text-base font-bold truncate">{currentUserRank.username}</div>
+        <motion.div
+           animate={{ color: isDocked ? 'rgba(165, 243, 252, 0.85)' : 'rgba(147, 197, 253, 0.8)' }}
+           className="text-xs font-bold uppercase tracking-wider"
+        >
+           Топ 85%
+        </motion.div>
+      </div>
+
+      <div className={`font-mono text-xl font-black drop-shadow-md relative z-10 transition-colors ${isDocked ? 'text-blue-200' : 'text-cyan-300'}`}>
+        {currentUserRank.score.toLocaleString()}
+      </div>
+    </motion.div>
+  );
+});
+CurrentUserFooter.displayName = 'CurrentUserFooter';
 
 // --- ОСНОВНОЙ ЭКРАН ---
 export function LeaderboardScreen() {
   const [activeTab, setActiveTab] = useState<'arcade' | 'campaign'>('arcade');
   const [visibleCount, setVisibleCount] = useState(15);
+  const [isDocked, setIsDocked] = useState(false);
+  const [dockPulseKey, setDockPulseKey] = useState(0);
+  const [bottomNavHeight, setBottomNavHeight] = useState(96);
+  
   const { user } = useAppStore();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const currentUserRowRef = useRef<HTMLDivElement>(null);
+  const isFirstMount = useRef(true);
+  const visibleCountRef = useRef(15);
 
   const leaderboard = useMemo(() => generateLeaderboard(100), []);
+  const stickyBottomPx = bottomNavHeight + CARD_GAP_PX;
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      setVisibleCount(15);
-      if (scrollRef.current) scrollRef.current.scrollTop = 0;
-    }, 150);
-    return () => clearTimeout(t);
+    const nav = document.querySelector(BOTTOM_NAV_SELECTOR) as HTMLElement | null;
+    if (!nav) return;
+
+    const measure = () => {
+      const measuredHeight = Math.ceil(nav.getBoundingClientRect().height);
+      if (measuredHeight > 0) setBottomNavHeight(measuredHeight);
+    };
+
+    measure();
+    const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    resizeObserver?.observe(nav);
+    window.addEventListener('resize', measure);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (visibleCount < leaderboard.length) {
+      setIsDocked(false);
+      return;
+    }
+
+    const root = scrollRef.current;
+    const target = currentUserRowRef.current;
+    if (!root || !target || typeof IntersectionObserver === 'undefined') return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsDocked(entry.isIntersecting),
+      { root, threshold: 0.6 }
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [visibleCount, leaderboard.length, activeTab]);
+
+  // ИСПРАВЛЕНО: Звук/отклик при стыковке обрабатывается через эффект, чтобы не спамить
+  const prevDocked = useRef(isDocked);
+  useEffect(() => {
+    if (isDocked !== prevDocked.current) {
+      if (isDocked) {
+        triggerHaptic('medium'); // Щелчок при стыковке
+        setDockPulseKey((prev) => prev + 1);
+      }
+      else triggerHaptic('light'); // Мягкий отрыв
+      prevDocked.current = isDocked;
+    }
+  }, [isDocked]);
+
+  const handleTabChange = useCallback((tab: 'arcade' | 'campaign') => {
+    if (tab === activeTab) return;
+    isFirstMount.current = false; 
+    triggerHaptic('selection');
+    setActiveTab(tab);
+    setVisibleCount(15);
+    visibleCountRef.current = 15;
+    setIsDocked(false); 
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [activeTab]);
 
-  const handleScroll = () => {
-    if (!scrollRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    const currentCount = visibleCountRef.current;
+
+    // Пагинация
     if (scrollHeight - scrollTop <= clientHeight + 200) {
-      setVisibleCount(prev => Math.min(prev + 10, leaderboard.length));
+      if (currentCount < leaderboard.length) {
+        const next = Math.min(currentCount + 10, leaderboard.length);
+        setVisibleCount(next);
+        visibleCountRef.current = next;
+      }
     }
-  };
 
-  const currentUserRank = {
-    rank: 1249785,
-    username: user?.username || 'Вы',
-    score: 150,
-    avatarSeed: 999
-  };
-
-  const getRankStyles = (rank: number) => {
-    switch(rank) {
-      case 1: return { bg: 'bg-gradient-to-r from-yellow-500/25 via-amber-500/20 to-yellow-600/25', border: 'border-yellow-400/50', rank: 'text-yellow-400 drop-shadow-glow', glow: 'shadow-[0_0_20px_rgba(250,204,21,0.3)]', icon: '👑' };
-      case 2: return { bg: 'bg-gradient-to-r from-gray-300/20 via-slate-400/15 to-gray-300/20', border: 'border-gray-300/40', rank: 'text-gray-300', glow: 'shadow-[0_0_15px_rgba(203,213,225,0.25)]', icon: '🥈' };
-      case 3: return { bg: 'bg-gradient-to-r from-orange-600/25 via-amber-700/20 to-orange-500/25', border: 'border-orange-400/40', rank: 'text-orange-400', glow: 'shadow-[0_0_15px_rgba(251,146,60,0.25)]', icon: '🥉' };
-      default: return { bg: 'bg-white/5', border: 'border-white/5', rank: 'text-white/40', glow: '', icon: '' };
+    if (typeof IntersectionObserver === 'undefined') {
+      if (visibleCountRef.current >= leaderboard.length) {
+        const isAtBottom = (scrollHeight - scrollTop - clientHeight) <= 5;
+        setIsDocked(prev => (prev !== isAtBottom ? isAtBottom : prev));
+      } else {
+        setIsDocked(false);
+      }
     }
-  };
+  }, [leaderboard.length]);
 
   return (
-    <div className="px-4 pb-24 h-full flex flex-col pt-4">
+    <div className="px-4 h-full flex flex-col pt-4 relative">
       
       {/* Banner */}
       <div className="bg-gradient-to-b from-yellow-500/20 to-transparent p-6 rounded-3xl border border-yellow-500/30 mb-6 text-center relative overflow-hidden shrink-0">
@@ -159,19 +349,18 @@ export function LeaderboardScreen() {
 
       {/* Tabs */}
       <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-1 mb-6 flex relative border border-white/10 shrink-0">
-        <motion.div 
-          className="absolute top-1 bottom-1 bg-white/10 rounded-xl shadow-sm"
-          initial={false}
-          animate={{ 
-            left: activeTab === 'arcade' ? '4px' : '50%', 
-            width: 'calc(50% - 6px)' 
-          }}
-          transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        />
-        <button onClick={() => setActiveTab('arcade')} className={`flex-1 py-3 text-sm font-bold z-10 transition-colors flex items-center justify-center gap-2 ${activeTab === 'arcade' ? 'text-white' : 'text-white/50'}`}>
+        <div className="absolute top-1 bottom-1 left-1 right-1 flex">
+          {activeTab === 'arcade' ? (
+            <motion.div layoutId="activeTab" className="flex-1 bg-white/10 rounded-xl shadow-sm" transition={{ type: "spring", stiffness: 400, damping: 30 }} />
+          ) : <div className="flex-1" />}
+          {activeTab === 'campaign' ? (
+            <motion.div layoutId="activeTab" className="flex-1 bg-white/10 rounded-xl shadow-sm" transition={{ type: "spring", stiffness: 400, damping: 30 }} />
+          ) : <div className="flex-1" />}
+        </div>
+        <button onClick={() => handleTabChange('arcade')} className={`flex-1 py-3 text-sm font-bold z-10 transition-colors flex items-center justify-center gap-2 ${activeTab === 'arcade' ? 'text-white' : 'text-white/50'}`}>
           <Gamepad2 size={16} /> Arcade
         </button>
-        <button onClick={() => setActiveTab('campaign')} className={`flex-1 py-3 text-sm font-bold z-10 transition-colors flex items-center justify-center gap-2 ${activeTab === 'campaign' ? 'text-white' : 'text-white/50'}`}>
+        <button onClick={() => handleTabChange('campaign')} className={`flex-1 py-3 text-sm font-bold z-10 transition-colors flex items-center justify-center gap-2 ${activeTab === 'campaign' ? 'text-white' : 'text-white/50'}`}>
           <Target size={16} /> Campaign
         </button>
       </div>
@@ -179,62 +368,42 @@ export function LeaderboardScreen() {
       {/* List Container */}
       <div className="flex-1 overflow-hidden relative rounded-t-2xl">
         <div 
-          ref={scrollRef}
+          ref={scrollRef} 
           onScroll={handleScroll}
-          className="h-full overflow-y-auto custom-scrollbar pb-36 px-1" // Увеличили нижний паддинг, чтобы футер не перекрывал
+          style={{ paddingBottom: stickyBottomPx }}
+          className="h-full overflow-y-auto overflow-x-hidden custom-scrollbar px-1"
         >
-          {/* ИСПРАВЛЕНО: Убрали initial={false}, теперь анимация работает и при первой загрузке */}
-          <AnimatePresence mode="popLayout">
-            {leaderboard.slice(0, visibleCount).map((player, i) => {
-               const itemKey = `${activeTab}-${player.rank}`;
-               return (
-                <LeaderboardItem 
-                  key={itemKey}
-                  ref={null} 
-                  player={player} 
-                  index={i} 
-                  styles={getRankStyles(player.rank)} 
-                />
-               );
-            })}
-          </AnimatePresence>
+          {leaderboard.slice(0, visibleCount).map((player, i) => {
+            if (player.rank <= 3) {
+              return <TopLeaderboardItem key={`top-${activeTab}-${player.rank}`} player={player} index={i} animateEntry={isFirstMount.current} />;
+            }
+            return <RegularLeaderboardItem key={`reg-${activeTab}-${player.rank}`} player={player} />;
+          })}
 
           {visibleCount < leaderboard.length && (
             <div className="py-4 flex justify-center opacity-50">
               <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
             </div>
           )}
+
+          {visibleCount >= leaderboard.length && (
+            <div
+              ref={currentUserRowRef}
+              className={isDocked ? 'visible' : 'invisible pointer-events-none'}
+              aria-hidden={!isDocked}
+            >
+              <CurrentUserFooter user={user} isDocked pulseTrigger={dockPulseKey} />
+            </div>
+          )}
         </div>
 
-        {/* Sticky Footer (ИСПРАВЛЕННЫЙ) */}
-        {/* z-50 поднимает его над списком. bg-slate-900 делает непрозрачным */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 pt-4 bg-transparent z-50">
-          <div className="relative overflow-hidden rounded-2xl bg-slate-900 border-2 border-white/20 shadow-[0_0_50px_rgba(0,0,0,0.8)] p-4 flex items-center">
-            
-            {/* Оставили легкий градиент внутри для стиля, но база непрозрачная */}
-            <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-blue-500/5 via-white/5 to-transparent skew-x-12 opacity-50"></div>
-
-            <div className="flex flex-col items-center justify-center w-12 mr-2 leading-none relative z-10">
-               <span className="text-white/40 font-bold text-[10px] uppercase mb-1">Место</span>
-               <span className="text-white font-black text-sm tracking-tighter">#{currentUserRank.rank.toLocaleString()}</span>
-            </div>
-
-            <div className="w-12 h-12 rounded-full bg-blue-600/20 mr-3 overflow-hidden shrink-0 border-2 border-blue-400/50 flex items-center justify-center shadow-lg relative z-10">
-               <User size={24} className="text-blue-200" />
-            </div>
-
-            <div className="flex-1 relative z-10">
-              <div className="text-white text-base font-black">Вы</div>
-              <div className="text-blue-300/60 text-xs font-bold uppercase tracking-wider">Топ 85%</div>
-            </div>
-
-            <div className="font-mono text-xl font-black text-yellow-400 drop-shadow-md relative z-10">
-              {currentUserRank.score.toLocaleString()}
-            </div>
+        {!isDocked && (
+          <div className="absolute left-1 right-1 z-50 pointer-events-none" style={{ bottom: stickyBottomPx }}>
+            <CurrentUserFooter user={user} isDocked={false} />
           </div>
-        </div>
-
+        )}
       </div>
+
     </div>
   );
 }

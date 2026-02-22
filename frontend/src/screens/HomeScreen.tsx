@@ -1,6 +1,8 @@
+import React from 'react';
 import { motion } from 'framer-motion';
 import { Zap, Target } from 'lucide-react';
 import { useAppStore } from '../stores/store';
+import { StarParticles } from '../components/ui/StarParticles';
 
 export function HomeScreen() {
   const { setScreen, user } = useAppStore();
@@ -10,41 +12,81 @@ export function HomeScreen() {
   };
 
   return (
-    <div className="flex flex-col h-full px-6 pt-4 pb-24 justify-center gap-8">
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ type: 'spring', duration: 0.5 }}
-        className="relative group cursor-pointer"
-        onClick={handlePlayArcade}
-      >
-        <div className="absolute inset-0 bg-purple-500 rounded-3xl blur-xl opacity-40 group-hover:opacity-60 transition-opacity animate-pulse" />
-        <div className="relative bg-white/10 backdrop-blur-xl border border-white/20 p-8 rounded-3xl text-center shadow-2xl overflow-hidden hover:scale-[1.02] transition-transform duration-300">
-          <div className="absolute top-0 right-0 p-4 opacity-20"><Zap size={100} /></div>
-          <h2 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-300 to-pink-300 italic tracking-tighter uppercase mb-2">
-            Arcade
-          </h2>
-          <p className="text-purple-100/70 text-sm font-medium">
-            {'\u0423\u0440\u043E\u0432\u0435\u043D\u044C'} {user?.currentLevel || 1}
-          </p>
-        </div>
-      </motion.div>
+    // Обертка экрана с глобальным фоном (вайб глубокого космоса)
+    // ИСПРАВЛЕНИЕ: вернули h-full вместо h-screen и убрали жесткий overflow-hidden, 
+    // чтобы не ломать родительский layout и не перекрывать нижнюю навигацию
+    <div className="relative flex flex-col h-full w-full bg-[#050511]">
+      
+      <StarParticles 
+        colorRGB="255, 255, 255" 
+        count={60} 
+        speed={0.15} 
+        className="z-0 opacity-60" 
+      />
 
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ type: 'spring', duration: 0.5, delay: 0.1 }}
-        className="relative group cursor-not-allowed opacity-60"
-      >
-        <div className="absolute inset-0 bg-cyan-500 rounded-3xl blur-xl opacity-20" />
-        <div className="relative bg-white/10 backdrop-blur-xl border border-white/20 p-8 rounded-3xl text-center shadow-2xl overflow-hidden">
-          <div className="absolute top-0 right-0 p-4 opacity-20"><Target size={100} /></div>
-          <h2 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-blue-300 italic tracking-tighter uppercase mb-2">
-            Campaign
-          </h2>
-          <p className="text-blue-100/70 text-sm font-medium">{'\u0421\u043A\u043E\u0440\u043E'}</p>
-        </div>
-      </motion.div>
+      {/* Основной контент */}
+      <div className="relative z-10 flex flex-col h-full px-6 pt-4 pb-24 justify-center gap-8">
+        
+        {/* КАРТОЧКА ARCADE */}
+        <motion.button
+          type="button"
+          aria-label="Start Arcade"
+          initial={false}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 0 }}
+          className="relative group cursor-pointer text-left"
+          onClick={handlePlayArcade}
+        >
+          {/* Пульсирующее свечение под карточкой */}
+          <div className="absolute inset-0 bg-purple-500 rounded-3xl blur-xl opacity-40 group-hover:opacity-60 transition-opacity animate-pulse" />
+          
+          {/* Стеклянная карточка с эффектом дыхания */}
+          <motion.div 
+            animate={{ y: [0, -6, 0] }}
+            transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
+            className="relative bg-[#16192d]/60 backdrop-blur-xl border border-white/10 border-t-white/20 p-8 rounded-3xl text-center shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden hover:scale-[1.02] transition-transform duration-300"
+          >
+            {/* Густые магические искры ВНУТРИ кнопки */}
+            <StarParticles 
+              colorRGB="216, 180, 254" // Пурпурно-золотой оттенок
+              count={40} 
+              speed={0.35} 
+              className="z-0 opacity-80" 
+            />
+            
+            <div className="absolute top-0 right-0 p-4 opacity-20 z-10">
+              <Zap size={100} color="white" />
+            </div>
+            
+            <h2 className="relative z-10 text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-300 to-pink-300 italic tracking-tighter uppercase mb-2 drop-shadow-md">
+              Arcade
+            </h2>
+            <p className="relative z-10 text-purple-100/80 text-sm font-medium">
+              Уровень {user?.currentLevel || 1}
+            </p>
+          </motion.div>
+        </motion.button>
+
+        {/* КАРТОЧКА CAMPAIGN */}
+        <motion.div
+          initial={false}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 0 }}
+          className="relative group cursor-not-allowed opacity-60"
+        >
+          <div className="absolute inset-0 bg-cyan-500 rounded-3xl blur-xl opacity-20" />
+          <div className="relative bg-[#0c0e1c]/60 backdrop-blur-xl border border-white/10 border-t-white/20 p-8 rounded-3xl text-center shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-20">
+              <Target size={100} color="white" />
+            </div>
+            <h2 className="relative z-10 text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-blue-300 italic tracking-tighter uppercase mb-2">
+              Campaign
+            </h2>
+            <p className="relative z-10 text-blue-100/70 text-sm font-medium">Скоро</p>
+          </div>
+        </motion.div>
+
+      </div>
     </div>
   );
 }

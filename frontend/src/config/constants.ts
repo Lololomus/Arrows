@@ -201,6 +201,12 @@ export const ANIMATIONS = {
   electricStrike: 300,
 };
 
+export const UI_ANIMATIONS = {
+  fade: 300,
+  scale: 200,
+  spring: { type: "spring", stiffness: 500, damping: 30 },
+};
+
 // ============================================
 // API ENDPOINTS
 // ============================================

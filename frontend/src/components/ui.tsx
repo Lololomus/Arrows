@@ -537,44 +537,6 @@ export function Loader({ text = 'Загрузка...' }: { text?: string }) {
 }
 
 // ============================================
-// BOTTOM NAV
-// ============================================
-
-interface NavItem {
-  id: string;
-  icon: string;
-  label: string;
-}
-
-interface BottomNavProps {
-  items: NavItem[];
-  active: string;
-  onSelect: (id: string) => void;
-}
-
-export function BottomNav({ items, active, onSelect }: BottomNavProps) {
-  return (
-    <nav className="fixed bottom-0 left-0 right-0 pb-safe bg-gradient-to-t from-black/80 to-transparent backdrop-blur-md">
-      <div className="flex justify-around py-2">
-        {items.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => onSelect(item.id)}
-            className={`
-              flex flex-col items-center px-4 py-2 rounded-xl transition-all
-              ${active === item.id ? 'bg-white/10 scale-105' : 'opacity-60'}
-            `}
-          >
-            <span className="text-2xl mb-1">{item.icon}</span>
-            <span className="text-xs text-white">{item.label}</span>
-          </button>
-        ))}
-      </div>
-    </nav>
-  );
-}
-
-// ============================================
 // STAT CARD
 // ============================================
 

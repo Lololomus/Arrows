@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { ShoppingBag, Sparkles, X, Zap, Gift, Package, CheckCircle, Clock } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 // --- ИСПРАВЛЕННЫЕ АНИМАЦИИ (БЕЗ МАСШТАБИРОВАНИЯ) ---
 
@@ -253,6 +253,7 @@ export function ShopScreen() {
   const [rouletteOffset, setRouletteOffset] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
   const [activeSkin, setActiveSkin] = useState<number | null>(4); // По умолчанию Fire Skin активен
+  const timeoutIdsRef = useRef<number[]>([]);
   
   // TODO: Получать из store
   const userInventory = [
@@ -272,12 +273,19 @@ export function ShopScreen() {
 
   // Подсчет дней до истечения
   const getDaysLeft = (expiresAt: string) => {
-    const now = new Date('2026-01-31'); // Текущая дата из system-reminder
+    const now = new Date();
     const expires = new Date(expiresAt);
     const diff = expires.getTime() - now.getTime();
     const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
     return days;
   };
+
+  useEffect(() => {
+    return () => {
+      timeoutIdsRef.current.forEach((id) => window.clearTimeout(id));
+      timeoutIdsRef.current = [];
+    };
+  }, []);
   
   const handleBuy = (item: typeof shopItems[0]) => {
     if (item.category === 'boxes') {
@@ -301,6 +309,8 @@ export function ShopScreen() {
   };
 
   const openMysteryBox = () => {
+    timeoutIdsRef.current.forEach((id) => window.clearTimeout(id));
+    timeoutIdsRef.current = [];
     setIsOpeningBox(true);
     setSelectedItem(null);
     setIsSpinning(true);
@@ -327,9 +337,9 @@ export function ShopScreen() {
     const cardWidth = 168;
     const finalOffset = -(rewardIndex * cardWidth - window.innerWidth / 2 + 72);
     
-    setTimeout(() => setRouletteOffset(finalOffset), 100);
-    setTimeout(() => setIsSpinning(false), 4600);
-    setTimeout(() => setBoxReward(reward!), 5200);
+    timeoutIdsRef.current.push(window.setTimeout(() => setRouletteOffset(finalOffset), 100));
+    timeoutIdsRef.current.push(window.setTimeout(() => setIsSpinning(false), 4600));
+    timeoutIdsRef.current.push(window.setTimeout(() => setBoxReward(reward!), 5200));
   };
 
   const closeBoxReward = () => {

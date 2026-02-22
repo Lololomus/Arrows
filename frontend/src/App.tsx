@@ -1,40 +1,47 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, ClipboardList, Gamepad2, Trophy, ShoppingBag } from 'lucide-react';
 import { useAppStore } from './stores/store';
 import { authApi } from './api/client';
-import { ParticleBackground } from './components/ParticleBackground';
+import { UI_ANIMATIONS } from './config/constants';
+import { Loader } from './components/ui';
+import { BottomNav, type TabId } from './components/BottomNav';
 import { HomeScreen } from './screens/HomeScreen';
 import { GameScreen } from './screens/GameScreen';
-import { ShopScreen } from './screens/ShopScreen';
-import { FriendsScreen } from './screens/FriendsScreen';
-import { TasksScreen } from './screens/TasksScreen';
-import { LeaderboardScreen } from './screens/LeaderboardScreen';
 
+const ShopScreen = lazy(() =>
+  import('./screens/ShopScreen').then((module) => ({ default: module.ShopScreen }))
+);
+const FriendsScreen = lazy(() =>
+  import('./screens/FriendsScreen').then((module) => ({ default: module.FriendsScreen }))
+);
+const TasksScreen = lazy(() =>
+  import('./screens/TasksScreen').then((module) => ({ default: module.TasksScreen }))
+);
+const LeaderboardScreen = lazy(() =>
+  import('./screens/LeaderboardScreen').then((module) => ({ default: module.LeaderboardScreen }))
+);
 
-type TabId = 'friends' | 'tasks' | 'play' | 'leaderboard' | 'shop';
 const DEV_AUTH_ENABLED = ['1', 'true', 'yes', 'on'].includes(
   String(import.meta.env.VITE_ENABLE_DEV_AUTH || '').toLowerCase()
 );
 
-
 export default function App() {
   const { screen, setToken, setUser, setError } = useAppStore();
   const [activeTab, setActiveTab] = useState<TabId>('play');
+  const handleTabChange = useCallback((id: TabId) => setActiveTab(id), []);
+  const openLeaderboardFromFriends = useCallback(() => setActiveTab('leaderboard'), []);
 
-  // 🔐 АВТОРИЗАЦИЯ ПРИ СТАРТЕ
   useEffect(() => {
     let cancelled = false;
 
     const authenticate = async () => {
       setError(null);
       try {
-        // Получаем initData из Telegram WebApp
         const initData = window.Telegram?.WebApp?.initData;
-        
+
         if (!initData) {
           if (DEV_AUTH_ENABLED) {
-            console.warn('⚠️ No Telegram initData - using dev auth fallback');
+            console.warn('No Telegram initData - using dev auth fallback');
             const devUser = await authApi.getMe();
             if (cancelled) return;
             setToken(null);
@@ -44,57 +51,46 @@ export default function App() {
 
           setToken(null);
           setUser(null);
-          setError('Нужен запуск через Telegram Mini App');
+          setError('\u041d\u0443\u0436\u0435\u043d \u0437\u0430\u043f\u0443\u0441\u043a \u0447\u0435\u0440\u0435\u0437 Telegram Mini App');
           return;
         }
-        
-        console.log('🔐 Authenticating...');
+
+        console.log('Authenticating...');
         const response = await authApi.telegram(initData);
         if (cancelled) return;
 
-        // Сохраняем токен и пользователя
         setToken(response.token);
         setUser(response.user);
-        
-        console.log('✅ Authenticated:', response.user.id);
+
+        console.log('Authenticated:', response.user.id);
       } catch (error) {
         if (cancelled) return;
-        console.error('❌ Auth failed:', error);
-        setError('Ошибка авторизации');
+        console.error('Auth failed:', error);
+        setError('\u041e\u0448\u0438\u0431\u043a\u0430 \u0430\u0432\u0442\u043e\u0440\u0438\u0437\u0430\u0446\u0438\u0438');
       }
     };
-    
+
     authenticate();
 
     return () => {
       cancelled = true;
     };
-  }, [setError, setToken, setUser]); // Пустой массив = вызовется ОДИН раз при монтировании
+  }, [setError, setToken, setUser]);
 
-  // Если в игре - показываем GameScreen без табов
   if (screen === 'game') {
     return (
       <div className="relative w-full h-screen overflow-hidden bg-slate-900 font-sans select-none">
-        <ParticleBackground />
         <div className="relative z-10 h-full">
           <GameScreen />
         </div>
       </div>
-    );    
+    );
   }
 
-  const tabs = [
-    { id: 'friends' as TabId, label: 'Друзья', icon: Users },
-    { id: 'tasks' as TabId, label: 'Задания', icon: ClipboardList },
-    { id: 'play' as TabId, label: 'Играть', icon: Gamepad2, isMain: true },
-    { id: 'leaderboard' as TabId, label: 'Топ', icon: Trophy },
-    { id: 'shop' as TabId, label: 'Магазин', icon: ShoppingBag },
-  ];
-
   const getActiveComponent = () => {
-    switch (activeTab) {
+      switch (activeTab) {
       case 'friends':
-        return <FriendsScreen />;
+        return <FriendsScreen onOpenLeaderboard={openLeaderboardFromFriends} />;
       case 'tasks':
         return <TasksScreen />;
       case 'play':
@@ -116,8 +112,7 @@ export default function App() {
         .drop-shadow-glow { filter: drop-shadow(0 0 10px rgba(250, 204, 21, 0.5)); }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
-        
-        /* 📱 SAFE AREA для iPhone notch и home indicator */
+
         .safe-area-top {
           padding-top: var(--app-safe-top);
         }
@@ -132,90 +127,26 @@ export default function App() {
         }
       `}</style>
 
-      {/* Background */}
-      <ParticleBackground />
-
-      {/* Main Container */}
       <div className="relative z-10 flex flex-col h-full max-w-md mx-auto shadow-2xl bg-black/20">
-
-        {/* Content Area */}
         <div className="flex-1 overflow-hidden relative pt-6 safe-area-top">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 1.05, filter: 'blur(10px)' }}
-              transition={{ duration: 0.3 }}
-              className="h-full w-full"
-            >
-              {getActiveComponent()}
-            </motion.div>
+          <AnimatePresence mode="wait" initial={false}>
+            <Suspense fallback={<Loader text="\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430..." />}>
+              <motion.div
+                key={activeTab}
+                initial={false}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: UI_ANIMATIONS.fade / 1000 }}
+                className="h-full w-full"
+              >
+                {getActiveComponent()}
+              </motion.div>
+            </Suspense>
           </AnimatePresence>
         </div>
 
-        {/* Bottom Navigation */}
-        <div className="absolute bottom-0 left-0 w-full bg-black/40 backdrop-blur-xl border-t border-white/10 pb-6 pt-2 px-2 rounded-t-3xl safe-bottom">
-          <div className="flex justify-around items-end">
-            {tabs.map((tab) => {
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`relative flex flex-col items-center justify-center p-2 transition-all duration-300 ${tab.isMain ? '-mt-8' : ''}`}
-                >
-                  {/* Active Indicator Background */}
-                  {isActive && !tab.isMain && (
-                    <motion.div
-                      layoutId="nav-pill"
-                      className="absolute inset-0 bg-gradient-to-b from-white/10 to-transparent rounded-2xl -z-10"
-                      initial={false}
-                      transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                    />
-                  )}
-
-                  {/* Icon Wrapper */}
-                  <motion.div
-                    animate={{
-                      y: isActive ? -4 : 0,
-                      scale: isActive ? 1.1 : 1,
-                    }}
-                    className={`
-                      ${tab.isMain 
-                        ? 'w-16 h-16 bg-gradient-to-tr from-blue-600 to-cyan-500 rounded-full flex items-center justify-center shadow-lg shadow-cyan-500/30 border-4 border-slate-900' 
-                        : 'w-10 h-10 flex items-center justify-center'
-                      }
-                    `}
-                  >
-                    <tab.icon 
-                      size={tab.isMain ? 32 : 24} 
-                      className={isActive ? 'text-white' : 'text-slate-400'}
-                      strokeWidth={isActive ? 2.5 : 2}
-                    />
-                  </motion.div>
-
-                  {/* Label */}
-                  {!tab.isMain && (
-                    <motion.span
-                      animate={{ 
-                        opacity: isActive ? 1 : 0.6, 
-                        scale: isActive ? 1 : 0.9,
-                        color: isActive ? '#ffffff' : '#94a3b8'
-                      }}
-                      className="text-[10px] font-medium mt-1"
-                    >
-                      {tab.label}
-                    </motion.span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
+        <BottomNav activeTab={activeTab} onTabChange={handleTabChange} />
       </div>
     </div>
   );
 }
-
