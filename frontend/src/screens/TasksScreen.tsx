@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ClipboardList, Trophy, Users, Share2, Youtube, Send, CheckCircle2, Lock, Puzzle } from 'lucide-react';
+import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 
 interface Task {
   id: number;
@@ -82,10 +83,8 @@ export function TasksScreen() {
     }
   };
 
-  const sortedTasks = [...tasks].sort((a, b) => {
-    if (a.completed === b.completed) return 0;
-    return a.completed ? -1 : 1;
-  });
+  const completedTasks = tasks.filter((task) => task.completed);
+  const pendingTasks = tasks.filter((task) => !task.completed);
 
   const itemVariant = {
     hidden: { opacity: 0, x: -20 },
@@ -110,10 +109,25 @@ export function TasksScreen() {
   };
 
   return (
-    <div className="px-4 pb-24 pt-4 h-full flex flex-col">
+    <div className="px-4 pb-24 pt-4 h-full flex flex-col relative overflow-hidden">
+      <AdaptiveParticles
+        variant="bg"
+        tone="neutral"
+        baseCount={16}
+        baseSpeed={0.09}
+        className="z-0 opacity-30"
+      />
+
       <div className="mb-6 text-center shrink-0">
-        <div className="relative inline-block">
-          <ClipboardList size={48} className="mx-auto text-purple-400 mb-2 drop-shadow-[0_0_15px_rgba(168,85,247,0.4)]" />
+        <div className="relative inline-block rounded-2xl overflow-hidden">
+          <AdaptiveParticles
+            variant="accent"
+            tone="neutral"
+            baseCount={14}
+            baseSpeed={0.16}
+            className="z-0 opacity-55"
+          />
+          <ClipboardList size={48} className="mx-auto text-purple-400 mb-2 drop-shadow-[0_0_15px_rgba(168,85,247,0.4)] relative z-10" />
         </div>
         <h2 className="text-2xl font-bold text-white">Задания</h2>
         <p className="text-white/60 text-sm">Выполняй задания и получай награды</p>
@@ -148,61 +162,96 @@ export function TasksScreen() {
           {activeTab === 'tasks' ? (
             <motion.div key="tasks" {...tabTransition} className="space-y-3 pb-2">
               <AnimatePresence mode="popLayout">
-                {sortedTasks.map((task, i) => (
+                {completedTasks.length > 0 && (
+                  <div className="relative space-y-3">
+                    <AdaptiveParticles
+                      variant="accent"
+                      tone="green"
+                      baseCount={14}
+                      baseSpeed={0.15}
+                      className="z-0 opacity-55"
+                    />
+                    <div className="relative z-10 space-y-3">
+                      {completedTasks.map((task, i) => (
+                        <motion.div
+                          key={task.id}
+                          layout
+                          custom={i}
+                          variants={itemVariant}
+                          initial="hidden"
+                          animate="visible"
+                          onClick={() => handleTaskClick(task)}
+                          className="relative border rounded-2xl p-4 bg-green-500/10 border-green-500/30 transition-colors overflow-hidden group"
+                        >
+                          <div className="flex items-center gap-4 relative z-10">
+                            <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-colors bg-green-500/20 text-green-400">
+                              <CheckCircle2 size={24} />
+                            </div>
+
+                            <div className="flex-1 min-w-0">
+                              <h3 className="font-bold text-sm mb-1 truncate transition-colors text-green-400">
+                                {task.title}
+                              </h3>
+                              <p className="text-white/50 text-xs truncate">{task.description}</p>
+                            </div>
+
+                            <div className="text-right flex-shrink-0">
+                              <span className="text-xs font-bold text-green-400 uppercase tracking-wider bg-green-400/10 px-2 py-1 rounded-lg">
+                                Выполнено
+                              </span>
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {pendingTasks.map((task, i) => (
                   <motion.div
                     key={task.id}
                     layout
-                    custom={i}
+                    custom={i + completedTasks.length}
                     variants={itemVariant}
                     initial="hidden"
                     animate="visible"
                     onClick={() => handleTaskClick(task)}
                     className={`
                       relative border rounded-2xl p-4
-                      ${task.completed
-                        ? 'bg-green-500/10 border-green-500/30'
-                        : task.locked
-                          ? 'bg-white/5 border-white/5 opacity-50 cursor-not-allowed'
-                          : 'bg-white/5 border-white/10 hover:bg-white/10 cursor-pointer'
+                      ${task.locked
+                        ? 'bg-white/5 border-white/5 opacity-50 cursor-not-allowed'
+                        : 'bg-white/5 border-white/10 hover:bg-white/10 cursor-pointer'
                       }
                       transition-colors overflow-hidden group
                     `}
                   >
-                    {!task.locked && !task.completed && (
+                    {!task.locked && (
                       <div className="absolute inset-0 bg-purple-500/10 opacity-0 group-hover:opacity-100 transition-opacity" />
                     )}
 
                     <div className="flex items-center gap-4 relative z-10">
                       <div className={`
                         w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-colors
-                        ${task.completed
-                          ? 'bg-green-500/20 text-green-400'
-                          : task.locked
-                            ? 'bg-gray-500/20 text-gray-400'
-                            : 'bg-gradient-to-br from-purple-500/20 to-blue-500/20 text-purple-400'
+                        ${task.locked
+                          ? 'bg-gray-500/20 text-gray-400'
+                          : 'bg-gradient-to-br from-purple-500/20 to-blue-500/20 text-purple-400'
                         }
                       `}>
-                        {task.completed ? <CheckCircle2 size={24} /> : <task.icon size={24} />}
+                        <task.icon size={24} />
                       </div>
 
                       <div className="flex-1 min-w-0">
-                        <h3 className={`font-bold text-sm mb-1 truncate transition-colors ${task.completed ? 'text-green-400' : 'text-white'}`}>
+                        <h3 className="font-bold text-sm mb-1 truncate transition-colors text-white">
                           {task.title}
                         </h3>
                         <p className="text-white/50 text-xs truncate">{task.description}</p>
                       </div>
 
                       <div className="text-right flex-shrink-0">
-                        {task.completed ? (
-                          <span className="text-xs font-bold text-green-400 uppercase tracking-wider bg-green-400/10 px-2 py-1 rounded-lg">
-                            Выполнено
-                          </span>
-                        ) : (
-                          <div className="flex flex-col items-end">
-                            <div className="text-yellow-400 font-bold text-lg leading-none">+{task.reward}</div>
-                            <div className="text-yellow-400/60 text-[10px] uppercase mt-1">монет</div>
-                          </div>
-                        )}
+                        <div className="flex flex-col items-end">
+                          <div className="text-yellow-400 font-bold text-lg leading-none">+{task.reward}</div>
+                          <div className="text-yellow-400/60 text-[10px] uppercase mt-1">монет</div>
+                        </div>
                       </div>
                     </div>
                   </motion.div>
@@ -211,10 +260,17 @@ export function TasksScreen() {
             </motion.div>
           ) : (
             <motion.div key="fragments" {...tabTransition} className="h-full flex items-center justify-center px-2">
-              <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 backdrop-blur-lg p-6 text-center">
-                <Puzzle size={42} className="mx-auto text-white/50 mb-3" />
-                <h3 className="text-white text-xl font-bold mb-2">Фрагменты</h3>
-                <p className="text-white/60 text-sm">Скоро появится</p>
+              <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 backdrop-blur-lg p-6 text-center relative overflow-hidden">
+                <AdaptiveParticles
+                  variant="accent"
+                  tone="neutral"
+                  baseCount={12}
+                  baseSpeed={0.14}
+                  className="z-0 opacity-55"
+                />
+                <Puzzle size={42} className="mx-auto text-white/50 mb-3 relative z-10" />
+                <h3 className="text-white text-xl font-bold mb-2 relative z-10">Фрагменты</h3>
+                <p className="text-white/60 text-sm relative z-10">Скоро появится</p>
               </div>
             </motion.div>
           )}

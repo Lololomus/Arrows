@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { Users, Share2, Copy, Trophy } from 'lucide-react';
 import { useAppStore } from '../stores/store';
+import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 
 interface FriendsScreenProps {
   onOpenLeaderboard?: () => void;
@@ -44,7 +45,15 @@ export function FriendsScreen({ onOpenLeaderboard }: FriendsScreenProps) {
   };
 
   return (
-    <div className="px-4 pb-24 h-full flex flex-col pt-4">
+    <div className="px-4 pb-24 h-full flex flex-col pt-4 relative overflow-hidden">
+      <AdaptiveParticles
+        variant="bg"
+        tone="neutral"
+        baseCount={18}
+        baseSpeed={0.1}
+        className="z-0 opacity-30"
+      />
+
       <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-1 mb-6 flex relative border border-white/10 shrink-0">
         <div className="absolute top-1 bottom-1 left-1 right-1 flex">
           <div className="flex-1">
@@ -72,15 +81,33 @@ export function FriendsScreen({ onOpenLeaderboard }: FriendsScreenProps) {
             className="space-y-6"
           >
             <div className="grid grid-cols-2 gap-3">
-              <div className="bg-gradient-to-br from-yellow-500/20 to-orange-500/20 border border-yellow-500/30 rounded-2xl p-4 text-center">
-                <div className="text-3xl mb-2">💰</div>
-                <div className="text-yellow-400 font-bold text-lg">+200</div>
-                <div className="text-yellow-200/60 text-xs">монет тебе</div>
+              <div className="relative rounded-2xl overflow-hidden">
+                <AdaptiveParticles
+                  variant="accent"
+                  tone="gold"
+                  baseCount={18}
+                  baseSpeed={0.2}
+                  className="z-0 opacity-75"
+                />
+                <div className="relative z-10 bg-gradient-to-br from-yellow-500/20 to-orange-500/20 border border-yellow-500/30 rounded-2xl p-4 text-center">
+                  <div className="text-3xl mb-2">💰</div>
+                  <div className="text-yellow-400 font-bold text-lg">+200</div>
+                  <div className="text-yellow-200/60 text-xs">монет тебе</div>
+                </div>
               </div>
-              <div className="bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-blue-500/30 rounded-2xl p-4 text-center">
-                <div className="text-3xl mb-2">🎁</div>
-                <div className="text-cyan-400 font-bold text-lg">+100</div>
-                <div className="text-cyan-200/60 text-xs">монет другу</div>
+              <div className="relative rounded-2xl overflow-hidden">
+                <AdaptiveParticles
+                  variant="accent"
+                  tone="cyan"
+                  baseCount={18}
+                  baseSpeed={0.2}
+                  className="z-0 opacity-75"
+                />
+                <div className="relative z-10 bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-blue-500/30 rounded-2xl p-4 text-center">
+                  <div className="text-3xl mb-2">🎁</div>
+                  <div className="text-cyan-400 font-bold text-lg">+100</div>
+                  <div className="text-cyan-200/60 text-xs">монет другу</div>
+                </div>
               </div>
             </div>
 
@@ -96,8 +123,20 @@ export function FriendsScreen({ onOpenLeaderboard }: FriendsScreenProps) {
               </div>
             </div>
 
-            <button onClick={handleShare} className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-blue-500/20">
-              <Share2 size={20} className="inline mr-2 mb-1" /> Пригласить друга
+            <button
+              onClick={handleShare}
+              className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-blue-500/20 relative overflow-hidden"
+            >
+              <AdaptiveParticles
+                variant="accent"
+                tone="neutral"
+                baseCount={16}
+                baseSpeed={0.18}
+                className="z-0 opacity-60"
+              />
+              <span className="relative z-10">
+                <Share2 size={20} className="inline mr-2 mb-1" /> Пригласить друга
+              </span>
             </button>
           </motion.div>
 
@@ -107,36 +146,45 @@ export function FriendsScreen({ onOpenLeaderboard }: FriendsScreenProps) {
               <p className="text-white/50 text-xs text-center mt-1">Всего: {friends.length}</p>
             </div>
 
-            <div className="space-y-3 pb-4">
-              {friends.map((friend, i) => (
-                <motion.div
-                  key={friend.id}
-                  custom={i}
-                  variants={itemVariant}
-                  initial="hidden"
-                  animate="visible"
-                  className="flex items-center justify-between bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/5"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="text-white/30 font-bold text-lg w-6 text-center">{i + 1}</div>
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-2xl">
-                      {friend.avatar}
-                    </div>
-                    <div className="text-white font-medium text-sm">{friend.name}</div>
-                  </div>
-                  <div
-                    className={`text-xs px-3 py-1.5 rounded-lg font-medium ${
-                      friend.status === 'online'
-                        ? 'bg-green-500/20 text-green-300'
-                        : friend.status === 'playing'
-                          ? 'bg-purple-500/20 text-purple-300'
-                          : 'bg-gray-500/20 text-gray-400'
-                    }`}
+            <div className="relative">
+              <AdaptiveParticles
+                variant="accent"
+                tone="blue"
+                baseCount={16}
+                baseSpeed={0.15}
+                className="z-0 opacity-45"
+              />
+              <div className="relative z-10 space-y-3 pb-4">
+                {friends.map((friend, i) => (
+                  <motion.div
+                    key={friend.id}
+                    custom={i}
+                    variants={itemVariant}
+                    initial="hidden"
+                    animate="visible"
+                    className="flex items-center justify-between bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/5"
                   >
-                    {friend.status === 'online' ? '🟢 Онлайн' : friend.status === 'playing' ? '🎮 Играет' : '⚫ Оффлайн'}
-                  </div>
-                </motion.div>
-              ))}
+                    <div className="flex items-center gap-4">
+                      <div className="text-white/30 font-bold text-lg w-6 text-center">{i + 1}</div>
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-2xl">
+                        {friend.avatar}
+                      </div>
+                      <div className="text-white font-medium text-sm">{friend.name}</div>
+                    </div>
+                    <div
+                      className={`text-xs px-3 py-1.5 rounded-lg font-medium ${
+                        friend.status === 'online'
+                          ? 'bg-green-500/20 text-green-300'
+                          : friend.status === 'playing'
+                            ? 'bg-purple-500/20 text-purple-300'
+                            : 'bg-gray-500/20 text-gray-400'
+                      }`}
+                    >
+                      {friend.status === 'online' ? '🟢 Онлайн' : friend.status === 'playing' ? '🎮 Играет' : '⚫ Оффлайн'}
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
             </div>
           </div>
         </motion.div>

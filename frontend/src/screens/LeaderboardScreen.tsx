@@ -3,6 +3,7 @@ import { useState, useMemo, useRef, useEffect, useCallback, memo } from 'react';
 import { motion } from 'framer-motion';
 import { Trophy, Gift, Gamepad2, Target } from 'lucide-react';
 import { useAppStore } from '../stores/store';
+import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { StarParticles } from '../components/ui/StarParticles';
 
 // --- ХЕЛПЕРЫ ДЛЯ TELEGRAM ---
@@ -69,6 +70,24 @@ const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Play
   const styles = RANK_STYLES[player.rank];
   const [isStamped, setIsStamped] = useState(!animateEntry);
   const [showShockwave, setShowShockwave] = useState(false);
+  const topParticleProfile = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return { enabled: true, count: 20, speed: 0.28 };
+    }
+
+    const isReducedMotion = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (isReducedMotion) {
+      return { enabled: false, count: 20, speed: 0.28 };
+    }
+
+    const hardwareConcurrency = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 8 : 8;
+    const isLowEnd = hardwareConcurrency <= 4 || (window.devicePixelRatio || 1) > 2.5;
+    if (isLowEnd) {
+      return { enabled: true, count: 11, speed: 0.238 };
+    }
+
+    return { enabled: true, count: 20, speed: 0.28 };
+  }, []);
 
   const handleStampComplete = useCallback(() => {
     if (!animateEntry) return; 
@@ -95,9 +114,13 @@ const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Play
           className="absolute inset-0 bg-white/30 rounded-2xl pointer-events-none z-10"
         />
       )}
-      {isStamped && styles.particleColor && (
+      {isStamped && styles.particleColor && topParticleProfile.enabled && (
         <div className="absolute inset-0 z-0 opacity-80 mix-blend-screen pointer-events-none overflow-hidden">
-          <StarParticles colorRGB={styles.particleColor} count={30} speed={0.35} />
+          <StarParticles
+            colorRGB={styles.particleColor}
+            count={topParticleProfile.count}
+            speed={topParticleProfile.speed}
+          />
         </div>
       )}
       <div className="flex items-center justify-center w-8 mr-2 relative z-20 shrink-0">
@@ -334,14 +357,28 @@ export function LeaderboardScreen() {
   }, [leaderboard.length]);
 
   return (
-    <div className="px-4 h-full flex flex-col pt-4 relative">
+    <div className="px-4 h-full flex flex-col pt-4 relative overflow-hidden">
+      <AdaptiveParticles
+        variant="bg"
+        tone="blue"
+        baseCount={18}
+        baseSpeed={0.09}
+        className="z-0 opacity-35"
+      />
       
       {/* Banner */}
       <div className="bg-gradient-to-b from-yellow-500/20 to-transparent p-6 rounded-3xl border border-yellow-500/30 mb-6 text-center relative overflow-hidden shrink-0">
+        <AdaptiveParticles
+          variant="accent"
+          tone="gold"
+          baseCount={14}
+          baseSpeed={0.16}
+          className="z-0 opacity-55"
+        />
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-yellow-500/20 blur-3xl -z-10"></div>
-        <Trophy size={56} className="mx-auto text-yellow-400 mb-2 drop-shadow-glow" />
-        <h2 className="text-3xl font-black text-white uppercase tracking-wide drop-shadow-md">Сезон #1</h2>
-        <div className="inline-flex items-center gap-2 mt-2 bg-black/30 px-3 py-1 rounded-full border border-white/10">
+        <Trophy size={56} className="mx-auto text-yellow-400 mb-2 drop-shadow-glow relative z-10" />
+        <h2 className="text-3xl font-black text-white uppercase tracking-wide drop-shadow-md relative z-10">Сезон #1</h2>
+        <div className="inline-flex items-center gap-2 mt-2 bg-black/30 px-3 py-1 rounded-full border border-white/10 relative z-10">
           <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
           <p className="text-yellow-200/80 text-xs font-mono">14д 08ч 15м</p>
         </div>

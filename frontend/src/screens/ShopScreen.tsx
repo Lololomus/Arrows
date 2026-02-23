@@ -1,6 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { ShoppingBag, Sparkles, X, Zap, Gift, Package, CheckCircle, Clock } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 
 // --- ИСПРАВЛЕННЫЕ АНИМАЦИИ (БЕЗ МАСШТАБИРОВАНИЯ) ---
 
@@ -403,7 +404,14 @@ export function ShopScreen() {
         </div>
 
         <div className="relative flex-1 overflow-hidden px-4 pb-24">
-          <div className="absolute inset-0 rounded-3xl border border-white/10 bg-gray-950/85 backdrop-blur-md flex items-center justify-center">
+          <AdaptiveParticles
+            variant="bg"
+            tone="neutral"
+            baseCount={12}
+            baseSpeed={0.08}
+            className="z-0 opacity-25"
+          />
+          <div className="absolute inset-0 rounded-3xl border border-white/10 bg-gray-950/85 backdrop-blur-md flex items-center justify-center z-10">
             <div className="text-center">
               <div className="text-white font-black text-5xl tracking-wider uppercase">СКОРО</div>
               <p className="text-white/60 text-sm mt-3">Магазин и инвентарь временно недоступны</p>
@@ -467,8 +475,16 @@ export function ShopScreen() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-24">
-        {activeTab === 'shop' ? (
+      <div className="relative flex-1 overflow-y-auto custom-scrollbar px-4 pb-24">
+        <AdaptiveParticles
+          variant="bg"
+          tone="neutral"
+          baseCount={12}
+          baseSpeed={0.08}
+          className="z-0 opacity-20"
+        />
+        <div className="relative z-10">
+          {activeTab === 'shop' ? (
           
           /* --- SHOP TAB --- */
           /* Оборачиваем ВЕСЬ таб в motion.div с containerVariants для запуска каскада */
@@ -480,9 +496,16 @@ export function ShopScreen() {
           >
             {/* Header */}
             <div className="mb-6 text-center">
-              <div className="relative inline-block">
-                <ShoppingBag size={48} className="mx-auto text-cyan-400 mb-2 drop-shadow-[0_0_15px_rgba(34,211,238,0.4)]" />
-                <Sparkles size={20} className="absolute -top-1 -right-1 text-yellow-400 animate-pulse" />
+              <div className="relative inline-block rounded-2xl overflow-hidden">
+                <AdaptiveParticles
+                  variant="hero"
+                  tone="cyan"
+                  baseCount={12}
+                  baseSpeed={0.14}
+                  className="z-0 opacity-60"
+                />
+                <ShoppingBag size={48} className="mx-auto text-cyan-400 mb-2 drop-shadow-[0_0_15px_rgba(34,211,238,0.4)] relative z-10" />
+                <Sparkles size={20} className="absolute -top-1 -right-1 text-yellow-400 animate-pulse z-10" />
               </div>
               <h2 className="text-2xl font-bold text-white mb-1">Магазин</h2>
               <p className="text-white/60 text-sm">Улучшай свою игру</p>
@@ -785,7 +808,8 @@ export function ShopScreen() {
               </div>
             )}
           </motion.div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Item Details Modal */}

@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { Zap, Target } from 'lucide-react';
 import { useAppStore } from '../stores/store';
-import { StarParticles } from '../components/ui/StarParticles';
+import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 
 export function HomeScreen() {
   const { setScreen, user } = useAppStore();
@@ -17,11 +17,12 @@ export function HomeScreen() {
     // чтобы не ломать родительский layout и не перекрывать нижнюю навигацию
     <div className="relative flex flex-col h-full w-full bg-[#050511]">
       
-      <StarParticles 
-        colorRGB="255, 255, 255" 
-        count={60} 
-        speed={0.15} 
-        className="z-0 opacity-60" 
+      <AdaptiveParticles
+        variant="bg"
+        tone="neutral"
+        baseCount={40}
+        baseSpeed={0.12}
+        className="z-0 opacity-60"
       />
 
       {/* Основной контент */}
@@ -47,11 +48,12 @@ export function HomeScreen() {
             className="relative bg-[#16192d]/60 backdrop-blur-xl border border-white/10 border-t-white/20 p-8 rounded-3xl text-center shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden hover:scale-[1.02] transition-transform duration-300"
           >
             {/* Густые магические искры ВНУТРИ кнопки */}
-            <StarParticles 
-              colorRGB="216, 180, 254" // Пурпурно-золотой оттенок
-              count={40} 
-              speed={0.35} 
-              className="z-0 opacity-80" 
+            <AdaptiveParticles
+              variant="accent"
+              tone="violet"
+              baseCount={24}
+              baseSpeed={0.22}
+              className="z-0 opacity-80"
             />
             
             <div className="absolute top-0 right-0 p-4 opacity-20 z-10">
