@@ -1,8 +1,19 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
+  content: {
+    relative: true,
+    files: [
+      "./index.html",
+      "./src/**/*.{js,ts,jsx,tsx}",
+    ],
+  },
+  safelist: [
+    "top-1/3",
+    "drop-shadow-[0_0_18px_rgba(255,255,255,0.3)]",
+    "bg-[#16192d]/60",
+    "bg-[#0c0e1c]/60",
+    "hover:scale-[1.02]",
+    "shadow-[0_8px_32px_rgba(0,0,0,0.5)]",
   ],
   theme: {
     extend: {

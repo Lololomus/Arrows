@@ -1,12 +1,14 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import '@fontsource/bungee-inline';
 import { useAppStore } from './stores/store';
 import { authApi } from './api/client';
 import { UI_ANIMATIONS } from './config/constants';
-import { Loader } from './components/ui';
+import { SmartLoader } from './components/ui/SmartLoader';
 import { BottomNav, type TabId } from './components/BottomNav';
 import { HomeScreen } from './screens/HomeScreen';
 import { GameScreen } from './screens/GameScreen';
+import nonGameBackgroundUrl from './assets/background.webp?url';
 
 const ShopScreen = lazy(() =>
   import('./screens/ShopScreen').then((module) => ({ default: module.ShopScreen }))
@@ -24,6 +26,7 @@ const LeaderboardScreen = lazy(() =>
 const DEV_AUTH_ENABLED = ['1', 'true', 'yes', 'on'].includes(
   String(import.meta.env.VITE_ENABLE_DEV_AUTH || '').toLowerCase()
 );
+const ENABLE_NON_GAME_BACKGROUND = true; // one-line toggle
 
 export default function App() {
   const { screen, setToken, setUser, setError } = useAppStore();
@@ -127,10 +130,20 @@ export default function App() {
         }
       `}</style>
 
-      <div className="relative z-10 flex flex-col h-full max-w-md mx-auto shadow-2xl bg-black/20">
-        <div className="flex-1 overflow-hidden relative pt-6 safe-area-top">
+      <div className="relative z-10 flex flex-col h-full max-w-md mx-auto shadow-2xl bg-black/20 overflow-hidden">
+        {ENABLE_NON_GAME_BACKGROUND && (
+          <div className="absolute inset-0 pointer-events-none z-0">
+            <div
+              className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+              style={{ backgroundImage: `url(${nonGameBackgroundUrl})` }}
+            />
+            <div className="absolute inset-0 bg-slate-950/55" />
+          </div>
+        )}
+
+        <div className="flex-1 overflow-hidden relative pt-6 safe-area-top z-10">
           <AnimatePresence mode="wait" initial={false}>
-            <Suspense fallback={<Loader text="\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430..." />}>
+            <Suspense fallback={<SmartLoader text="\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430..." delayMs={180} />}>
               <motion.div
                 key={activeTab}
                 initial={false}
@@ -145,7 +158,9 @@ export default function App() {
           </AnimatePresence>
         </div>
 
-        <BottomNav activeTab={activeTab} onTabChange={handleTabChange} />
+        <div className="relative z-10">
+          <BottomNav activeTab={activeTab} onTabChange={handleTabChange} />
+        </div>
       </div>
     </div>
   );

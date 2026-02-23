@@ -5,6 +5,7 @@ import { Trophy, Gift, Gamepad2, Target } from 'lucide-react';
 import { useAppStore } from '../stores/store';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { StarParticles } from '../components/ui/StarParticles';
+import { useParticleRuntimeProfile } from '../components/ui/particleRuntimeProfile';
 
 // --- ХЕЛПЕРЫ ДЛЯ TELEGRAM ---
 const triggerHaptic = (style: 'light' | 'medium' | 'heavy' | 'selection') => {
@@ -70,24 +71,17 @@ const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Play
   const styles = RANK_STYLES[player.rank];
   const [isStamped, setIsStamped] = useState(!animateEntry);
   const [showShockwave, setShowShockwave] = useState(false);
+  const { isReducedMotion, isLowEnd, isPageVisible } = useParticleRuntimeProfile();
   const topParticleProfile = useMemo(() => {
-    if (typeof window === 'undefined') {
-      return { enabled: true, count: 20, speed: 0.28 };
-    }
-
-    const isReducedMotion = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (isReducedMotion) {
       return { enabled: false, count: 20, speed: 0.28 };
     }
-
-    const hardwareConcurrency = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 8 : 8;
-    const isLowEnd = hardwareConcurrency <= 4 || (window.devicePixelRatio || 1) > 2.5;
     if (isLowEnd) {
       return { enabled: true, count: 11, speed: 0.238 };
     }
 
     return { enabled: true, count: 20, speed: 0.28 };
-  }, []);
+  }, [isReducedMotion, isLowEnd]);
 
   const handleStampComplete = useCallback(() => {
     if (!animateEntry) return; 
@@ -120,6 +114,7 @@ const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Play
             colorRGB={styles.particleColor}
             count={topParticleProfile.count}
             speed={topParticleProfile.speed}
+            running={isPageVisible}
           />
         </div>
       )}

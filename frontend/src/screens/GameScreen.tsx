@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Arrow Puzzle - Game Screen (VIEWPORT CANVAS)
  *
  * ИЗМЕНЕНИЯ:
@@ -18,6 +18,7 @@ import { RefreshCw, Lightbulb, RotateCcw, AlertTriangle, Heart, Trash2, ZoomIn, 
 import { ANIMATIONS, MAX_CELL_SIZE, MIN_CELL_SIZE } from '../config/constants';
 import { processMove, getFreeArrows, isArrowBlocked } from '../game/engine';
 import { FXOverlay } from '../components/FXOverlay';
+import { LevelTransitionLoader } from '../components/ui/LevelTransitionLoader';
 
 import gameBgImage from '../assets/game-bg.jpg?url';
 
@@ -533,10 +534,7 @@ export function GameScreen() {
                 </motion.div>
             </div>
           ) : status === 'loading' ? (
-            <div className="flex h-full items-center justify-center flex-col">
-              <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="w-16 h-16 border-4 border-white/20 border-t-white rounded-full mb-4" />
-              <span className="text-white/70 text-sm font-medium">Загрузка...</span>
-            </div>
+            <LevelTransitionLoader level={currentLevel} />
           ) : (
             <CanvasBoard
               key={`canvas-${currentLevel}`}

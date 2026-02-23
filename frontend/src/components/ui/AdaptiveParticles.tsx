@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { StarParticles } from './StarParticles';
+import { useParticleRuntimeProfile } from './particleRuntimeProfile';
 
 export type ParticleVariant = 'bg' | 'accent' | 'hero';
 export type ParticleTone = 'neutral' | 'blue' | 'violet' | 'gold' | 'cyan' | 'green';
@@ -28,49 +29,6 @@ const TONE_RGB: Record<ParticleTone, string> = {
   green: '74, 222, 128',
 };
 
-function useReducedMotion() {
-  const [isReduced, setIsReduced] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const sync = () => setIsReduced(mediaQuery.matches);
-    sync();
-
-    if (typeof mediaQuery.addEventListener === 'function') {
-      mediaQuery.addEventListener('change', sync);
-      return () => mediaQuery.removeEventListener('change', sync);
-    }
-
-    if (typeof mediaQuery.addListener === 'function') {
-      mediaQuery.addListener(sync);
-      return () => mediaQuery.removeListener(sync);
-    }
-  }, []);
-
-  return isReduced;
-}
-
-function useLowEndProfile() {
-  const [isLowEnd, setIsLowEnd] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const sync = () => {
-      const hardwareConcurrency = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 8 : 8;
-      const dpr = window.devicePixelRatio || 1;
-      setIsLowEnd(hardwareConcurrency <= 4 || dpr > 2.5);
-    };
-
-    sync();
-    window.addEventListener('resize', sync);
-    return () => window.removeEventListener('resize', sync);
-  }, []);
-
-  return isLowEnd;
-}
-
 export function AdaptiveParticles({
   variant,
   tone = 'neutral',
@@ -79,8 +37,7 @@ export function AdaptiveParticles({
   baseCount,
   baseSpeed,
 }: AdaptiveParticlesProps) {
-  const isReducedMotion = useReducedMotion();
-  const isLowEnd = useLowEndProfile();
+  const { isReducedMotion, isLowEnd, isPageVisible } = useParticleRuntimeProfile();
 
   const shouldRender = enabled && (!isReducedMotion || variant === 'bg');
 
@@ -113,6 +70,7 @@ export function AdaptiveParticles({
       colorRGB={TONE_RGB[tone]}
       count={count}
       speed={speed}
+      running={isPageVisible}
       className={className}
     />
   );
