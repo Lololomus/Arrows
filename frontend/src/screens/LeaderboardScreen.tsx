@@ -1,7 +1,7 @@
 // ===== 📄 ФАЙЛ: frontend/src/screens/LeaderboardScreen.tsx =====
 import { useState, useMemo, useRef, useEffect, useCallback, memo } from 'react';
 import { motion } from 'framer-motion';
-import { Trophy, Gift, Gamepad2, Target } from 'lucide-react';
+import { Trophy, Gift } from 'lucide-react';
 import { useAppStore } from '../stores/store';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { StarParticles } from '../components/ui/StarParticles';
@@ -28,6 +28,8 @@ interface Player {
   avatarSeed: number;
 }
 
+type LeaderboardTab = 'arcade' | 'campaign';
+
 const RANK_STYLES: Record<number, { bg: string; border: string; rankClass: string; icon: string; particleColor?: string }> = {
   1: { bg: 'bg-[#3f3113]', border: 'border-[#ca8a04]/30', rankClass: 'text-yellow-400 drop-shadow-glow', icon: '👑', particleColor: '255, 215, 0' },
   2: { bg: 'bg-[#2c303a]', border: 'border-[#94a3b8]/30', rankClass: 'text-gray-300', icon: '🥈', particleColor: '176, 196, 222' },
@@ -45,6 +47,62 @@ const generateLeaderboard = (count: number): Player[] => {
     avatarSeed: i + 1
   }));
 };
+
+const INITIAL_VISIBLE_COUNT = 15;
+const SKELETON_MIN_VISIBLE_MS = 240;
+const AVATAR_PRELOAD_TIMEOUT_MS = 1400;
+
+const getAvatarUrl = (seed: number) => `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}`;
+
+const waitMs = (ms: number) => new Promise<void>((resolve) => {
+  window.setTimeout(resolve, ms);
+});
+
+const waitFrame = () => new Promise<void>((resolve) => {
+  requestAnimationFrame(() => resolve());
+});
+
+function preloadImage(src: string, timeoutMs = AVATAR_PRELOAD_TIMEOUT_MS): Promise<void> {
+  return new Promise((resolve) => {
+    const image = new Image();
+    let settled = false;
+    let timeoutId: number | null = null;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      image.onload = null;
+      image.onerror = null;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+      resolve();
+    };
+
+    timeoutId = window.setTimeout(finish, timeoutMs);
+    image.onload = finish;
+    image.onerror = finish;
+    image.src = src;
+
+    if (image.complete) {
+      finish();
+      return;
+    }
+
+    if (typeof image.decode === 'function') {
+      image.decode().then(finish).catch(() => {
+        // fallback to onload/onerror/timeout
+      });
+    }
+  });
+}
+
+async function prepareLeaderboardForDisplay(players: Player[]): Promise<void> {
+  const visiblePlayers = players.slice(0, INITIAL_VISIBLE_COUNT);
+  await Promise.allSettled(visiblePlayers.map((player) => preloadImage(getAvatarUrl(player.avatarSeed))));
+  await waitFrame();
+  await waitFrame();
+}
 
 // --- КОМПОНЕНТ: ASYNC AVATAR ---
 const AsyncAvatar = memo(({ seed, rank, photoUrl }: { seed: number, rank?: number, photoUrl?: string }) => {
@@ -165,6 +223,44 @@ const RegularLeaderboardItem = memo(({ player }: { player: Player }) => {
 });
 RegularLeaderboardItem.displayName = 'RegularLeaderboardItem';
 
+const SkeletonLeaderboardItem = memo(({ rank }: { rank: number }) => {
+  const isTop = rank <= 3;
+  const topStyles = RANK_STYLES[rank];
+  const cardClass = isTop
+    ? `${topStyles.bg} ${topStyles.border} shadow-lg`
+    : `${DEFAULT_RANK_STYLE.bg} ${DEFAULT_RANK_STYLE.border}`;
+
+  return (
+    <div className={`flex items-center p-4 rounded-2xl border relative overflow-hidden h-[82px] mb-3 ${cardClass}`}>
+      <div className="flex items-center justify-center w-8 mr-2 relative z-10 shrink-0">
+        {isTop ? (
+          <span className="text-2xl opacity-35">{topStyles.icon}</span>
+        ) : (
+          <div className="h-5 w-5 rounded-md bg-white/10 animate-pulse" />
+        )}
+      </div>
+      <div className="relative z-10 mr-3">
+        <div className={`w-12 h-12 rounded-full bg-white/10 animate-pulse ${isTop ? 'ring-2 ring-white/10' : ''}`} />
+      </div>
+      <div className="flex-1 min-w-0 relative z-10 py-1">
+        <div className="h-4 w-28 rounded bg-white/12 animate-pulse mb-2" />
+        {isTop && <div className="h-2.5 w-24 rounded bg-white/10 animate-pulse" />}
+      </div>
+      <div className="h-5 w-16 rounded bg-white/12 animate-pulse" />
+    </div>
+  );
+});
+SkeletonLeaderboardItem.displayName = 'SkeletonLeaderboardItem';
+
+const LeaderboardSkeleton = memo(({ count = INITIAL_VISIBLE_COUNT }: { count?: number }) => (
+  <>
+    {Array.from({ length: count }).map((_, index) => (
+      <SkeletonLeaderboardItem key={`skeleton-${index}`} rank={index + 1} />
+    ))}
+  </>
+));
+LeaderboardSkeleton.displayName = 'LeaderboardSkeleton';
+
 // --- КОМПОНЕНТ: ДИНАМИЧЕСКИЙ ФУТЕР ТЕКУЩЕГО ИГРОКА ---
 const CARD_GAP_PX = 12;
 const BOTTOM_NAV_SELECTOR = '[data-bottom-nav]';
@@ -232,12 +328,6 @@ const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger }: { user: any, i
 
       <div className="flex-1 min-w-0 relative z-10 py-1">
         <div className="text-white text-base font-bold truncate">{currentUserRank.username}</div>
-        <motion.div
-           animate={{ color: isDocked ? 'rgba(165, 243, 252, 0.85)' : 'rgba(147, 197, 253, 0.8)' }}
-           className="text-xs font-bold uppercase tracking-wider"
-        >
-           Топ 85%
-        </motion.div>
       </div>
 
       <div className={`font-mono text-xl font-black drop-shadow-md relative z-10 transition-colors ${isDocked ? 'text-blue-200' : 'text-cyan-300'}`}>
@@ -250,8 +340,11 @@ CurrentUserFooter.displayName = 'CurrentUserFooter';
 
 // --- ОСНОВНОЙ ЭКРАН ---
 export function LeaderboardScreen() {
-  const [activeTab, setActiveTab] = useState<'arcade' | 'campaign'>('arcade');
-  const [visibleCount, setVisibleCount] = useState(15);
+  const [activeTab, setActiveTab] = useState<LeaderboardTab>('arcade');
+  const [displayTab, setDisplayTab] = useState<LeaderboardTab>('arcade');
+  const [isSwitchingTab, setIsSwitchingTab] = useState(false);
+  const [listRenderVersion, setListRenderVersion] = useState(0);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
   const [isDocked, setIsDocked] = useState(false);
   const [dockPulseKey, setDockPulseKey] = useState(0);
   const [bottomNavHeight, setBottomNavHeight] = useState(96);
@@ -259,11 +352,16 @@ export function LeaderboardScreen() {
   const { user } = useAppStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentUserRowRef = useRef<HTMLDivElement>(null);
-  const isFirstMount = useRef(true);
-  const visibleCountRef = useRef(15);
+  const visibleCountRef = useRef(INITIAL_VISIBLE_COUNT);
+  const switchRequestIdRef = useRef(0);
 
-  const leaderboard = useMemo(() => generateLeaderboard(100), []);
+  const leaderboards = useMemo<Record<LeaderboardTab, Player[]>>(() => ({
+    arcade: generateLeaderboard(100),
+    campaign: generateLeaderboard(100),
+  }), []);
+  const leaderboard = leaderboards[displayTab];
   const stickyBottomPx = bottomNavHeight + CARD_GAP_PX;
+  const shouldAnimateListEnter = listRenderVersion > 0;
 
   useEffect(() => {
     const nav = document.querySelector(BOTTOM_NAV_SELECTOR) as HTMLElement | null;
@@ -302,7 +400,7 @@ export function LeaderboardScreen() {
 
     observer.observe(target);
     return () => observer.disconnect();
-  }, [visibleCount, leaderboard.length, activeTab]);
+  }, [visibleCount, leaderboard.length, displayTab]);
 
   // ИСПРАВЛЕНО: Звук/отклик при стыковке обрабатывается через эффект, чтобы не спамить
   const prevDocked = useRef(isDocked);
@@ -317,16 +415,45 @@ export function LeaderboardScreen() {
     }
   }, [isDocked]);
 
-  const handleTabChange = useCallback((tab: 'arcade' | 'campaign') => {
-    if (tab === activeTab) return;
-    isFirstMount.current = false; 
+  useEffect(() => () => {
+    switchRequestIdRef.current += 1;
+  }, []);
+
+  const handleTabChange = useCallback((tab: LeaderboardTab) => {
+    if (tab === activeTab && !isSwitchingTab) return;
+
+    const requestId = switchRequestIdRef.current + 1;
+    switchRequestIdRef.current = requestId;
     triggerHaptic('selection');
     setActiveTab(tab);
-    setVisibleCount(15);
-    visibleCountRef.current = 15;
-    setIsDocked(false); 
+    setIsSwitchingTab(true);
+    setIsDocked(false);
+    setVisibleCount(INITIAL_VISIBLE_COUNT);
+    visibleCountRef.current = INITIAL_VISIBLE_COUNT;
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
-  }, [activeTab]);
+
+    const startedAt = performance.now();
+    const targetLeaderboard = leaderboards[tab];
+
+    void (async () => {
+      try {
+        await prepareLeaderboardForDisplay(targetLeaderboard);
+        const elapsed = performance.now() - startedAt;
+        if (elapsed < SKELETON_MIN_VISIBLE_MS) {
+          await waitMs(SKELETON_MIN_VISIBLE_MS - elapsed);
+        }
+
+        if (switchRequestIdRef.current !== requestId) return;
+
+        setDisplayTab(tab);
+        setListRenderVersion((prev) => prev + 1);
+      } finally {
+        if (switchRequestIdRef.current === requestId) {
+          setIsSwitchingTab(false);
+        }
+      }
+    })();
+  }, [activeTab, isSwitchingTab, leaderboards]);
 
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
@@ -390,10 +517,10 @@ export function LeaderboardScreen() {
           ) : <div className="flex-1" />}
         </div>
         <button onClick={() => handleTabChange('arcade')} className={`flex-1 py-3 text-sm font-bold z-10 transition-colors flex items-center justify-center gap-2 ${activeTab === 'arcade' ? 'text-white' : 'text-white/50'}`}>
-          <Gamepad2 size={16} /> Arcade
+          <span aria-hidden="true">🕹</span> Arcade
         </button>
         <button onClick={() => handleTabChange('campaign')} className={`flex-1 py-3 text-sm font-bold z-10 transition-colors flex items-center justify-center gap-2 ${activeTab === 'campaign' ? 'text-white' : 'text-white/50'}`}>
-          <Target size={16} /> Campaign
+          <span aria-hidden="true">⚡️</span> Adventure
         </button>
       </div>
 
@@ -401,35 +528,46 @@ export function LeaderboardScreen() {
       <div className="flex-1 overflow-hidden relative rounded-t-2xl">
         <div 
           ref={scrollRef} 
-          onScroll={handleScroll}
+          onScroll={isSwitchingTab ? undefined : handleScroll}
           style={{ paddingBottom: stickyBottomPx }}
           className="h-full overflow-y-auto overflow-x-hidden custom-scrollbar px-1"
         >
-          {leaderboard.slice(0, visibleCount).map((player, i) => {
-            if (player.rank <= 3) {
-              return <TopLeaderboardItem key={`top-${activeTab}-${player.rank}`} player={player} index={i} animateEntry={isFirstMount.current} />;
-            }
-            return <RegularLeaderboardItem key={`reg-${activeTab}-${player.rank}`} player={player} />;
-          })}
-
-          {visibleCount < leaderboard.length && (
-            <div className="py-4 flex justify-center opacity-50">
-              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-            </div>
-          )}
-
-          {visibleCount >= leaderboard.length && (
-            <div
-              ref={currentUserRowRef}
-              className={isDocked ? 'visible' : 'invisible pointer-events-none'}
-              aria-hidden={!isDocked}
+          {isSwitchingTab ? (
+            <LeaderboardSkeleton />
+          ) : (
+            <motion.div
+              key={`${displayTab}-${listRenderVersion}`}
+              initial={shouldAnimateListEnter ? { opacity: 0, y: 10, filter: 'blur(4px)' } : false}
+              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              transition={shouldAnimateListEnter ? { duration: 0.28, ease: 'easeOut' } : { duration: 0 }}
             >
-              <CurrentUserFooter user={user} isDocked pulseTrigger={dockPulseKey} />
-            </div>
+              {leaderboard.slice(0, visibleCount).map((player, i) => {
+                if (player.rank <= 3) {
+                  return <TopLeaderboardItem key={`top-${displayTab}-${player.rank}`} player={player} index={i} animateEntry={true} />;
+                }
+                return <RegularLeaderboardItem key={`reg-${displayTab}-${player.rank}`} player={player} />;
+              })}
+
+              {visibleCount < leaderboard.length && (
+                <div className="py-4 flex justify-center opacity-50">
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                </div>
+              )}
+
+              {visibleCount >= leaderboard.length && (
+                <div
+                  ref={currentUserRowRef}
+                  className={isDocked ? 'visible' : 'invisible pointer-events-none'}
+                  aria-hidden={!isDocked}
+                >
+                  <CurrentUserFooter user={user} isDocked pulseTrigger={dockPulseKey} />
+                </div>
+              )}
+            </motion.div>
           )}
         </div>
 
-        {!isDocked && (
+        {!isSwitchingTab && !isDocked && (
           <div className="absolute left-1 right-1 z-50 pointer-events-none" style={{ bottom: stickyBottomPx }}>
             <CurrentUserFooter user={user} isDocked={false} />
           </div>

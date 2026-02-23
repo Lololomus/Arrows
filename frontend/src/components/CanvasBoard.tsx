@@ -828,7 +828,7 @@ function drawArrow(
     const head = arrow.cells[0];
     const hx = head.x * cellSize + half + dir.dx * bounceOffset;
     const hy = head.y * cellSize + half + dir.dy * bounceOffset;
-    const sz = cellSize * 0.3;
+    const sz = cellSize * 0.7;
     ctx.save();
     ctx.translate(hx, hy);
     ctx.rotate(dir.angle * (Math.PI / 180));

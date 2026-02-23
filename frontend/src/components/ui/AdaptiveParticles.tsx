@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { StarParticles } from './StarParticles';
+import { StarParticles, type StarSizeProfile } from './StarParticles';
 import { useParticleRuntimeProfile } from './particleRuntimeProfile';
 
 export type ParticleVariant = 'bg' | 'accent' | 'hero';
@@ -12,6 +12,7 @@ interface AdaptiveParticlesProps {
   enabled?: boolean;
   baseCount?: number;
   baseSpeed?: number;
+  sizeProfile?: StarSizeProfile;
 }
 
 const VARIANT_DEFAULTS: Record<ParticleVariant, { count: number; speed: number }> = {
@@ -36,6 +37,7 @@ export function AdaptiveParticles({
   enabled = true,
   baseCount,
   baseSpeed,
+  sizeProfile,
 }: AdaptiveParticlesProps) {
   const { isReducedMotion, isLowEnd, isPageVisible } = useParticleRuntimeProfile();
 
@@ -71,6 +73,7 @@ export function AdaptiveParticles({
       count={count}
       speed={speed}
       running={isPageVisible}
+      sizeProfile={sizeProfile}
       className={className}
     />
   );

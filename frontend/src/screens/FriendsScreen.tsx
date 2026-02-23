@@ -13,7 +13,7 @@ export function FriendsScreen({ onOpenLeaderboard }: FriendsScreenProps) {
   const friends = [
     { id: 1, name: 'Alexey_K', status: 'online', avatar: '👨‍💻' },
     { id: 2, name: 'CryptoLord', status: 'offline', avatar: '🦸' },
-    { id: 3, name: 'Masha_Win', status: 'playing', avatar: '👩‍🎨' },
+    { id: 3, name: 'Masha_Win', status: 'offline', avatar: '👩‍🎨' },
     { id: 4, name: 'Dmitry_Pro', status: 'online', avatar: '🧑‍🚀' },
     { id: 5, name: 'Anna_Top', status: 'offline', avatar: '👩‍🔬' },
   ];
@@ -175,12 +175,10 @@ export function FriendsScreen({ onOpenLeaderboard }: FriendsScreenProps) {
                       className={`text-xs px-3 py-1.5 rounded-lg font-medium ${
                         friend.status === 'online'
                           ? 'bg-green-500/20 text-green-300'
-                          : friend.status === 'playing'
-                            ? 'bg-purple-500/20 text-purple-300'
-                            : 'bg-gray-500/20 text-gray-400'
+                          : 'bg-gray-500/20 text-gray-400'
                       }`}
                     >
-                      {friend.status === 'online' ? '🟢 Онлайн' : friend.status === 'playing' ? '🎮 Играет' : '⚫ Оффлайн'}
+                      {friend.status === 'online' ? '🟢 Онлайн' : '⚫ Оффлайн'}
                     </div>
                   </motion.div>
                 ))}

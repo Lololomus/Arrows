@@ -1,14 +1,78 @@
 import { useCallback, useEffect, useRef } from 'react';
 
+export type StarSizeTier = 'small' | 'medium' | 'large';
+export interface StarSizeProfile {
+  small: number;
+  medium: number;
+  large: number;
+}
+
 interface StarParticlesProps {
   colorRGB?: string;
   count?: number;
   speed?: number;
   className?: string;
   running?: boolean;
+  sizeProfile?: StarSizeProfile;
 }
 
 const spriteCache: Record<string, HTMLCanvasElement> = {};
+const DEFAULT_SIZE_PROFILE: StarSizeProfile = { small: 0.6, medium: 0.32, large: 0.08 };
+
+function normalizeSizeProfile(profile?: StarSizeProfile): StarSizeProfile {
+  const source = profile ?? DEFAULT_SIZE_PROFILE;
+  const small = Math.max(0, source.small);
+  const medium = Math.max(0, source.medium);
+  const large = Math.max(0, source.large);
+  const total = small + medium + large;
+
+  if (total <= 0) return DEFAULT_SIZE_PROFILE;
+
+  return {
+    small: small / total,
+    medium: medium / total,
+    large: large / total,
+  };
+}
+
+function buildTierSequence(count: number, profile?: StarSizeProfile): StarSizeTier[] {
+  const normalized = normalizeSizeProfile(profile);
+  const tierWeights: Array<{ tier: StarSizeTier; weight: number }> = [
+    { tier: 'small', weight: normalized.small },
+    { tier: 'medium', weight: normalized.medium },
+    { tier: 'large', weight: normalized.large },
+  ];
+
+  const rawCounts = tierWeights.map((item) => item.weight * count);
+  const floorCounts = rawCounts.map((value) => Math.floor(value));
+  let assigned = floorCounts[0] + floorCounts[1] + floorCounts[2];
+  let remainder = Math.max(0, count - assigned);
+
+  if (remainder > 0) {
+    const rankedByFraction = rawCounts
+      .map((value, index) => ({ index, fraction: value - floorCounts[index] }))
+      .sort((a, b) => b.fraction - a.fraction);
+
+    let pointer = 0;
+    while (remainder > 0) {
+      floorCounts[rankedByFraction[pointer].index] += 1;
+      remainder -= 1;
+      pointer = (pointer + 1) % rankedByFraction.length;
+    }
+  }
+
+  const tiers: StarSizeTier[] = [];
+  for (let i = 0; i < floorCounts[0]; i++) tiers.push('small');
+  for (let i = 0; i < floorCounts[1]; i++) tiers.push('medium');
+  for (let i = 0; i < floorCounts[2]; i++) tiers.push('large');
+
+  for (let i = tiers.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [tiers[i], tiers[j]] = [tiers[j], tiers[i]];
+  }
+
+  return tiers;
+}
 
 function getOrCreateStarSprite(colorRGB: string): HTMLCanvasElement {
   if (spriteCache[colorRGB]) {
@@ -48,6 +112,7 @@ class StarParticle {
   height: number;
   sprite: HTMLCanvasElement;
   baseSpeed: number;
+  sizeTier: StarSizeTier;
 
   x!: number;
   y!: number;
@@ -57,11 +122,12 @@ class StarParticle {
   pulseSpeed!: number;
   baseOpacity!: number;
 
-  constructor(width: number, height: number, sprite: HTMLCanvasElement, baseSpeed: number) {
+  constructor(width: number, height: number, sprite: HTMLCanvasElement, baseSpeed: number, sizeTier: StarSizeTier) {
     this.width = width;
     this.height = height;
     this.sprite = sprite;
     this.baseSpeed = baseSpeed;
+    this.sizeTier = sizeTier;
     this.reset(true);
   }
 
@@ -69,12 +135,11 @@ class StarParticle {
     this.x = Math.random() * this.width;
     this.y = initial ? Math.random() * this.height : this.height + Math.random() * 20;
 
-    const sizeRandomizer = Math.random();
-    if (sizeRandomizer > 0.92) {
+    if (this.sizeTier === 'large') {
       this.size = Math.random() * 20 + 16;
       this.speed = this.baseSpeed * 1.8 + Math.random() * 0.5;
       this.baseOpacity = 0.6 + Math.random() * 0.4;
-    } else if (sizeRandomizer > 0.6) {
+    } else if (this.sizeTier === 'medium') {
       this.size = Math.random() * 10 + 6;
       this.speed = this.baseSpeed * 1.2 + Math.random() * 0.3;
       this.baseOpacity = 0.4 + Math.random() * 0.4;
@@ -115,14 +180,15 @@ class CanvasSystem {
   logicalHeight = 0;
   dpr = 1;
 
-  constructor(canvas: HTMLCanvasElement, count: number, colorRGB: string, speed: number) {
+  constructor(canvas: HTMLCanvasElement, count: number, colorRGB: string, speed: number, sizeProfile?: StarSizeProfile) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: true });
     this.sprite = getOrCreateStarSprite(colorRGB);
 
     this.resize();
+    const tiers = buildTierSequence(count, sizeProfile);
     for (let i = 0; i < count; i++) {
-      this.particles.push(new StarParticle(this.logicalWidth, this.logicalHeight, this.sprite, speed));
+      this.particles.push(new StarParticle(this.logicalWidth, this.logicalHeight, this.sprite, speed, tiers[i] ?? 'small'));
     }
   }
 
@@ -157,6 +223,7 @@ export function StarParticles({
   speed = 0.2,
   className = '',
   running = true,
+  sizeProfile,
 }: StarParticlesProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const systemRef = useRef<CanvasSystem | null>(null);
@@ -189,7 +256,7 @@ export function StarParticles({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const system = new CanvasSystem(canvas, count, colorRGB, speed);
+    const system = new CanvasSystem(canvas, count, colorRGB, speed, sizeProfile);
     systemRef.current = system;
 
     let resizeObserver: ResizeObserver | null = null;
@@ -217,7 +284,7 @@ export function StarParticles({
       }
       systemRef.current = null;
     };
-  }, [colorRGB, count, speed, startLoop, stopLoop]);
+  }, [colorRGB, count, speed, sizeProfile, startLoop, stopLoop]);
 
   useEffect(() => {
     if (running) {

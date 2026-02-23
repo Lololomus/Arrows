@@ -143,7 +143,7 @@ export default function App() {
 
         <div className="flex-1 overflow-hidden relative pt-6 safe-area-top z-10">
           <AnimatePresence mode="wait" initial={false}>
-            <Suspense fallback={<SmartLoader text="\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430..." delayMs={180} />}>
+            <Suspense fallback={<SmartLoader delayMs={180} />}>
               <motion.div
                 key={activeTab}
                 initial={false}

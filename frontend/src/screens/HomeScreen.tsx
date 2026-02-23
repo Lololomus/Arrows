@@ -1,7 +1,8 @@
 import { motion } from 'framer-motion';
-import { Zap, Target } from 'lucide-react';
 import { useAppStore } from '../stores/store';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
+
+const HOME_BG_STAR_SIZE_PROFILE = { small: 0.8, medium: 0.16, large: 0.04 } as const;
 
 const titleContainer = {
   hidden: {},
@@ -37,8 +38,9 @@ export function HomeScreen() {
       <AdaptiveParticles
         variant="bg"
         tone="neutral"
-        baseCount={40}
+        baseCount={84}
         baseSpeed={0.12}
+        sizeProfile={HOME_BG_STAR_SIZE_PROFILE}
         className="z-0 opacity-60"
       />
 
@@ -92,7 +94,7 @@ export function HomeScreen() {
               />
 
               <div className="absolute top-0 right-0 p-4 opacity-20 z-10">
-                <Zap size={100} color="white" />
+                <span className="text-7xl leading-none">🕹️</span>
               </div>
 
               <h2
@@ -116,13 +118,13 @@ export function HomeScreen() {
             <div className="absolute inset-0 bg-cyan-500 rounded-3xl blur-xl opacity-20" />
             <div className="relative bg-[#0c0e1c]/60 backdrop-blur-xl border border-white/10 border-t-white/20 p-8 rounded-3xl text-center shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden">
               <div className="absolute top-0 right-0 p-4 opacity-20">
-                <Target size={100} color="white" />
+                <span className="text-7xl leading-none">⚡️</span>
               </div>
               <h2
                 style={displayTitleFont}
                 className="relative z-10 text-4xl text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-blue-300 tracking-wider uppercase mb-2"
               >
-                Campaign
+                Adventure
               </h2>
               <p className="relative z-10 text-blue-100/70 text-sm font-medium">Скоро</p>
             </div>
