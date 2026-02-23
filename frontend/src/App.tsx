@@ -80,9 +80,60 @@ export default function App() {
     };
   }, [setError, setToken, setUser]);
 
+  useEffect(() => {
+    if (!ENABLE_NON_GAME_BACKGROUND) return;
+
+    let disposed = false;
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = nonGameBackgroundUrl;
+
+    const waitForLoad = () => new Promise<void>((resolve) => {
+      if (img.complete) {
+        resolve();
+        return;
+      }
+
+      const done = () => {
+        img.onload = null;
+        img.onerror = null;
+        resolve();
+      };
+
+      img.onload = done;
+      img.onerror = done;
+    });
+
+    void (async () => {
+      await waitForLoad();
+      if (disposed) return;
+      if (typeof img.decode === 'function') {
+        try {
+          await img.decode();
+        } catch {
+          // ignore decode failures: loaded image is enough for warm cache
+        }
+      }
+    })();
+
+    return () => {
+      disposed = true;
+      img.onload = null;
+      img.onerror = null;
+    };
+  }, []);
+
   if (screen === 'game') {
     return (
       <div className="relative w-full h-screen overflow-hidden bg-slate-900 font-sans select-none">
+        {ENABLE_NON_GAME_BACKGROUND && (
+          <div className="absolute inset-0 pointer-events-none opacity-0" aria-hidden="true">
+            <div
+              className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+              style={{ backgroundImage: `url(${nonGameBackgroundUrl})` }}
+            />
+          </div>
+        )}
         <div className="relative z-10 h-full">
           <GameScreen />
         </div>

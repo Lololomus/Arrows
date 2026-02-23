@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { GridArrowHeartbeatLoader } from './GridArrowHeartbeatLoader';
+import { GridArrowPopFlyLoader } from './GridArrowPopFlyLoader';
 
 interface SmartLoaderProps {
   delayMs?: number;
@@ -28,7 +28,7 @@ export function SmartLoader({
 
   return (
     <div className={`h-full w-full flex items-center justify-center px-6 ${className}`}>
-      <GridArrowHeartbeatLoader size={78} ariaLabel="Loading" />
+      <GridArrowPopFlyLoader size={78} ariaLabel="Loading" showText={false} withBackdrop />
     </div>
   );
 }
