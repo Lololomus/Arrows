@@ -47,6 +47,7 @@ const GRID_PADDING_CELLS = 0.4;
 export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, springScale, active }: FXOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
+  const wakeUpRef = useRef<() => void>(() => {});
 
   const arrows = useGameStore(s => s.arrows);
   const skin = useActiveSkin();
@@ -84,6 +85,11 @@ export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, 
       }
     }
     prevArrowsRef.current = currentIds;
+
+    // Step 2: Wake up render loop if sleeping and there's work
+    if (flyingArrowsRef.current.length > 0 && animFrameRef.current === 0) {
+      wakeUpRef.current();
+    }
   }, [arrows, active, skin.animation.flyDuration]);
 
   // ============================================
@@ -97,7 +103,7 @@ export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
     const resizeCanvas = () => {
       canvas.width = window.innerWidth * dpr;
@@ -117,7 +123,8 @@ export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, 
 
       const flying = flyingArrowsRef.current;
       if (flying.length === 0) {
-        animFrameRef.current = requestAnimationFrame(render);
+        // Step 2: Sleep — no work to do, stop rAF loop
+        animFrameRef.current = 0;
         return;
       }
 
@@ -170,8 +177,16 @@ export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, 
 
     animFrameRef.current = requestAnimationFrame(render);
 
+    // Step 2: Allow detection useEffect to restart sleeping loop
+    wakeUpRef.current = () => {
+      if (animFrameRef.current === 0) {
+        animFrameRef.current = requestAnimationFrame(render);
+      }
+    };
+
     return () => {
       window.removeEventListener('resize', resizeCanvas);
+      wakeUpRef.current = () => {};
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
   }, [active, cellSize, gridSize.width, gridSize.height, skin, springScale, springX, springY, containerRef]);

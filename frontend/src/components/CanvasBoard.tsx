@@ -130,29 +130,47 @@ export function CanvasBoard({
   const errorFlashRef = useRef<ErrorFlash | null>(null);
 
   const containerSizeRef = useRef({ w: window.innerWidth, h: window.innerHeight });
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
   const totalBoardW = (gridSize.width + GRID_PADDING_CELLS) * cellSize;
   const totalBoardH = (gridSize.height + GRID_PADDING_CELLS) * cellSize;
   const boardPadding = cellSize * (GRID_PADDING_CELLS / 2);
 
-  // Текущие занятые ячейки
-  const currentOccupied = useMemo(() => {
-    const set = new Set<string>();
+  // --- STEP 3: Numeric cell encoding (no string alloc) ---
+  // Encode cell as single number: y * MAX_W + x. MAX_W must exceed any grid width.
+  const MAX_W = 1024; // supports grids up to 1024 wide
+
+  // Текущие занятые ячейки — numeric Set (no string keys)
+  const currentOccupiedNum = useMemo(() => {
+    const set = new Set<number>();
     for (const arrow of arrows) {
-      for (const cell of arrow.cells) set.add(`${cell.x},${cell.y}`);
+      for (const cell of arrow.cells) set.add(cell.y * MAX_W + cell.x);
     }
     return set;
   }, [arrows]);
 
-  // Начальные ячейки (фиксируются при mount = старт уровня)
-  const initialCellsRef = useRef<Set<string>>(currentOccupied);
-  if (initialCellsRef.current.size === 0 && currentOccupied.size > 0) {
-    initialCellsRef.current = currentOccupied;
+  // Pre-parsed coordinate arrays for drawing (avoid split/map in hot path)
+  const initialCellsParsed = useRef<{ x: number; y: number }[]>([]);
+  const initialOccupiedNum = useRef<Set<number>>(new Set());
+
+  if (initialOccupiedNum.current.size === 0 && currentOccupiedNum.size > 0) {
+    initialOccupiedNum.current = new Set(currentOccupiedNum);
+    const arr: { x: number; y: number }[] = [];
+    for (const arrow of arrows) {
+      for (const cell of arrow.cells) arr.push({ x: cell.x, y: cell.y });
+    }
+    initialCellsParsed.current = arr;
   }
 
   // blocked set для O(1) lookup в рендере
   const blockedSet = useMemo(() => new Set(blockedArrowIds), [blockedArrowIds]);
+
+  // --- STEP 5: Offscreen canvas for static layers (background + grid dots) ---
+  const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const staticDirtyRef = useRef(true);
+
+  // Mark static layer dirty when arrows change (removal) or skin changes
+  useEffect(() => { staticDirtyRef.current = true; }, [arrows, skin]);
 
   // ============================================
   // SCREEN → GRID CONVERSION
@@ -432,11 +450,52 @@ export function CanvasBoard({
         totalBoardW, totalBoardH, boardPadding, cellSize,
       );
 
-      // 0. Подложка
-      drawBoardBackground(ctx, cellSize, initialCellsRef.current);
+      // 0+1. Static layers via offscreen canvas (Step 5)
+      const gridW = gridSize.width * cellSize;
+      const gridH = gridSize.height * cellSize;
 
-      // 1. Grid dots
-      drawGridDots(ctx, cellSize, initialCellsRef.current, currentOccupied, skin);
+      if (staticDirtyRef.current || !staticCanvasRef.current) {
+        // Create or resize offscreen canvas
+        let offscreen = staticCanvasRef.current;
+        if (!offscreen || offscreen.width !== gridW || offscreen.height !== gridH) {
+          offscreen = document.createElement('canvas');
+          offscreen.width = gridW;
+          offscreen.height = gridH;
+          staticCanvasRef.current = offscreen;
+        }
+        const offCtx = offscreen.getContext('2d');
+        if (offCtx) {
+          offCtx.clearRect(0, 0, gridW, gridH);
+          drawBoardBackground(offCtx, cellSize, initialCellsParsed.current);
+          drawGridDots(offCtx, cellSize, initialCellsParsed.current, currentOccupiedNum, MAX_W, skin);
+        }
+        staticDirtyRef.current = false;
+      }
+
+      if (staticCanvasRef.current) {
+        // Step 9: Only draw visible portion of static canvas when zoomed in
+        const halfVpW = cw / 2 / camScale;
+        const halfVpH = ch / 2 / camScale;
+        const vpCX = -camX / camScale + totalBoardW / 2 - boardPadding;
+        const vpCY = -camY / camScale + totalBoardH / 2 - boardPadding;
+        const margin = cellSize;
+
+        const sx = Math.max(0, Math.floor(vpCX - halfVpW - margin));
+        const sy = Math.max(0, Math.floor(vpCY - halfVpH - margin));
+        const sx2 = Math.min(gridW, Math.ceil(vpCX + halfVpW + margin));
+        const sy2 = Math.min(gridH, Math.ceil(vpCY + halfVpH + margin));
+        const sw = sx2 - sx;
+        const sh = sy2 - sy;
+
+        if (sw > 0 && sh > 0) {
+          // Full grid visible → simple drawImage (no sub-rect overhead)
+          if (sx === 0 && sy === 0 && sw >= gridW && sh >= gridH) {
+            ctx.drawImage(staticCanvasRef.current, 0, 0);
+          } else {
+            ctx.drawImage(staticCanvasRef.current, sx, sy, sw, sh, sx, sy, sw, sh);
+          }
+        }
+      }
 
       // 2. Стрелки
       let hasAnimations = isIntro;
@@ -502,9 +561,20 @@ export function CanvasBoard({
       }
     };
     wakeUpRenderRef.current = wakeUp;
-    const unsubX = springX.on('change', wakeUp);
-    const unsubY = springY.on('change', wakeUp);
-    const unsubScale = springScale.on('change', wakeUp);
+
+    // Step 8: Throttled spring wakeUp — ignore micro-drift < 0.5px / 0.001 scale
+    const lastSpring = { x: springX.get(), y: springY.get(), s: springScale.get() };
+    const springWake = () => {
+      const x = springX.get(), y = springY.get(), s = springScale.get();
+      if (Math.abs(x - lastSpring.x) < 0.5
+       && Math.abs(y - lastSpring.y) < 0.5
+       && Math.abs(s - lastSpring.s) < 0.001) return;
+      lastSpring.x = x; lastSpring.y = y; lastSpring.s = s;
+      wakeUp();
+    };
+    const unsubX = springX.on('change', springWake);
+    const unsubY = springY.on('change', springWake);
+    const unsubScale = springScale.on('change', springWake);
 
     return () => {
       isRunning = false;
@@ -512,7 +582,7 @@ export function CanvasBoard({
       unsubX(); unsubY(); unsubScale();
     };
   }, [
-    arrows, gridSize, cellSize, currentOccupied, hintedArrowId, blockedSet,
+    arrows, gridSize, cellSize, currentOccupiedNum, hintedArrowId, blockedSet,
     totalBoardW, totalBoardH, boardPadding, dpr, skin,
     springX, springY, springScale,
   ]);
@@ -560,34 +630,50 @@ function getVisibleArrowsFromCamera(
   camX: number, camY: number, camScale: number,
   totalBoardW: number, totalBoardH: number, boardPadding: number, cellSize: number,
 ): Arrow[] {
-  if (camScale <= 1) return arrows;
+  // Step 6: Compute viewport AABB in world-space for ANY scale
   const halfVpW = containerW / 2 / camScale;
   const halfVpH = containerH / 2 / camScale;
   const vpCX = -camX / camScale + totalBoardW / 2 - boardPadding;
   const vpCY = -camY / camScale + totalBoardH / 2 - boardPadding;
   const margin = cellSize * 2;
-  return arrows.filter(a =>
-    a.cells.some(c => {
-      const px = c.x * cellSize;
-      const py = c.y * cellSize;
-      return px >= vpCX - halfVpW - margin && px <= vpCX + halfVpW + margin
-          && py >= vpCY - halfVpH - margin && py <= vpCY + halfVpH + margin;
-    })
-  );
+
+  const left = vpCX - halfVpW - margin;
+  const right = vpCX + halfVpW + margin;
+  const top = vpCY - halfVpH - margin;
+  const bottom = vpCY + halfVpH + margin;
+
+  // Fast path: if viewport covers entire grid, skip filtering
+  const gridPixelW = totalBoardW - 2 * boardPadding;
+  const gridPixelH = totalBoardH - 2 * boardPadding;
+  if (left <= 0 && top <= 0 && right >= gridPixelW && bottom >= gridPixelH) {
+    return arrows;
+  }
+
+  // Filter by head cell only (cheaper than .some(cells))
+  const result: Arrow[] = [];
+  for (let i = 0; i < arrows.length; i++) {
+    const head = arrows[i].cells[0];
+    const px = head.x * cellSize;
+    const py = head.y * cellSize;
+    if (px >= left && px <= right && py >= top && py <= bottom) {
+      result.push(arrows[i]);
+    }
+  }
+  return result;
 }
 
 // ============================================
 // DRAWING: Background, Grid Dots
 // ============================================
 
-function drawBoardBackground(ctx: CanvasRenderingContext2D, cellSize: number, occupiedCells: Set<string>) {
-  if (occupiedCells.size === 0) return;
+function drawBoardBackground(ctx: CanvasRenderingContext2D, cellSize: number, cells: { x: number; y: number }[]) {
+  if (cells.length === 0) return;
   const pad = cellSize * 0.15;
   const radius = cellSize * 0.22;
   ctx.save();
   ctx.beginPath();
-  for (const key of occupiedCells) {
-    const [x, y] = key.split(',').map(Number);
+  for (let i = 0; i < cells.length; i++) {
+    const { x, y } = cells[i];
     ctx.roundRect(x * cellSize - pad, y * cellSize - pad, cellSize + pad * 2, cellSize + pad * 2, radius);
   }
   ctx.fillStyle = 'rgba(15, 23, 42, 0.65)';
@@ -595,13 +681,13 @@ function drawBoardBackground(ctx: CanvasRenderingContext2D, cellSize: number, oc
   ctx.restore();
 }
 
-function drawGridDots(ctx: CanvasRenderingContext2D, cellSize: number, initialCells: Set<string>, currentOccupied: Set<string>, skin: GameSkin) {
+function drawGridDots(ctx: CanvasRenderingContext2D, cellSize: number, initialCells: { x: number; y: number }[], currentOccupied: Set<number>, MAX_W: number, skin: GameSkin) {
   const half = cellSize / 2;
   const dotR = cellSize * skin.geometry.gridDotRadius;
   ctx.fillStyle = skin.colors.gridDotColor;
-  for (const key of initialCells) {
-    if (currentOccupied.has(key)) continue;
-    const [x, y] = key.split(',').map(Number);
+  for (let i = 0; i < initialCells.length; i++) {
+    const { x, y } = initialCells[i];
+    if (currentOccupied.has(y * MAX_W + x)) continue;
     ctx.beginPath();
     ctx.arc(x * cellSize + half, y * cellSize + half, dotR, 0, Math.PI * 2);
     ctx.fill();
@@ -749,6 +835,15 @@ function drawErrorVignette(ctx: CanvasRenderingContext2D, width: number, height:
 }
 
 // ============================================
+// STATIC POINT BUFFER (Step 4: zero-alloc drawArrow)
+// ============================================
+
+const _ptBuf: { x: number; y: number }[] = [];
+function ensurePtBuf(len: number) {
+  while (_ptBuf.length < len) _ptBuf.push({ x: 0, y: 0 });
+}
+
+// ============================================
 // DRAWING: Arrow
 // ============================================
 
@@ -767,10 +862,9 @@ function drawArrow(
   let needsWhiteHighlight = false;
 
   if (isBlocked) {
-    // Fallback для изначально красных стрелок
     const upperColor = arrow.color.toUpperCase();
     if (upperColor === '#FF3B30' || upperColor === '#FF0000' || upperColor === '#FF2D55') {
-      strokeColor = '#8B0000'; // Тёмно-бордовый
+      strokeColor = '#8B0000';
       needsWhiteHighlight = true;
     } else {
       strokeColor = BLOCKED_COLOR;
@@ -781,51 +875,61 @@ function drawArrow(
 
   if (isBlocked) { ctx.save(); ctx.globalAlpha = BLOCKED_ALPHA; }
 
-  const cellsReversed = [...arrow.cells].reverse();
-  const points = cellsReversed.map(c => ({
-    x: c.x * cellSize + half,
-    y: c.y * cellSize + half,
-  }));
-
-  if (points.length > 1) {
-    const last = points[points.length - 1];
-    last.x -= dir.dx * headGap;
-    last.y -= dir.dy * headGap;
+  // Step 4: fill static buffer reversed (tail→head), zero allocs
+  const cells = arrow.cells;
+  const len = cells.length;
+  ensurePtBuf(len);
+  for (let i = 0; i < len; i++) {
+    const c = cells[len - 1 - i];
+    _ptBuf[i].x = c.x * cellSize + half;
+    _ptBuf[i].y = c.y * cellSize + half;
   }
 
-  const geometricLength = Math.max(0, (arrow.cells.length - 1) * cellSize - headGap);
+  if (len > 1) {
+    _ptBuf[len - 1].x -= dir.dx * headGap;
+    _ptBuf[len - 1].y -= dir.dy * headGap;
+  }
+
+  const geometricLength = Math.max(0, (len - 1) * cellSize - headGap);
 
   const buildPath = () => {
     ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
-    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
-    // Продлеваем путь вперёд для анимации змейки, чтобы было куда "упираться"
-    if (bounceOffset > 0 && points.length > 0) {
-      const last = points[points.length - 1];
-      ctx.lineTo(last.x + dir.dx * bounceOffset, last.y + dir.dy * bounceOffset);
+    ctx.moveTo(_ptBuf[0].x, _ptBuf[0].y);
+    for (let i = 1; i < len; i++) ctx.lineTo(_ptBuf[i].x, _ptBuf[i].y);
+    if (bounceOffset > 0 && len > 0) {
+      ctx.lineTo(
+        _ptBuf[len - 1].x + dir.dx * bounceOffset,
+        _ptBuf[len - 1].y + dir.dy * bounceOffset,
+      );
     }
   };
 
   // LOD
   if (isLOD) {
-    if (points.length >= 2) {
+    if (len >= 2) {
       buildPath();
       if (bounceOffset > 0) {
         ctx.setLineDash([geometricLength, 20000]);
         ctx.lineDashOffset = -bounceOffset;
       }
       if (needsWhiteHighlight) {
-        ctx.shadowColor = 'white';
-        ctx.shadowBlur = 4;
+        // Step 7: wide white stroke instead of shadowBlur
+        buildPath();
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = strokeWidth * 1.5 + 4;
+        ctx.globalAlpha = 0.35;
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.stroke();
+        ctx.globalAlpha = isBlocked ? BLOCKED_ALPHA : 1;
+        buildPath();
       }
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = strokeWidth * 1.5;
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       ctx.stroke();
       ctx.setLineDash([]);
-      if (needsWhiteHighlight) ctx.shadowBlur = 0;
     }
-    const head = arrow.cells[0];
+    const head = cells[0];
     const hx = head.x * cellSize + half + dir.dx * bounceOffset;
     const hy = head.y * cellSize + half + dir.dy * bounceOffset;
     const sz = cellSize * 0.7;
@@ -850,7 +954,7 @@ function drawArrow(
   }
 
   // Full detail
-  if (points.length >= 2) {
+  if (len >= 2) {
     buildPath();
     if (bounceOffset > 0) {
       ctx.setLineDash([geometricLength, 20000]);
@@ -868,16 +972,35 @@ function drawArrow(
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
 
     if ((isHinted && hintPulse > 0) || needsWhiteHighlight) {
+      // Step 7: Double-stroke glow (no shadowBlur)
       ctx.save();
       if (isHinted && hintPulse > 0) {
+        // Wide translucent glow stroke underneath
+        buildPath();
         ctx.globalAlpha = hintPulse * skin.animation.hintGlowAlpha;
-        ctx.shadowColor = skin.colors.hintColor;
-        ctx.shadowBlur = cellSize * skin.animation.hintGlowBlurRatio;
+        ctx.strokeStyle = skin.colors.hintColor;
+        ctx.lineWidth = strokeWidth * skin.animation.hintGlowStrokeMultiplier * 2.5;
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.stroke();
+        // Crisp stroke on top
+        buildPath();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = skin.colors.hintColor;
+        ctx.lineWidth = strokeWidth * skin.animation.hintGlowStrokeMultiplier;
+        ctx.stroke();
       } else if (needsWhiteHighlight) {
-        ctx.shadowColor = 'white';
-        ctx.shadowBlur = cellSize * 0.2;
+        buildPath();
+        ctx.globalAlpha = 0.3;
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = strokeWidth + cellSize * 0.25;
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.stroke();
+        buildPath();
+        ctx.globalAlpha = isBlocked ? BLOCKED_ALPHA : 1;
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = strokeWidth;
+        ctx.stroke();
       }
-      ctx.stroke();
       ctx.restore();
     } else {
       ctx.stroke();
@@ -886,7 +1009,7 @@ function drawArrow(
   }
 
   // Шеврон
-  const head = arrow.cells[0];
+  const head = cells[0];
   const headX = head.x * cellSize + half + dir.dx * bounceOffset;
   const headY = head.y * cellSize + half + dir.dy * bounceOffset;
 
@@ -901,8 +1024,15 @@ function drawArrow(
   ctx.lineWidth = strokeWidth * skin.geometry.chevronStrokeMultiplier;
   ctx.lineCap = skin.geometry.lineCap; ctx.lineJoin = skin.geometry.lineJoin;
   if (needsWhiteHighlight) {
-    ctx.shadowColor = 'white';
-    ctx.shadowBlur = 4;
+    // Step 7: wide white chevron underneath instead of shadowBlur
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = strokeWidth * skin.geometry.chevronStrokeMultiplier + 4;
+    ctx.stroke();
+    ctx.restore();
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = strokeWidth * skin.geometry.chevronStrokeMultiplier;
   }
   ctx.stroke();
   ctx.restore();
@@ -915,4 +1045,3 @@ function drawArrow(
 
   if (isBlocked) ctx.restore();
 }
-
