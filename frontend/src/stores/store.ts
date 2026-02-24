@@ -188,7 +188,7 @@ export const useGameStore = create<GameStore>()(
     (set, get) => ({
       ...initialGameState,
       
-      initLevel: (level, seed, _ignoredGridSize, arrows) => {
+      initLevel: (level, seed, serverGridSize, arrows) => {
         // === НОРМАЛИЗАЦИЯ КООРДИНАТ ===
         let minX = Infinity, minY = Infinity;
         let maxX = -Infinity, maxY = -Infinity;
@@ -216,6 +216,16 @@ export const useGameStore = create<GameStore>()(
 
         const strictWidth = maxX - minX + 1;
         const strictHeight = maxY - minY + 1;
+
+        const serverWidth = Number(serverGridSize?.width ?? strictWidth);
+        const serverHeight = Number(serverGridSize?.height ?? strictHeight);
+        if (serverWidth !== strictWidth || serverHeight !== strictHeight) {
+          const looksTransposed = serverWidth === strictHeight && serverHeight === strictWidth;
+          console.warn(
+            `[System] Level ${level} grid mismatch: server ${serverWidth}x${serverHeight}, normalized ${strictWidth}x${strictHeight}`
+            + (looksTransposed ? ' (possible axis transpose)' : '')
+          );
+        }
 
         // Фаза 2: SpatialIndex
         rebuildIndex(normalizedArrows);

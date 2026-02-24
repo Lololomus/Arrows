@@ -89,3 +89,6 @@ htmlcov/
 
 # mypy
 .mypy_cache/
+
+# Game levels (local only)
+backend/app/levels/level_*.json

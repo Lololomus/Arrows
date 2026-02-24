@@ -58,6 +58,13 @@ interface ErrorFlash {
   duration: number;
 }
 
+interface ArrowBBox {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
 export interface CanvasBoardProps {
   arrows: Arrow[];
   gridSize: { width: number; height: number };
@@ -164,6 +171,36 @@ export function CanvasBoard({
 
   // blocked set для O(1) lookup в рендере
   const blockedSet = useMemo(() => new Set(blockedArrowIds), [blockedArrowIds]);
+
+  // Precomputed arrow AABBs in cell-space to keep culling cheap per-frame.
+  const arrowBBoxes = useMemo<ArrowBBox[]>(() => {
+    const boxes = new Array<ArrowBBox>(arrows.length);
+    for (let i = 0; i < arrows.length; i++) {
+      const cells = arrows[i].cells;
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+
+      for (let j = 0; j < cells.length; j++) {
+        const { x, y } = cells[j];
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+
+      if (minX === Infinity) {
+        minX = 0;
+        maxX = 0;
+        minY = 0;
+        maxY = 0;
+      }
+
+      boxes[i] = { minX, maxX, minY, maxY };
+    }
+    return boxes;
+  }, [arrows]);
 
   // --- STEP 5: Offscreen canvas for static layers (background + grid dots) ---
   const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -446,7 +483,7 @@ export function CanvasBoard({
       }
 
       const visibleArrows = getVisibleArrowsFromCamera(
-        arrows, cw, ch, camX, camY, camScale,
+        arrows, arrowBBoxes, cw, ch, camX, camY, camScale,
         totalBoardW, totalBoardH, boardPadding, cellSize,
       );
 
@@ -497,30 +534,23 @@ export function CanvasBoard({
         }
       }
 
-      // 2. Стрелки
+      // 2. Стрелки (batched by color)
       let hasAnimations = isIntro;
       const bounce = bounceRef.current;
       const bounceActive = bounce && (now - bounce.startTime < bounce.duration);
       if (bounceActive) hasAnimations = true;
 
-      for (let i = 0; i < visibleArrows.length; i++) {
-        const arrow = visibleArrows[i];
-        const isBlocked = blockedSet.has(arrow.id);
+      const globalHintPulse = hintedArrowId
+        ? 0.5 + 0.5 * Math.sin(now * 0.001 * skin.animation.hintGlowSpeed * Math.PI * 2)
+        : 0;
 
-        let bounceOffset = 0;
-        if (bounceActive && bounce!.arrowId === arrow.id) {
-          const t = (now - bounce!.startTime) / bounce!.duration;
-          const bp = bounceEasing(t);
-          bounceOffset = bounce!.distance * bp * cellSize;
-        }
-
-        const isHinted = arrow.id === hintedArrowId;
-        const hintPulse = isHinted
-          ? 0.5 + 0.5 * Math.sin(now * 0.001 * skin.animation.hintGlowSpeed * Math.PI * 2)
-          : 0;
-
-        drawArrow(ctx, arrow, cellSize, bounceOffset, isHinted, hintPulse, skin, isLOD, isBlocked);
-      }
+      drawArrowsBatched(
+        ctx, visibleArrows, cellSize,
+        hintedArrowId, globalHintPulse,
+        blockedSet,
+        bounceActive ? bounce : null,
+        now, skin, isLOD,
+      );
 
       // 3. Preview ray
       const ray = previewRayRef.current;
@@ -582,7 +612,7 @@ export function CanvasBoard({
       unsubX(); unsubY(); unsubScale();
     };
   }, [
-    arrows, gridSize, cellSize, currentOccupiedNum, hintedArrowId, blockedSet,
+    arrows, arrowBBoxes, gridSize, cellSize, currentOccupiedNum, hintedArrowId, blockedSet,
     totalBoardW, totalBoardH, boardPadding, dpr, skin,
     springX, springY, springScale,
   ]);
@@ -626,7 +656,7 @@ function bounceEasing(t: number): number {
 // ============================================
 
 function getVisibleArrowsFromCamera(
-  arrows: Arrow[], containerW: number, containerH: number,
+  arrows: Arrow[], arrowBBoxes: ArrowBBox[], containerW: number, containerH: number,
   camX: number, camY: number, camScale: number,
   totalBoardW: number, totalBoardH: number, boardPadding: number, cellSize: number,
 ): Arrow[] {
@@ -649,14 +679,18 @@ function getVisibleArrowsFromCamera(
     return arrows;
   }
 
-  // Filter by head cell only (cheaper than .some(cells))
+  // Filter by precomputed arrow AABB over all cells (works for bent shapes too).
   const result: Arrow[] = [];
   for (let i = 0; i < arrows.length; i++) {
-    const head = arrows[i].cells[0];
-    const px = head.x * cellSize;
-    const py = head.y * cellSize;
-    if (px >= left && px <= right && py >= top && py <= bottom) {
-      result.push(arrows[i]);
+    const a = arrows[i];
+    const bbox = arrowBBoxes[i];
+    if (!bbox) continue;
+    const minX = bbox.minX * cellSize;
+    const maxX = bbox.maxX * cellSize;
+    const minY = bbox.minY * cellSize;
+    const maxY = bbox.maxY * cellSize;
+    if (maxX >= left && minX <= right && maxY >= top && minY <= bottom) {
+      result.push(a);
     }
   }
   return result;
@@ -832,6 +866,212 @@ function drawErrorVignette(ctx: CanvasRenderingContext2D, width: number, height:
   grad.addColorStop(1, `rgba(255, 0, 0, ${alpha})`);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, width, height);
+}
+
+// ============================================
+// PRECOMPUTED DIRECTION ROTATIONS (for batch chevrons)
+// ============================================
+
+const _dirRot: Record<string, { cos: number; sin: number }> = {};
+for (const key in DIRECTIONS) {
+  const d = DIRECTIONS[key as keyof typeof DIRECTIONS];
+  const rad = d.angle * (Math.PI / 180);
+  _dirRot[key] = { cos: Math.cos(rad), sin: Math.sin(rad) };
+}
+
+// ============================================
+// BATCHED ARROW RENDERING
+// ============================================
+
+/**
+ * Draw all arrows with color batching.
+ *
+ * Normal arrows are grouped by color → 1 stroke per color instead of 1 per arrow.
+ * Special arrows (blocked, hinted, bouncing, non-normal type) use individual drawArrow.
+ *
+ * Typical: 300 arrows × 9 colors → ~30 stroke calls instead of ~900.
+ */
+function drawArrowsBatched(
+  ctx: CanvasRenderingContext2D,
+  arrows: Arrow[],
+  cellSize: number,
+  hintedArrowId: string | null,
+  hintPulse: number,
+  blockedSet: Set<string>,
+  bounce: BounceAnim | null,
+  now: number,
+  skin: GameSkin,
+  isLOD: boolean,
+) {
+  const half = cellSize / 2;
+  const strokeWidth = cellSize * skin.geometry.bodyStrokeRatio;
+  const headGap = cellSize * skin.geometry.headGapRatio;
+  const outlineWidth = strokeWidth + cellSize * skin.geometry.outlineExtraRatio;
+  const chevLen = cellSize * skin.geometry.chevronLengthRatio;
+  const chevSpread = cellSize * skin.geometry.chevronSpreadRatio;
+  const chevStroke = strokeWidth * skin.geometry.chevronStrokeMultiplier;
+
+  // --- Partition: batchable vs individual ---
+  const byColor = new Map<string, Arrow[]>();
+  const individual: Arrow[] = [];
+
+  for (let i = 0; i < arrows.length; i++) {
+    const a = arrows[i];
+    if (
+      a.type !== 'normal' ||
+      blockedSet.has(a.id) ||
+      a.id === hintedArrowId ||
+      (bounce && bounce.arrowId === a.id)
+    ) {
+      individual.push(a);
+    } else {
+      let group = byColor.get(a.color);
+      if (!group) { group = []; byColor.set(a.color, group); }
+      group.push(a);
+    }
+  }
+
+  // === LOD BATCHED ===
+  if (isLOD) {
+    // Bodies by color
+    for (const [color, group] of byColor) {
+      ctx.beginPath();
+      for (let g = 0; g < group.length; g++) {
+        const a = group[g];
+        const cells = a.cells;
+        const len = cells.length;
+        if (len < 2) continue;
+        const dir = DIRECTIONS[a.direction];
+        // tail → head (reversed)
+        ctx.moveTo(cells[len - 1].x * cellSize + half, cells[len - 1].y * cellSize + half);
+        for (let j = len - 2; j > 0; j--) {
+          ctx.lineTo(cells[j].x * cellSize + half, cells[j].y * cellSize + half);
+        }
+        ctx.lineTo(
+          cells[0].x * cellSize + half - dir.dx * headGap,
+          cells[0].y * cellSize + half - dir.dy * headGap,
+        );
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = strokeWidth * 1.5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+
+    // Head triangles by color (pre-rotated, filled)
+    for (const [color, group] of byColor) {
+      ctx.beginPath();
+      for (let g = 0; g < group.length; g++) {
+        const a = group[g];
+        const head = a.cells[0];
+        const hx = head.x * cellSize + half;
+        const hy = head.y * cellSize + half;
+        const sz = cellSize * 0.7;
+        const rot = _dirRot[a.direction];
+        // Triangle: (0.4, 0), (-0.4, -0.4), (-0.4, 0.4) — rotated
+        const tipX = sz * 0.4, tipY = 0;
+        const blX = -sz * 0.4, blY = -sz * 0.4;
+        const brX = -sz * 0.4, brY = sz * 0.4;
+        ctx.moveTo(hx + tipX * rot.cos - tipY * rot.sin, hy + tipX * rot.sin + tipY * rot.cos);
+        ctx.lineTo(hx + blX * rot.cos - blY * rot.sin, hy + blX * rot.sin + blY * rot.cos);
+        ctx.lineTo(hx + brX * rot.cos - brY * rot.sin, hy + brX * rot.sin + brY * rot.cos);
+        ctx.closePath();
+      }
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
+
+  // === FULL DETAIL BATCHED ===
+  } else {
+    // 1. All outlines in one path (white border behind everything)
+    ctx.beginPath();
+    for (const [, group] of byColor) {
+      for (let g = 0; g < group.length; g++) {
+        const a = group[g];
+        const cells = a.cells;
+        const len = cells.length;
+        if (len < 2) continue;
+        const dir = DIRECTIONS[a.direction];
+        ctx.moveTo(cells[len - 1].x * cellSize + half, cells[len - 1].y * cellSize + half);
+        for (let j = len - 2; j > 0; j--) {
+          ctx.lineTo(cells[j].x * cellSize + half, cells[j].y * cellSize + half);
+        }
+        ctx.lineTo(
+          cells[0].x * cellSize + half - dir.dx * headGap,
+          cells[0].y * cellSize + half - dir.dy * headGap,
+        );
+      }
+    }
+    ctx.strokeStyle = skin.colors.outlineColor;
+    ctx.lineWidth = outlineWidth;
+    ctx.lineCap = skin.geometry.lineCap;
+    ctx.lineJoin = skin.geometry.lineJoin;
+    ctx.stroke();
+
+    // 2. Bodies by color
+    for (const [color, group] of byColor) {
+      ctx.beginPath();
+      for (let g = 0; g < group.length; g++) {
+        const a = group[g];
+        const cells = a.cells;
+        const len = cells.length;
+        if (len < 2) continue;
+        const dir = DIRECTIONS[a.direction];
+        ctx.moveTo(cells[len - 1].x * cellSize + half, cells[len - 1].y * cellSize + half);
+        for (let j = len - 2; j > 0; j--) {
+          ctx.lineTo(cells[j].x * cellSize + half, cells[j].y * cellSize + half);
+        }
+        ctx.lineTo(
+          cells[0].x * cellSize + half - dir.dx * headGap,
+          cells[0].y * cellSize + half - dir.dy * headGap,
+        );
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = strokeWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+
+    // 3. Chevrons by color (pre-rotated V-shape, no save/translate/rotate)
+    for (const [color, group] of byColor) {
+      ctx.beginPath();
+      for (let g = 0; g < group.length; g++) {
+        const a = group[g];
+        const head = a.cells[0];
+        const hx = head.x * cellSize + half;
+        const hy = head.y * cellSize + half;
+        const rot = _dirRot[a.direction];
+        // V-shape local: (-chevLen, -chevSpread) → (0,0) → (-chevLen, chevSpread)
+        const ax = -chevLen, ay = -chevSpread;
+        const bx = -chevLen, by = chevSpread;
+        ctx.moveTo(hx + ax * rot.cos - ay * rot.sin, hy + ax * rot.sin + ay * rot.cos);
+        ctx.lineTo(hx, hy);
+        ctx.lineTo(hx + bx * rot.cos - by * rot.sin, hy + bx * rot.sin + by * rot.cos);
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = chevStroke;
+      ctx.lineCap = skin.geometry.lineCap;
+      ctx.lineJoin = skin.geometry.lineJoin;
+      ctx.stroke();
+    }
+  }
+
+  // === Individual arrows (blocked, hinted, bouncing, special types) ===
+  for (let i = 0; i < individual.length; i++) {
+    const a = individual[i];
+    const isBouncing = bounce && bounce.arrowId === a.id;
+    let bounceOffset = 0;
+    if (isBouncing) {
+      const t = (now - bounce!.startTime) / bounce!.duration;
+      bounceOffset = bounce!.distance * bounceEasing(t) * cellSize;
+    }
+    const isHinted = a.id === hintedArrowId;
+    const hp = isHinted ? hintPulse : 0;
+    const isBlocked = blockedSet.has(a.id);
+    drawArrow(ctx, a, cellSize, bounceOffset, isHinted, hp, skin, isLOD, isBlocked);
+  }
 }
 
 // ============================================
