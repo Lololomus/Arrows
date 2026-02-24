@@ -1,7 +1,8 @@
 // ===== 📄 ФАЙЛ: frontend/src/screens/LeaderboardScreen.tsx =====
-import { useState, useMemo, useRef, useEffect, useCallback, memo } from 'react';
-import { motion } from 'framer-motion';
-import { Trophy, Gift } from 'lucide-react';
+import { useState, useMemo, useRef, useEffect, useCallback, memo, type CSSProperties } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Trophy, Gift, Info } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { useAppStore } from '../stores/store';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { StarParticles } from '../components/ui/StarParticles';
@@ -22,7 +23,8 @@ const triggerHaptic = (style: 'light' | 'medium' | 'heavy' | 'selection') => {
 // --- ТИПЫ И ДАННЫЕ ---
 interface Player {
   rank: number;
-  username: string;
+  displayName: string;
+  username: string | null;
   score: number;
   prize?: string;
   avatarSeed: number;
@@ -37,15 +39,53 @@ const RANK_STYLES: Record<number, { bg: string; border: string; rankClass: strin
 };
 
 const DEFAULT_RANK_STYLE = { bg: 'bg-white/5', border: 'border-white/5', rankClass: 'text-white/40', icon: '', particleColor: undefined };
+const DEFAULT_PLAYER_NAME = 'Player';
+const TWO_LINE_CLAMP_STYLE: CSSProperties = {
+  display: '-webkit-box',
+  WebkitLineClamp: 2,
+  WebkitBoxOrient: 'vertical',
+  overflow: 'hidden',
+};
+
+const normalizeUsername = (rawUsername: unknown): string | null => {
+  if (typeof rawUsername !== 'string') return null;
+  const normalized = rawUsername.trim().replace(/^@+/, '');
+  return normalized.length > 0 ? normalized : null;
+};
+
+const normalizeDisplayName = (rawDisplayName: unknown, rawUsername?: unknown, fallback = DEFAULT_PLAYER_NAME): string => {
+  if (typeof rawDisplayName === 'string') {
+    const trimmed = rawDisplayName.trim();
+    if (trimmed.length > 0) return trimmed;
+  }
+
+  const normalizedUsername = normalizeUsername(rawUsername);
+  if (normalizedUsername) return normalizedUsername;
+
+  return fallback;
+};
+
+const formatUsernameForUi = (username: string | null): string | null => {
+  if (!username) return null;
+  return `@${username}`;
+};
 
 const generateLeaderboard = (count: number): Player[] => {
-  return Array.from({ length: count }).map((_, i) => ({
-    rank: i + 1,
-    username: `Player_${9900 - i}`,
-    score: Math.max(1000, 10000 - i * 50 - Math.floor(Math.random() * 30)),
-    prize: i === 0 ? '🐸 Эксклюзивный Пепе' : i === 1 ? '⭐ Telegram Premium' : i === 2 ? '✨ 1000 звёзд' : undefined,
-    avatarSeed: i + 1
-  }));
+  return Array.from({ length: count }).map((_, i) => {
+    const baseName = `Player_${9900 - i}`;
+    const normalizedUsername = normalizeUsername(
+      i % 9 === 0 ? null : (i % 13 === 0 ? `@${baseName.toLowerCase()}` : baseName.toLowerCase())
+    );
+
+    return {
+      rank: i + 1,
+      displayName: normalizeDisplayName(baseName, normalizedUsername, DEFAULT_PLAYER_NAME),
+      username: normalizedUsername,
+      score: Math.max(1000, 10000 - i * 50 - Math.floor(Math.random() * 30)),
+      prize: i === 0 ? 'Эксклюзивный Пепе' : i === 1 ? 'Telegram Premium' : i === 2 ? '1000 звёзд' : undefined,
+      avatarSeed: i + 1,
+    };
+  });
 };
 
 const INITIAL_VISIBLE_COUNT = 15;
@@ -104,6 +144,72 @@ async function prepareLeaderboardForDisplay(players: Player[]): Promise<void> {
   await waitFrame();
 }
 
+// --- КОМПОНЕНТ: ИНФО О СЕЗОНЕ (СВАЙП-МОДАЛКА) ---
+const SeasonInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <AnimatePresence>
+      {isOpen && (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="fixed inset-0 bg-black/55 backdrop-blur-[2px] z-[2000]"
+          />
+          <motion.div
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
+            exit={{ y: '100%' }}
+            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            drag="y"
+            dragConstraints={{ top: 0, bottom: 0 }}
+            dragElastic={0.2}
+            onDragEnd={(e, info) => {
+              if (info.offset.y > 100 || info.velocity.y > 500) {
+                onClose();
+              }
+            }}
+            className="fixed bottom-0 left-0 right-0 z-[2001] bg-[#1a1a24] rounded-t-[32px] border-t border-[#ca8a04]/30 p-6 pb-12 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]"
+          >
+            {/* Ползунок для свайпа */}
+            <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-6" />
+
+            <div className="text-center">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-yellow-500/10 border border-yellow-500/20 mb-4">
+                <Gift className="text-yellow-400 w-8 h-8" />
+              </div>
+              <h3 className="text-2xl font-black text-white uppercase tracking-wide mb-6 drop-shadow-md">
+                Награды сезона
+              </h3>
+              
+              <div className="space-y-4 text-left">
+                <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+                  <p className="text-white/90 font-medium text-sm leading-relaxed">
+                    По завершении сезона игроки, пригласившие <span className="text-yellow-400 font-bold">наибольшее количество активных пользователей</span>, получат награды.
+                  </p>
+                </div>
+                
+                <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+                  <p className="text-white/90 font-medium text-sm leading-relaxed">
+                    Также <span className="text-cyan-400 font-bold">5 случайных пользователей</span>, попавших в топ-1000 получат призы.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+    ,
+    document.body
+  );
+});
+SeasonInfoModal.displayName = 'SeasonInfoModal';
+
+
 // --- КОМПОНЕНТ: ASYNC AVATAR ---
 const AsyncAvatar = memo(({ seed, rank, photoUrl }: { seed: number, rank?: number, photoUrl?: string }) => {
   const [loaded, setLoaded] = useState(false);
@@ -123,6 +229,27 @@ const AsyncAvatar = memo(({ seed, rank, photoUrl }: { seed: number, rank?: numbe
   );
 });
 AsyncAvatar.displayName = 'AsyncAvatar';
+
+interface PlayerIdentityTextProps {
+  displayName: string;
+  username: string | null;
+  nameClassName?: string;
+  usernameClassName?: string;
+}
+
+const PlayerIdentityText = memo(({ displayName, username, nameClassName, usernameClassName }: PlayerIdentityTextProps) => {
+  const formattedUsername = formatUsernameForUi(username);
+
+  return (
+    <>
+      <div className={nameClassName ?? 'text-white text-[15px] font-bold leading-tight truncate'}>{displayName}</div>
+      {formattedUsername && (
+        <div className={usernameClassName ?? 'text-[11px] leading-tight text-white/55 truncate mt-0.5'}>{formattedUsername}</div>
+      )}
+    </>
+  );
+});
+PlayerIdentityText.displayName = 'PlayerIdentityText';
 
 // --- КОМПОНЕНТ: ЭЛЕМЕНТ ТОП-3 ---
 const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Player, index: number, animateEntry: boolean }) => {
@@ -156,7 +283,7 @@ const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Play
       animate={{ opacity: 1, scale: 1, y: 0 }}
       transition={animateEntry ? { delay: index * 0.3, type: "spring", stiffness: 350, damping: 24, mass: 1 } : { duration: 0 }} 
       onAnimationComplete={handleStampComplete}
-      className={`flex items-center p-4 rounded-2xl border relative overflow-hidden h-[82px] mb-3 ${styles.bg} ${styles.border} shadow-lg`}
+      className={`flex items-center p-4 rounded-2xl border relative overflow-hidden min-h-[100px] mb-3 ${styles.bg} ${styles.border} shadow-lg`}
     >
       {showShockwave && (
         <motion.div
@@ -183,17 +310,21 @@ const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Play
         <AsyncAvatar seed={player.avatarSeed} rank={player.rank} />
       </div>
       <div className="flex-1 min-w-0 relative z-20 py-1">
-        <div className="text-white text-base font-bold truncate">{player.username}</div>
+        <PlayerIdentityText displayName={player.displayName} username={player.username} />
         {player.prize && (
-          <div className="flex items-center gap-1 mt-0.5">
-            <Gift size={12} className="text-purple-400" />
-            <span className="text-[10px] font-bold uppercase tracking-wider bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+          <div className="flex items-start gap-1.5 mt-1">
+            <Gift size={12} className="text-purple-300 mt-[1px] shrink-0" />
+            <span
+              title={player.prize}
+              style={TWO_LINE_CLAMP_STYLE}
+              className="text-[10px] font-bold uppercase tracking-[0.12em] leading-[1.2] bg-gradient-to-r from-purple-300 to-pink-300 bg-clip-text text-transparent"
+            >
               {player.prize}
             </span>
           </div>
         )}
       </div>
-      <div className="font-mono text-base font-black relative z-20 text-yellow-400 drop-shadow-md">
+      <div className="font-mono text-base font-black relative z-20 text-yellow-400 drop-shadow-md shrink-0 pl-2 text-right">
         {player.score.toLocaleString()}
       </div>
     </motion.div>
@@ -212,10 +343,14 @@ const RegularLeaderboardItem = memo(({ player }: { player: Player }) => {
       <div className="relative z-10 mr-3">
         <AsyncAvatar seed={player.avatarSeed} rank={player.rank} />
       </div>
-      <div className="flex-1 min-w-0 relative z-10 py-1">
-        <div className="text-white text-base font-bold truncate">{player.username}</div>
+      <div className="flex-1 min-w-0 relative z-10 py-0.5">
+        <PlayerIdentityText
+          displayName={player.displayName}
+          username={player.username}
+          usernameClassName="text-[11px] leading-tight text-white/50 truncate mt-0.5"
+        />
       </div>
-      <div className="font-mono text-base font-black relative z-10 text-yellow-400/80">
+      <div className="font-mono text-base font-black relative z-10 text-yellow-400/80 shrink-0 pl-2 text-right">
         {player.score.toLocaleString()}
       </div>
     </div>
@@ -231,7 +366,7 @@ const SkeletonLeaderboardItem = memo(({ rank }: { rank: number }) => {
     : `${DEFAULT_RANK_STYLE.bg} ${DEFAULT_RANK_STYLE.border}`;
 
   return (
-    <div className={`flex items-center p-4 rounded-2xl border relative overflow-hidden h-[82px] mb-3 ${cardClass}`}>
+    <div className={`flex items-center p-4 rounded-2xl border relative overflow-hidden mb-3 ${cardClass} ${isTop ? 'min-h-[100px]' : 'h-[82px]'}`}>
       <div className="flex items-center justify-center w-8 mr-2 relative z-10 shrink-0">
         {isTop ? (
           <span className="text-2xl opacity-35">{topStyles.icon}</span>
@@ -243,8 +378,9 @@ const SkeletonLeaderboardItem = memo(({ rank }: { rank: number }) => {
         <div className={`w-12 h-12 rounded-full bg-white/10 animate-pulse ${isTop ? 'ring-2 ring-white/10' : ''}`} />
       </div>
       <div className="flex-1 min-w-0 relative z-10 py-1">
-        <div className="h-4 w-28 rounded bg-white/12 animate-pulse mb-2" />
-        {isTop && <div className="h-2.5 w-24 rounded bg-white/10 animate-pulse" />}
+        <div className="h-4 w-28 rounded bg-white/12 animate-pulse mb-1.5" />
+        <div className="h-2.5 w-24 rounded bg-white/10 animate-pulse" />
+        {isTop && <div className="h-2.5 w-32 rounded bg-white/10 animate-pulse mt-2" />}
       </div>
       <div className="h-5 w-16 rounded bg-white/12 animate-pulse" />
     </div>
@@ -266,13 +402,19 @@ const CARD_GAP_PX = 12;
 const BOTTOM_NAV_SELECTOR = '[data-bottom-nav]';
 
 const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger }: { user: any, isDocked: boolean, pulseTrigger?: number }) => {
-  const currentUserRank = useMemo(() => ({
-    rank: 101,
-    username: user?.username || user?.first_name || 'Вы',
-    score: 150,
-    avatarSeed: user?.id || 999,
-    photoUrl: user?.photo_url || user?.photoUrl 
-  }), [user]);
+  const currentUserRank = useMemo(() => {
+    const normalizedUsername = normalizeUsername(user?.username);
+    const displayName = normalizeDisplayName(user?.firstName ?? user?.first_name, normalizedUsername, DEFAULT_PLAYER_NAME);
+
+    return {
+      rank: 101,
+      displayName,
+      username: normalizedUsername,
+      score: 150,
+      avatarSeed: user?.id || 999,
+      photoUrl: user?.photo_url || user?.photoUrl,
+    };
+  }, [user]);
   const [isPulseActive, setIsPulseActive] = useState(false);
 
   useEffect(() => {
@@ -318,7 +460,7 @@ const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger }: { user: any, i
       <div className="flex flex-col items-center justify-center w-8 mr-2 leading-none relative z-10 shrink-0">
          <span className="text-white/40 font-bold text-[10px] uppercase mb-1">Место</span>
          <span className={`font-black tracking-tighter transition-colors ${isDocked ? 'text-blue-200 text-sm' : 'text-cyan-300 text-sm drop-shadow-md'}`}>
-           #{currentUserRank.rank.toLocaleString()}
+            #{currentUserRank.rank.toLocaleString()}
          </span>
       </div>
 
@@ -326,8 +468,8 @@ const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger }: { user: any, i
         <AsyncAvatar seed={currentUserRank.avatarSeed} photoUrl={currentUserRank.photoUrl} />
       </div>
 
-      <div className="flex-1 min-w-0 relative z-10 py-1">
-        <div className="text-white text-base font-bold truncate">{currentUserRank.username}</div>
+      <div className="flex-1 min-w-0 relative z-10 py-0.5">
+        <PlayerIdentityText displayName={currentUserRank.displayName} username={currentUserRank.username} />
       </div>
 
       <div className={`font-mono text-xl font-black drop-shadow-md relative z-10 transition-colors ${isDocked ? 'text-blue-200' : 'text-cyan-300'}`}>
@@ -348,6 +490,7 @@ export function LeaderboardScreen() {
   const [isDocked, setIsDocked] = useState(false);
   const [dockPulseKey, setDockPulseKey] = useState(0);
   const [bottomNavHeight, setBottomNavHeight] = useState(96);
+  const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
   
   const { user } = useAppStore();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -402,15 +545,14 @@ export function LeaderboardScreen() {
     return () => observer.disconnect();
   }, [visibleCount, leaderboard.length, displayTab]);
 
-  // ИСПРАВЛЕНО: Звук/отклик при стыковке обрабатывается через эффект, чтобы не спамить
   const prevDocked = useRef(isDocked);
   useEffect(() => {
     if (isDocked !== prevDocked.current) {
       if (isDocked) {
-        triggerHaptic('medium'); // Щелчок при стыковке
+        triggerHaptic('medium');
         setDockPulseKey((prev) => prev + 1);
       }
-      else triggerHaptic('light'); // Мягкий отрыв
+      else triggerHaptic('light');
       prevDocked.current = isDocked;
     }
   }, [isDocked]);
@@ -498,6 +640,16 @@ export function LeaderboardScreen() {
           className="z-0 opacity-55"
         />
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-yellow-500/20 blur-3xl -z-10"></div>
+        
+        {/* Кнопка информации (ровно там где ты указал на скрине) */}
+        <button 
+          onClick={() => { triggerHaptic('light'); setIsInfoModalOpen(true); }}
+          aria-label="Информация о сезоне"
+          className="absolute top-3.5 right-3.5 z-20 w-10 h-10 flex items-center justify-center rounded-xl bg-white/10 border border-white/20 text-white/75 hover:text-white hover:bg-white/15 active:scale-95 transition-all backdrop-blur-sm shadow-[0_4px_14px_rgba(0,0,0,0.28)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-300/50"
+        >
+          <Info size={21} />
+        </button>
+
         <Trophy size={56} className="mx-auto text-yellow-400 mb-2 drop-shadow-glow relative z-10" />
         <h2 className="text-3xl font-black text-white uppercase tracking-wide drop-shadow-md relative z-10">Сезон #1</h2>
         <div className="inline-flex items-center gap-2 mt-2 bg-black/30 px-3 py-1 rounded-full border border-white/10 relative z-10">
@@ -573,7 +725,9 @@ export function LeaderboardScreen() {
           </div>
         )}
       </div>
-
+      
+      {/* Модалка с информацией */}
+      <SeasonInfoModal isOpen={isInfoModalOpen} onClose={() => setIsInfoModalOpen(false)} />
     </div>
   );
 }
