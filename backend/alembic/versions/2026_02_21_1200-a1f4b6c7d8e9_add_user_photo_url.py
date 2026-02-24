@@ -17,9 +17,16 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("users", sa.Column("photo_url", sa.String(length=512), nullable=True))
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {column["name"] for column in inspector.get_columns("users")}
+    if "photo_url" not in columns:
+        op.add_column("users", sa.Column("photo_url", sa.String(length=512), nullable=True))
 
 
 def downgrade() -> None:
-    op.drop_column("users", "photo_url")
-
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {column["name"] for column in inspector.get_columns("users")}
+    if "photo_url" in columns:
+        op.drop_column("users", "photo_url")

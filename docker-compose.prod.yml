@@ -1,11 +1,19 @@
-version: '3.8'
-
 services:
+  postgres:
+    ports: []
+
+  redis:
+    ports: []
+
   backend:
     env_file:
       - ./backend/.env.production
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-    volumes: []
+    # Запускаем через твой скрипт, чтобы уровни копировались и база ждалась
+    command: ["/bin/bash", "/app/entrypoint.prod.sh"]
+    volumes:
+      # Прокидываем постоянную папку с сервера внутрь контейнера
+      - /srv/arrows/levels:/app/app/levels
+    ports: []
 
   bot:
     env_file:

@@ -27,9 +27,14 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Копируем код приложения
 COPY . .
 
+# Backup level files inside image so entrypoint can restore host-mounted levels dir if empty.
+RUN mkdir -p /app/app/levels_seed && \
+    cp -a /app/app/levels/. /app/app/levels_seed/
+
 # Создаём непривилегированного пользователя
 RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app
+    chown -R appuser:appuser /app && \
+    chmod +x /app/entrypoint.prod.sh
 USER appuser
 
 # Открываем порт

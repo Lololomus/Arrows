@@ -37,6 +37,8 @@ Use base compose + production override:
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
+For a full production runbook (TLS mode, tunnel mode, env checklist, one-command deploy script), see `DEPLOYMENT.md`.
+
 Production safety guard:
 
 - if `ENVIRONMENT=production` and (`DEBUG=true` or `DEV_AUTH_ENABLED=true`) backend startup fails.
