@@ -1,27 +1,24 @@
 // ===== 📄 ФАЙЛ: src/components/FXOverlay.tsx =====
 /**
- * Arrow Puzzle - Screen-Space FX Canvas (v3 — ALL EDGE CASES)
+ * Arrow Puzzle — Screen-Space FX Canvas (v4 — SYNCHRONOUS BRIDGE)
  *
- * v3 fixes:
- * - minStrokeWorld: убран world-space cap (cellSize * 0.6), который делал штрих
- *   субпиксельным на extreme zoom-out. Теперь = MIN_STROKE_SCREEN_PX / camScale
- *   без ограничения сверху → гарантия видимости на любом масштабе.
- * - Cull: порог изменён с `screenCellSize * cells.length < 2` на
- *   `screenCellSize < 0.5` — одна ячейка < 0.5px действительно невидима.
- * - active transition: при active=false→true синхронизируем pointer без захвата,
- *   предотвращая burst старых FX.
- * - captureScale: убран (не использовался).
+ * АРХИТЕКТУРА v4:
+ * Раньше: useEffect → diff history → создать CapturedArrow → wakeUp → draw.
+ *   → 2-10 кадров задержки на мобиле. Стрелка "исчезала".
  *
- * v2 (сохранено):
- * - Lock-at-capture: flyDistance, minStroke, LOD, duration фиксируются в момент
- *   удаления → зум во время полёта не вызывает рывков.
- * - Clamped fly distance: оригинальная формула cellSize × multiplier, screen-
- *   результат зажат в [100, 350]px.
- * - LOD: треугольник вместо шеврона на мелком масштабе (как CanvasBoard).
- * - History pointer: обрабатывает ВСЕ новые diff'ы.
- * - Undo cleanup: летящие стрелки, вернувшиеся на доску, удаляются.
- * - Camera transform вынесен из цикла.
- * - Zero-alloc + ResizeObserver rect cache.
+ * Теперь: GameScreen.handleArrowClick() → emitFlyFX() → queue (синхронно).
+ *   → FXOverlay render loop → drainFlyFX() → draw. Zero кадров задержки.
+ *
+ * FXOverlay больше НЕ:
+ * - парсит history
+ * - использует useEffect для захвата стрелок
+ * - отслеживает prevHistoryLen/prevArrowIds
+ *
+ * FXOverlay ДЕЛАЕТ:
+ * - Drain fxBridge queue в render loop (rAF)
+ * - Рисует летящие стрелки с lock-at-capture параметрами
+ * - Undo cleanup: useEffect на arrows убирает вернувшиеся стрелки
+ * - LOD, zero-alloc, camera out of loop, rect cache — сохранены
  */
 
 import { useEffect, useRef } from 'react';
@@ -30,61 +27,21 @@ import { useGameStore } from '../stores/store';
 import { useActiveSkin, type GameSkin } from '../game/skins';
 import { DIRECTIONS, ARROW_EMOJIS } from '../config/constants';
 import type { Arrow } from '../game/types';
+import { drainFlyFX, hasPendingFX, type FlyFXItem } from '../game/fxBridge';
 
 // ============================================
 // CONSTANTS
 // ============================================
 
-/** Padding ячеек (должен совпадать с CanvasBoard) */
 const GRID_PADDING_CELLS = 0.4;
-
-/** LOD порог (совпадает с CanvasBoard LOD_THRESHOLD) */
-const LOD_THRESHOLD = 12;
-
-/**
- * Экранные границы fly-дистанции (px).
- *
- * Оригинальная формула (cellSize × flyDistanceMultiplier) сохраняется,
- * но screen-результат зажимается в [MIN, MAX]:
- * - Маленький уровень (camScale≈1): 400px → clamp → 350px. Почти без изменений.
- * - Средний (camScale≈0.3): 120px → 120px. Идентично оригиналу.
- * - Большой (camScale≈0.03): 12px → 100px. Фикс видимости.
- */
-const MIN_FLY_SCREEN_PX = 100;
-const MAX_FLY_SCREEN_PX = 350;
-
-/**
- * Минимальная толщина штриха на экране (px).
- *
- * Конвертируется в world-space: minStrokeWorld = MIN_STROKE_SCREEN_PX / camScale.
- * БЕЗ world-space cap — на extreme zoom-out штрих будет толстым в мировых единицах,
- * но нормальным (2px) на экране. В LOD-режиме это выглядит естественно.
- */
-const MIN_STROKE_SCREEN_PX = 2.0;
-
-/**
- * Cull порог (px размер одной ячейки на экране).
- * Если одна ячейка < 0.5px, анимация по-настоящему невидима.
- */
-const CULL_CELL_SCREEN_PX = 0.5;
-
-/** Минимальный camScale для расчётов (защита от деления на 0). */
-const MIN_CAM_SCALE = 0.005;
 
 // ============================================
 // TYPES
 // ============================================
 
-interface CapturedArrow {
-  arrow: Arrow;
-  startTime: number;
-  duration: number;
+/** Runtime fly state = bridge item + mutable progress */
+interface FlyingArrow extends FlyFXItem {
   progress: number;
-
-  // Locked at capture — не пересчитываются при зуме
-  flyDistanceWorld: number;
-  minStrokeWorld: number;
-  isLOD: boolean;
 }
 
 interface CachedRect {
@@ -94,7 +51,7 @@ interface CachedRect {
   height: number;
 }
 
-interface FXOverlayProps {
+export interface FXOverlayProps {
   containerRef: React.RefObject<HTMLDivElement>;
   gridSize: { width: number; height: number };
   cellSize: number;
@@ -105,7 +62,7 @@ interface FXOverlayProps {
 }
 
 // ============================================
-// STATIC POINT BUFFER (zero-alloc drawing)
+// STATIC POINT BUFFER (zero-alloc)
 // ============================================
 
 const _fxPtBuf: { x: number; y: number }[] = [];
@@ -113,31 +70,22 @@ function ensureFxPtBuf(len: number) {
   while (_fxPtBuf.length < len) _fxPtBuf.push({ x: 0, y: 0 });
 }
 
-// ============================================
-// HELPERS
-// ============================================
-
 function clamp(v: number, min: number, max: number): number {
   return v < min ? min : v > max ? max : v;
 }
 
+// ============================================
+// WAKE SINGLETON
+// ============================================
+
 /**
- * Адаптивная длительность полёта.
- *
- * На нормальных масштабах = baseDuration (400ms) без изменений.
- * Укорачивается только при очень мелких стрелках (screenCell < 15px),
- * и не более чем на 30% (floor = 0.7).
- *
- * screenCell=40+ → 1.0 → 400ms (оригинал)
- * screenCell=15  → 1.0 → 400ms (оригинал)
- * screenCell=8   → 0.85 → 340ms
- * screenCell=3   → 0.7  → 280ms (минимум)
+ * FXOverlay регистрирует свою wake-функцию сюда.
+ * GameScreen вызывает wakeFXOverlay() после emitFlyFX().
  */
-function computeFlyDuration(baseDuration: number, cellSize: number, camScale: number): number {
-  const screenCell = cellSize * camScale;
-  if (screenCell >= 15) return baseDuration;
-  const factor = clamp(screenCell / 15, 0.7, 1.0);
-  return baseDuration * factor;
+let _wakeFn: (() => void) | null = null;
+
+export function wakeFXOverlay(): void {
+  _wakeFn?.();
 }
 
 // ============================================
@@ -147,24 +95,14 @@ function computeFlyDuration(baseDuration: number, cellSize: number, camScale: nu
 export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, springScale, active }: FXOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
-  const wakeUpRef = useRef<() => void>(() => {});
-
-  const arrows = useGameStore(s => s.arrows);
+  const flyingRef = useRef<FlyingArrow[]>([]);
   const skin = useActiveSkin();
 
-  const flyingArrowsRef = useRef<CapturedArrow[]>([]);
-
-  // History pointer — обрабатываем ВСЕ новые записи, не только последнюю
-  const prevHistoryLenRef = useRef<number>(0);
-
-  // Детекция active=false→true перехода (предотвращает burst старых FX)
-  const wasActiveRef = useRef<boolean>(false);
-
-  // Cached container rect (ResizeObserver + scroll)
+  // Cached container rect
   const cachedRectRef = useRef<CachedRect>({ left: 0, top: 0, width: 0, height: 0 });
 
   // ============================================
-  // RECT CACHE (ResizeObserver + scroll)
+  // RECT CACHE (ResizeObserver)
   // ============================================
 
   useEffect(() => {
@@ -190,104 +128,33 @@ export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, 
   }, [containerRef]);
 
   // ============================================
-  // CAPTURE REMOVED ARROWS (history pointer)
+  // UNDO CLEANUP — единственный useEffect для arrows
   // ============================================
 
+  const arrows = useGameStore(s => s.arrows);
+
   useEffect(() => {
-    // --- active=false: запоминаем состояние, ничего не делаем ---
-    if (!active) {
-      wasActiveRef.current = false;
-      return;
-    }
+    if (!active) return;
+    const flying = flyingRef.current;
+    if (flying.length === 0) return;
 
-    const state = useGameStore.getState();
-    const history = state.history;
     const currentIds = new Set(arrows.map(a => a.id));
-    const flying = flyingArrowsRef.current;
-
-    // --- active=false → true: синхронизируем pointer БЕЗ захвата ---
-    // Предотвращает burst старых FX, накопившихся пока overlay был неактивен.
-    if (!wasActiveRef.current) {
-      wasActiveRef.current = true;
-      prevHistoryLenRef.current = history.length;
-      flyingArrowsRef.current = [];
-      return;
-    }
-
-    const prevLen = prevHistoryLenRef.current;
-
-    // --- Undo cleanup ---
-    // Стрелка вернулась на доску → убрать из летящих
-    if (flying.length > 0) {
-      for (let i = flying.length - 1; i >= 0; i--) {
-        if (currentIds.has(flying[i].arrow.id)) {
-          flying.splice(i, 1);
-        }
+    for (let i = flying.length - 1; i >= 0; i--) {
+      if (currentIds.has(flying[i].arrow.id)) {
+        flying.splice(i, 1);
       }
     }
-
-    // --- Undo detection: history стала короче ---
-    if (history.length < prevLen) {
-      prevHistoryLenRef.current = history.length;
-      return;
-    }
-
-    // --- Нет новых записей ---
-    if (history.length === prevLen) {
-      return;
-    }
-
-    // --- Текущий camScale для lock-at-capture ---
-    const camScale = Math.max(springScale.get(), MIN_CAM_SCALE);
-    const screenCellSize = cellSize * camScale;
-    const isLOD = screenCellSize < LOD_THRESHOLD;
-    const invScale = 1 / camScale;
-
-    // --- Обработать ВСЕ новые diff'ы ---
-    for (let i = prevLen; i < history.length; i++) {
-      const diff = history[i];
-      if (!diff || diff.removedArrows.length === 0) continue;
-
-      for (const removedArrow of diff.removedArrows) {
-        // Cull: ячейка < 0.5px на экране — анимация невидима
-        if (screenCellSize < CULL_CELL_SCREEN_PX) continue;
-
-        // Fly distance: оригинальная формула, clamped в screen-space
-        const rawWorldDist = cellSize * skin.animation.flyDistanceMultiplier;
-        const rawScreenDist = rawWorldDist * camScale;
-        const clampedScreenDist = clamp(rawScreenDist, MIN_FLY_SCREEN_PX, MAX_FLY_SCREEN_PX);
-        const flyDistWorld = clampedScreenDist * invScale;
-
-        // Min stroke: чистая screen-space гарантия, без world-space cap.
-        // На extreme zoom-out штрих толстый в world-units, но 2px на экране.
-        const minStrokeWorld = MIN_STROKE_SCREEN_PX * invScale;
-
-        flying.push({
-          arrow: removedArrow,
-          startTime: performance.now(),
-          duration: computeFlyDuration(skin.animation.flyDuration, cellSize, camScale),
-          progress: 0,
-          flyDistanceWorld: flyDistWorld,
-          minStrokeWorld,
-          isLOD,
-        });
-      }
-    }
-
-    prevHistoryLenRef.current = history.length;
-
-    // Wake up render loop if sleeping
-    if (flying.length > 0 && animFrameRef.current === 0) {
-      wakeUpRef.current();
-    }
-  }, [arrows, active, skin.animation.flyDuration, skin.animation.flyDistanceMultiplier, cellSize, springScale]);
+  }, [arrows, active]);
 
   // ============================================
   // RENDER LOOP
   // ============================================
 
   useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      _wakeFn = null;
+      return;
+    }
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -302,41 +169,45 @@ export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, 
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
-    // Board dimensions in world coords (matches CanvasBoard)
     const totalBoardW = (gridSize.width + GRID_PADDING_CELLS) * cellSize;
     const totalBoardH = (gridSize.height + GRID_PADDING_CELLS) * cellSize;
     const boardPadding = cellSize * (GRID_PADDING_CELLS / 2);
 
+    let isRunning = true;
+
     function render(now: number) {
-      if (!ctx || !canvas) return;
+      if (!isRunning || !ctx || !canvas) return;
+
+      // === DRAIN QUEUE — синхронно из fxBridge ===
+      const newItems = drainFlyFX();
+      const flying = flyingRef.current;
+      for (let i = 0; i < newItems.length; i++) {
+        (flying as FlyingArrow[]).push({ ...newItems[i], progress: 0 });
+      }
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const flying = flyingArrowsRef.current;
       if (flying.length === 0) {
         animFrameRef.current = 0;
         return;
       }
 
-      // Cached rect — без getBoundingClientRect per-frame
       const rect = cachedRectRef.current;
       if (rect.width === 0) {
         animFrameRef.current = requestAnimationFrame(render);
         return;
       }
 
-      // Live camera from springs
       const camX = springX.get();
       const camY = springY.get();
       const camScale = springScale.get();
-
-      // Screen center of container
       const cx = rect.left + rect.width / 2;
       const cy = rect.top + rect.height / 2;
 
       ctx.save();
       ctx.scale(dpr, dpr);
 
-      // Camera transform — once, not per arrow
+      // Camera transform — once
       ctx.save();
       ctx.translate(cx + camX, cy + camY);
       ctx.scale(camScale, camScale);
@@ -362,15 +233,18 @@ export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, 
 
     animFrameRef.current = requestAnimationFrame(render);
 
-    wakeUpRef.current = () => {
-      if (animFrameRef.current === 0) {
+    // Register wake function for GameScreen
+    const wakeUp = () => {
+      if (animFrameRef.current === 0 && isRunning) {
         animFrameRef.current = requestAnimationFrame(render);
       }
     };
+    _wakeFn = wakeUp;
 
     return () => {
+      isRunning = false;
+      _wakeFn = null;
       window.removeEventListener('resize', resizeCanvas);
-      wakeUpRef.current = () => {};
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
   }, [active, cellSize, gridSize.width, gridSize.height, skin, springScale, springX, springY, containerRef]);
@@ -391,31 +265,28 @@ export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, 
 
 function drawFlyingArrow(
   ctx: CanvasRenderingContext2D,
-  fa: CapturedArrow,
+  fa: FlyingArrow,
   cellSize: number,
   skin: GameSkin,
 ) {
-  const { arrow, progress, isLOD } = fa;
-  const easedProgress = skin.animation.flyEasing(progress);
-
-  // Locked values — не зависят от текущего camScale
+  const easedProgress = skin.animation.flyEasing(fa.progress);
   const flyDistance = fa.flyDistanceWorld * easedProgress;
   const opacity = 1 - easedProgress;
 
   ctx.save();
   ctx.globalAlpha = clamp(opacity, 0, 1);
 
-  if (isLOD) {
-    drawArrowLOD(ctx, arrow, cellSize, flyDistance, fa.minStrokeWorld, skin);
+  if (fa.isLOD) {
+    drawArrowLOD(ctx, fa.arrow, cellSize, flyDistance, fa.minStrokeWorld, skin);
   } else {
-    drawArrowFull(ctx, arrow, cellSize, flyDistance, fa.minStrokeWorld, skin);
+    drawArrowFull(ctx, fa.arrow, cellSize, flyDistance, fa.minStrokeWorld, skin);
   }
 
   ctx.restore();
 }
 
 // ============================================
-// DRAWING: Full Detail (chevron head)
+// DRAWING: Full Detail
 // ============================================
 
 function drawArrowFull(
@@ -430,7 +301,6 @@ function drawArrowFull(
   const half = cellSize / 2;
   const headGap = cellSize * skin.geometry.headGapRatio;
 
-  // Stroke widths with minimum enforcement (guarantees screen visibility)
   const rawBodyStroke = cellSize * skin.geometry.bodyStrokeRatio;
   const rawMonolith = rawBodyStroke + cellSize * skin.geometry.outlineExtraRatio;
   const strokeWidth = Math.max(rawBodyStroke, minStrokeWorld);
@@ -439,7 +309,6 @@ function drawArrowFull(
   const cells = arrow.cells;
   const len = cells.length;
 
-  // Zero-alloc: fill static buffer reversed (tail→head)
   ensureFxPtBuf(len);
   for (let i = 0; i < len; i++) {
     const c = cells[len - 1 - i];
@@ -454,12 +323,10 @@ function drawArrowFull(
 
   const geometricLength = Math.max(0, (len - 1) * cellSize - headGap);
 
-  // Body path
   if (len >= 2) {
     ctx.beginPath();
     ctx.moveTo(_fxPtBuf[0].x, _fxPtBuf[0].y);
     for (let i = 1; i < len; i++) ctx.lineTo(_fxPtBuf[i].x, _fxPtBuf[i].y);
-    // Extend far in fly direction for lineDash trick
     ctx.lineTo(
       _fxPtBuf[len - 1].x + dir.dx * cellSize * 15,
       _fxPtBuf[len - 1].y + dir.dy * cellSize * 15,
@@ -475,7 +342,6 @@ function drawArrowFull(
     ctx.setLineDash([]);
   }
 
-  // Chevron head
   const head = cells[0];
   const headX = head.x * cellSize + half + dir.dx * flyDistance;
   const headY = head.y * cellSize + half + dir.dy * flyDistance;
@@ -495,7 +361,6 @@ function drawArrowFull(
   ctx.stroke();
   ctx.restore();
 
-  // Special arrow emoji
   if (arrow.type !== 'normal') {
     ctx.font = `${cellSize * 0.5}px serif`;
     ctx.textAlign = 'center';
@@ -505,8 +370,7 @@ function drawArrowFull(
 }
 
 // ============================================
-// DRAWING: LOD (filled triangle head)
-// Matches CanvasBoard LOD style exactly.
+// DRAWING: LOD
 // ============================================
 
 function drawArrowLOD(
@@ -527,7 +391,6 @@ function drawArrowLOD(
   const cells = arrow.cells;
   const len = cells.length;
 
-  // Zero-alloc: fill static buffer reversed (tail→head)
   ensureFxPtBuf(len);
   for (let i = 0; i < len; i++) {
     const c = cells[len - 1 - i];
@@ -542,7 +405,6 @@ function drawArrowLOD(
 
   const geometricLength = Math.max(0, (len - 1) * cellSize - headGap);
 
-  // Body (single stroke, no outline — LOD simplification)
   if (len >= 2) {
     ctx.beginPath();
     ctx.moveTo(_fxPtBuf[0].x, _fxPtBuf[0].y);
@@ -562,7 +424,6 @@ function drawArrowLOD(
     ctx.setLineDash([]);
   }
 
-  // Filled triangle head (matches CanvasBoard LOD exactly)
   const head = cells[0];
   const hx = head.x * cellSize + half + dir.dx * flyDistance;
   const hy = head.y * cellSize + half + dir.dy * flyDistance;
@@ -579,6 +440,4 @@ function drawArrowLOD(
   ctx.fillStyle = arrow.color;
   ctx.fill();
   ctx.restore();
-
-  // No emoji in LOD mode — too small to see
 }

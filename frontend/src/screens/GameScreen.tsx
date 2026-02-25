@@ -17,7 +17,9 @@ import { gameApi } from '../api/client';
 import { RefreshCw, Lightbulb, RotateCcw, AlertTriangle, Heart, Trash2, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
 import { ANIMATIONS, MAX_CELL_SIZE, MIN_CELL_SIZE } from '../config/constants';
 import { processMove, getFreeArrows, isArrowBlocked } from '../game/engine';
-import { FXOverlay } from '../components/FXOverlay';
+import { emitFlyFX, clearFlyFX } from '../game/fxBridge';
+import { getSkin } from '../game/skins';
+import { FXOverlay, wakeFXOverlay } from '../components/FXOverlay';
 import { LevelTransitionLoader } from '../components/ui/LevelTransitionLoader';
 
 import gameBgImage from '../assets/game-bg.jpg?url';
@@ -362,6 +364,7 @@ export function GameScreen() {
   // === ЗАГРУЗКА УРОВНЯ ===
   const loadLevel = useCallback(async (levelNum: number) => {
     setStatus('loading');
+    clearFlyFX();
     setNoMoreLevels(false);
     try {
       const levelData = await gameApi.getLevel(levelNum);
@@ -572,25 +575,37 @@ export function GameScreen() {
       }
       if (result.electricTarget) idsToRemove.push(result.electricTarget.id);
 
+      // === v4: synchronous FX before store mutation ===
+      // emitFlyFX() queues arrows before React sees state removal.
+      // FXOverlay drains queue in the same rAF frame -> zero-frame gap.
+      const arrowsToFly = idsToRemove
+        .map(id => currentArrows.find(a => a.id === id))
+        .filter((a): a is typeof arrow => !!a);
+
+      const activeSkin = getSkin(currentState.activeSkinId);
+      emitFlyFX(arrowsToFly, baseCellSize, cameraScale.get(), activeSkin);
+      wakeFXOverlay();
+      // === end of v4 insert ===
+
       if (idsToRemove.length === 1) removeArrow(arrowId);
       else removeArrows(idsToRemove);
 
-      // Авто-разблокировка: проверяем blocked стрелки после удаления
+      // Auto-unblock
       requestAnimationFrame(() => {
         const state = useGameStore.getState();
         const blocked = state.blockedArrowIds;
         if (blocked.length === 0) return;
-        const currentArrows = state.arrows;
-        const currentGrid = { width: state.gridSize.width, height: state.gridSize.height };
+        const currentArrows2 = state.arrows;
+        const currentGrid2 = { width: state.gridSize.width, height: state.gridSize.height };
         const toUnblock = blocked.filter(id => {
-          const a = currentArrows.find(ar => ar.id === id);
-          if (!a) return true; // стрелка удалена — чистим
-          return !isArrowBlocked(a, currentArrows, currentGrid);
+          const a = currentArrows2.find(ar => ar.id === id);
+          if (!a) return true;
+          return !isArrowBlocked(a, currentArrows2, currentGrid2);
         });
         if (toUnblock.length > 0) unblockArrows(toUnblock);
       });
     }
-  }, [setShakingArrow, blockArrow, unblockArrows, failMove, removeArrow, removeArrows, isIntroAnimating]);
+  }, [setShakingArrow, blockArrow, unblockArrows, failMove, removeArrow, removeArrows, isIntroAnimating, baseCellSize, cameraScale]);
 
   const handleHint = useCallback(() => {
     if (isIntroAnimating) return;
