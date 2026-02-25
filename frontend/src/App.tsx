@@ -125,7 +125,7 @@ export default function App() {
 
   if (screen === 'game') {
     return (
-      <div className="relative w-full h-screen overflow-hidden bg-slate-900 font-sans select-none">
+      <div className="relative w-full app-viewport overflow-hidden bg-slate-900 font-sans select-none">
         {ENABLE_NON_GAME_BACKGROUND && (
           <div className="absolute inset-0 pointer-events-none opacity-0" aria-hidden="true">
             <div
@@ -159,26 +159,13 @@ export default function App() {
   };
 
   return (
-    <div className="relative w-full h-screen overflow-hidden bg-slate-900 font-sans select-none">
+    <div className="relative w-full app-viewport overflow-hidden bg-slate-900 font-sans select-none">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap');
         .font-sans { font-family: 'Inter', sans-serif; }
         .drop-shadow-glow { filter: drop-shadow(0 0 10px rgba(250, 204, 21, 0.5)); }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
-
-        .safe-area-top {
-          padding-top: var(--app-safe-top);
-        }
-        .safe-bottom {
-          padding-bottom: var(--app-safe-bottom);
-        }
-        .safe-area-left {
-          padding-left: var(--app-safe-left);
-        }
-        .safe-area-right {
-          padding-right: var(--app-safe-right);
-        }
       `}</style>
 
       <div className="relative z-10 flex flex-col h-full max-w-md mx-auto shadow-2xl bg-black/20 overflow-hidden">

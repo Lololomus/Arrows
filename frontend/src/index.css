@@ -166,6 +166,7 @@ button, .clickable {
    ============================================ */
 
 :root {
+  --app-bottom-nav-offset: 96px;
   --app-safe-top: max(
     env(safe-area-inset-top, 0px),
     var(--tg-safe-area-inset-top, 0px),
@@ -188,6 +189,11 @@ button, .clickable {
   );
 }
 
+.app-viewport {
+  min-height: 100vh;
+  height: 100dvh;
+}
+
 .safe-top,
 .safe-area-top {
   padding-top: var(--app-safe-top);
@@ -206,6 +212,34 @@ button, .clickable {
 .safe-right,
 .safe-area-right {
   padding-right: var(--app-safe-right);
+}
+
+.safe-x {
+  padding-left: var(--app-safe-left);
+  padding-right: var(--app-safe-right);
+}
+
+.safe-y {
+  padding-top: var(--app-safe-top);
+  padding-bottom: var(--app-safe-bottom);
+}
+
+.safe-all {
+  padding-top: var(--app-safe-top);
+  padding-bottom: var(--app-safe-bottom);
+  padding-left: var(--app-safe-left);
+  padding-right: var(--app-safe-right);
+}
+
+.safe-fixed {
+  padding-top: var(--app-safe-top);
+  padding-bottom: var(--app-safe-bottom);
+  padding-left: var(--app-safe-left);
+  padding-right: var(--app-safe-right);
+}
+
+.pb-nav {
+  padding-bottom: var(--app-bottom-nav-offset, 96px);
 }
 
 /* ============================================

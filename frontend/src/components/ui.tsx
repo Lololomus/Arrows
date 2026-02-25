@@ -192,7 +192,7 @@ export function Modal({ isOpen, onClose, children, className = '' }: ModalProps)
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 safe-fixed z-50 flex items-center justify-center p-4"
         >
           {/* Backdrop */}
           <motion.div

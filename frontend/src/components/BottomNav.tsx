@@ -1,4 +1,4 @@
-import { memo, useCallback, type MouseEvent } from 'react';
+import { memo, useCallback, useEffect, useRef, type MouseEvent } from 'react';
 import { motion } from 'framer-motion';
 import { Users, ClipboardList, Gamepad2, Trophy, ShoppingBag } from 'lucide-react';
 import { UI_ANIMATIONS } from '../config/constants';
@@ -29,6 +29,8 @@ const fadeDuration = UI_ANIMATIONS.fade / 1000;
 const scaleDuration = UI_ANIMATIONS.scale / 1000;
 
 const BottomNavComponent = ({ activeTab, onTabChange }: BottomNavProps) => {
+  const navRef = useRef<HTMLDivElement>(null);
+
   const handleTabClick = useCallback(
     (event: MouseEvent<HTMLButtonElement>) => {
       const id = event.currentTarget.dataset.tabId as TabId | undefined;
@@ -44,8 +46,36 @@ const BottomNavComponent = ({ activeTab, onTabChange }: BottomNavProps) => {
     [activeTab, onTabChange]
   );
 
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+
+    const rootStyle = document.documentElement.style;
+    const writeNavOffset = () => {
+      const measuredHeight = Math.ceil(nav.getBoundingClientRect().height);
+      if (measuredHeight > 0) {
+        rootStyle.setProperty('--app-bottom-nav-offset', `${measuredHeight}px`);
+      }
+    };
+
+    writeNavOffset();
+    const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(writeNavOffset) : null;
+    resizeObserver?.observe(nav);
+    window.addEventListener('resize', writeNavOffset);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', writeNavOffset);
+      rootStyle.setProperty('--app-bottom-nav-offset', '96px');
+    };
+  }, []);
+
   return (
-    <div data-bottom-nav className="absolute bottom-0 left-0 z-30 w-full bg-slate-950 border-t border-slate-800 pb-6 pt-2 px-2 rounded-t-3xl safe-bottom shadow-[0_-8px_24px_rgba(0,0,0,0.35)]">
+    <div
+      ref={navRef}
+      data-bottom-nav
+      className="absolute bottom-0 left-0 z-30 w-full bg-slate-950 border-t border-slate-800 pb-6 pt-2 px-2 rounded-t-3xl safe-bottom shadow-[0_-8px_24px_rgba(0,0,0,0.35)]"
+    >
       <div className="flex justify-around items-end">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;

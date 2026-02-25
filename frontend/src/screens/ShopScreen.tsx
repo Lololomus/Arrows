@@ -403,7 +403,7 @@ export function ShopScreen() {
           </div>
         </div>
 
-        <div className="relative flex-1 overflow-hidden px-4 pb-24">
+        <div className="relative flex-1 overflow-hidden px-4 pb-nav">
           <AdaptiveParticles
             variant="bg"
             tone="neutral"
@@ -475,7 +475,7 @@ export function ShopScreen() {
       </div>
 
       {/* Content */}
-      <div className="relative flex-1 overflow-y-auto custom-scrollbar px-4 pb-24">
+      <div className="relative flex-1 overflow-y-auto custom-scrollbar px-4 pb-nav">
         <AdaptiveParticles
           variant="bg"
           tone="neutral"
@@ -821,7 +821,7 @@ export function ShopScreen() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setSelectedItem(null)}
-              className="fixed inset-0 bg-black/80 backdrop-blur-md z-50"
+              className="fixed inset-0 safe-fixed bg-black/80 backdrop-blur-md z-50"
             />
 
             <motion.div
@@ -829,7 +829,8 @@ export function ShopScreen() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 50 }}
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="fixed inset-x-4 bottom-20 top-auto translate-y-0 z-50 max-w-md mx-auto max-h-[75vh] overflow-y-auto custom-scrollbar"
+              className="fixed inset-x-4 top-auto translate-y-0 z-50 max-w-md mx-auto max-h-[75vh] overflow-y-auto custom-scrollbar"
+              style={{ bottom: 'calc(var(--app-bottom-nav-offset, 96px) + 8px)' }}
             >
               <div className={`
                 relative rounded-3xl overflow-hidden border-2
@@ -1014,10 +1015,10 @@ export function ShopScreen() {
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: boxReward ? 1 : 0 }}
-              className="fixed inset-0 bg-black/95 backdrop-blur-lg z-[70] pointer-events-none"
+              className="fixed inset-0 safe-fixed bg-black/95 backdrop-blur-lg z-[70] pointer-events-none"
             />
 
-            <div className="fixed inset-0 z-50 bg-black/90">
+            <div className="fixed inset-0 safe-fixed z-50 bg-black/90">
               <div className="h-full flex flex-col items-center justify-center">
                 <motion.div
                   initial={{ opacity: 0, y: -50 }}
@@ -1138,7 +1139,7 @@ export function ShopScreen() {
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.5 }}
                   transition={{ type: 'spring', damping: 15 }}
-                  className="fixed inset-0 z-[80] flex items-center justify-center"
+                  className="fixed inset-0 safe-fixed z-[80] flex items-center justify-center"
                   onClick={closeBoxReward}
                 >
                   <div className="relative">

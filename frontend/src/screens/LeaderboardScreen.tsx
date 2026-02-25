@@ -173,6 +173,7 @@ const SeasonInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose: (
               }
             }}
             className="fixed bottom-0 left-0 right-0 z-[2001] bg-[#1a1a24] rounded-t-[32px] border-t border-[#ca8a04]/30 p-6 pb-12 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]"
+            style={{ paddingBottom: 'calc(3rem + var(--app-safe-bottom))' }}
           >
             {/* Ползунок для свайпа */}
             <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-6" />

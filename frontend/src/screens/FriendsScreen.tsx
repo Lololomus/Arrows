@@ -45,7 +45,7 @@ export function FriendsScreen({ onOpenLeaderboard }: FriendsScreenProps) {
   };
 
   return (
-    <div className="px-4 pb-24 h-full flex flex-col pt-4 relative overflow-hidden">
+    <div className="px-4 pb-nav h-full flex flex-col pt-4 relative overflow-hidden">
       <AdaptiveParticles
         variant="bg"
         tone="neutral"
