@@ -1,33 +1,20 @@
-// ===== 📄 ФАЙЛ: src/components/FXOverlay.tsx =====
 /**
- * Arrow Puzzle — Screen-Space FX Canvas (v4 — SYNCHRONOUS BRIDGE)
+ * Arrow Puzzle — Screen-Space FX Canvas (OPTIMIZED)
  *
- * АРХИТЕКТУРА v4:
- * Раньше: useEffect → diff history → создать CapturedArrow → wakeUp → draw.
- *   → 2-10 кадров задержки на мобиле. Стрелка "исчезала".
- *
- * Теперь: GameScreen.handleArrowClick() → emitFlyFX() → queue (синхронно).
- *   → FXOverlay render loop → drainFlyFX() → draw. Zero кадров задержки.
- *
- * FXOverlay больше НЕ:
- * - парсит history
- * - использует useEffect для захвата стрелок
- * - отслеживает prevHistoryLen/prevArrowIds
- *
- * FXOverlay ДЕЛАЕТ:
- * - Drain fxBridge queue в render loop (rAF)
- * - Рисует летящие стрелки с lock-at-capture параметрами
- * - Undo cleanup: useEffect на arrows убирает вернувшиеся стрелки
- * - LOD, zero-alloc, camera out of loop, rect cache — сохранены
+ * Оптимизации:
+ * 1. УБРАНА подписка на arrows — undo cleanup через history.length
+ *    (arrows менялся каждый клик → лишний ре-рендер FXOverlay)
+ * 2. Адаптивные эффекты: fly-out / shrink / pop в зависимости от масштаба
+ * 3. camScale из FlyFXItem для screen-space эффектов
  */
 
 import { useEffect, useRef } from 'react';
 import { MotionValue } from 'framer-motion';
 import { useGameStore } from '../stores/store';
 import { useActiveSkin, type GameSkin } from '../game/skins';
-import { DIRECTIONS, ARROW_EMOJIS } from '../config/constants';
+import { DIRECTIONS } from '../config/constants';
 import type { Arrow } from '../game/types';
-import { drainFlyFX, hasPendingFX, type FlyFXItem } from '../game/fxBridge';
+import { drainFlyFX, type FlyFXItem } from '../game/fxBridge';
 
 // ============================================
 // CONSTANTS
@@ -35,11 +22,15 @@ import { drainFlyFX, hasPendingFX, type FlyFXItem } from '../game/fxBridge';
 
 const GRID_PADDING_CELLS = 0.4;
 
+/** Пороги для адаптивных эффектов (screen-space px/cell) */
+const FX_FULL_FLY_THRESHOLD = 12;    // > 12px: полный fly-out
+const FX_SHRINK_THRESHOLD = 3;       // 3-12px: shrink + flash
+// < 3px: screen-space pop (всегда видимый)
+
 // ============================================
 // TYPES
 // ============================================
 
-/** Runtime fly state = bridge item + mutable progress */
 interface FlyingArrow extends FlyFXItem {
   progress: number;
 }
@@ -62,7 +53,7 @@ export interface FXOverlayProps {
 }
 
 // ============================================
-// STATIC POINT BUFFER (zero-alloc)
+// STATIC BUFFERS (zero-alloc)
 // ============================================
 
 const _fxPtBuf: { x: number; y: number }[] = [];
@@ -78,10 +69,6 @@ function clamp(v: number, min: number, max: number): number {
 // WAKE SINGLETON
 // ============================================
 
-/**
- * FXOverlay регистрирует свою wake-функцию сюда.
- * GameScreen вызывает wakeFXOverlay() после emitFlyFX().
- */
 let _wakeFn: (() => void) | null = null;
 
 export function wakeFXOverlay(): void {
@@ -98,7 +85,6 @@ export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, 
   const flyingRef = useRef<FlyingArrow[]>([]);
   const skin = useActiveSkin();
 
-  // Cached container rect
   const cachedRectRef = useRef<CachedRect>({ left: 0, top: 0, width: 0, height: 0 });
 
   // ============================================
@@ -128,23 +114,34 @@ export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, 
   }, [containerRef]);
 
   // ============================================
-  // UNDO CLEANUP — единственный useEffect для arrows
+  // UNDO CLEANUP — через history.length вместо arrows
+  // ⚡ arrows менялся каждый клик → лишний ре-рендер
+  //    history.length уменьшается ТОЛЬКО при undo
   // ============================================
 
-  const arrows = useGameStore(s => s.arrows);
+  const historyLen = useGameStore(s => s.history.length);
+  const prevHistoryLenRef = useRef(historyLen);
 
   useEffect(() => {
     if (!active) return;
     const flying = flyingRef.current;
-    if (flying.length === 0) return;
 
-    const currentIds = new Set(arrows.map(a => a.id));
-    for (let i = flying.length - 1; i >= 0; i--) {
-      if (currentIds.has(flying[i].arrow.id)) {
-        flying.splice(i, 1);
+    // history.length уменьшился → undo произошёл
+    if (historyLen < prevHistoryLenRef.current && flying.length > 0) {
+      // Получаем текущие arrow IDs из store
+      const currentArrows = useGameStore.getState().arrows;
+      const currentIds = new Set(currentArrows.map(a => a.id));
+
+      // Убираем анимации стрелок, которые вернулись
+      for (let i = flying.length - 1; i >= 0; i--) {
+        if (currentIds.has(flying[i].arrow.id)) {
+          flying.splice(i, 1);
+        }
       }
     }
-  }, [arrows, active]);
+
+    prevHistoryLenRef.current = historyLen;
+  }, [historyLen, active]);
 
   // ============================================
   // RENDER LOOP
@@ -178,7 +175,7 @@ export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, 
     function render(now: number) {
       if (!isRunning || !ctx || !canvas) return;
 
-      // === DRAIN QUEUE — синхронно из fxBridge ===
+      // === DRAIN QUEUE ===
       const newItems = drainFlyFX();
       const flying = flyingRef.current;
       for (let i = 0; i < newItems.length; i++) {
@@ -222,7 +219,8 @@ export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, 
           continue;
         }
 
-        drawFlyingArrow(ctx, fa, cellSize, skin);
+        // ⚡ Адаптивный эффект по screenCellSize
+        drawAdaptiveFX(ctx, fa, cellSize, skin);
       }
 
       ctx.restore(); // camera
@@ -233,7 +231,6 @@ export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, 
 
     animFrameRef.current = requestAnimationFrame(render);
 
-    // Register wake function for GameScreen
     const wakeUp = () => {
       if (animFrameRef.current === 0 && isRunning) {
         animFrameRef.current = requestAnimationFrame(render);
@@ -260,10 +257,34 @@ export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, 
 }
 
 // ============================================
-// DRAWING: Flying Arrow (dispatcher)
+// ADAPTIVE FX DISPATCHER
 // ============================================
 
-function drawFlyingArrow(
+function drawAdaptiveFX(
+  ctx: CanvasRenderingContext2D,
+  fa: FlyingArrow,
+  cellSize: number,
+  skin: GameSkin,
+) {
+  const scs = fa.screenCellSize;
+
+  if (scs >= FX_FULL_FLY_THRESHOLD) {
+    // Полный fly-out (стрелка хорошо видна)
+    drawFlyEffect(ctx, fa, cellSize, skin);
+  } else if (scs >= FX_SHRINK_THRESHOLD) {
+    // Shrink + цветная вспышка (стрелка мелкая, но видна пятном)
+    drawShrinkEffect(ctx, fa, cellSize);
+  } else {
+    // Screen-space pop (стрелка невидима, нужен гарантированный маркер)
+    drawPopEffect(ctx, fa, cellSize);
+  }
+}
+
+// ============================================
+// EFFECT: Full Fly-out (screenCell >= 12px)
+// ============================================
+
+function drawFlyEffect(
   ctx: CanvasRenderingContext2D,
   fa: FlyingArrow,
   cellSize: number,
@@ -286,7 +307,115 @@ function drawFlyingArrow(
 }
 
 // ============================================
-// DRAWING: Full Detail
+// EFFECT: Shrink + Flash (screenCell 3-12px)
+// ============================================
+
+function drawShrinkEffect(
+  ctx: CanvasRenderingContext2D,
+  fa: FlyingArrow,
+  cellSize: number,
+) {
+  const t = fa.progress;
+  const eased = 1 - (1 - t) * (1 - t); // easeOut quad
+
+  const head = fa.arrow.cells[0];
+  const half = cellSize / 2;
+  const cx = head.x * cellSize + half;
+  const cy = head.y * cellSize + half;
+
+  // Масштаб: 1 → 0 (стрелка сжимается в точку)
+  const scale = 1 - eased;
+  // Вспышка: 0 → peak → 0
+  const flashAlpha = t < 0.3 ? (t / 0.3) * 0.8 : 0.8 * (1 - (t - 0.3) / 0.7);
+  // Радиус вспышки в world coords, гарантированно видимый
+  const flashRadius = (12 + 20 * eased) / fa.camScale;
+
+  ctx.save();
+
+  // 1. Цветная вспышка (всегда видима)
+  ctx.globalAlpha = clamp(flashAlpha, 0, 1);
+  ctx.beginPath();
+  ctx.arc(cx, cy, flashRadius, 0, Math.PI * 2);
+  ctx.fillStyle = fa.arrow.color;
+  ctx.fill();
+
+  // 2. Белый core (ещё более видимый)
+  ctx.globalAlpha = clamp(flashAlpha * 0.9, 0, 1);
+  ctx.beginPath();
+  ctx.arc(cx, cy, flashRadius * 0.4, 0, Math.PI * 2);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fill();
+
+  // 3. Сжимающаяся стрелка (пока видна)
+  if (scale > 0.1) {
+    ctx.globalAlpha = clamp(scale, 0, 1);
+    ctx.translate(cx, cy);
+    ctx.scale(scale, scale);
+    ctx.translate(-cx, -cy);
+
+    // Простой LOD треугольник
+    const dir = DIRECTIONS[fa.arrow.direction];
+    const sz = cellSize * 0.7;
+    ctx.translate(cx, cy);
+    ctx.rotate(dir.angle * (Math.PI / 180));
+    ctx.beginPath();
+    ctx.moveTo(sz * 0.4, 0);
+    ctx.lineTo(-sz * 0.4, -sz * 0.4);
+    ctx.lineTo(-sz * 0.4, sz * 0.4);
+    ctx.closePath();
+    ctx.fillStyle = fa.arrow.color;
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+// ============================================
+// EFFECT: Screen-space Pop (screenCell < 3px)
+// ============================================
+
+function drawPopEffect(
+  ctx: CanvasRenderingContext2D,
+  fa: FlyingArrow,
+  cellSize: number,
+) {
+  const t = fa.progress;
+  const eased = 1 - (1 - t) * (1 - t); // easeOut quad
+
+  const head = fa.arrow.cells[0];
+  const half = cellSize / 2;
+  const cx = head.x * cellSize + half;
+  const cy = head.y * cellSize + half;
+
+  // Радиус в screen-pixels, делённый на camScale → гарантированно видим
+  const minScreenRadius = 16;
+  const maxScreenRadius = 32;
+  const screenRadius = minScreenRadius + (maxScreenRadius - minScreenRadius) * eased;
+  const worldRadius = screenRadius / fa.camScale;
+
+  const alpha = 1 - eased;
+
+  ctx.save();
+
+  // Цветное кольцо
+  ctx.globalAlpha = clamp(alpha * 0.7, 0, 1);
+  ctx.beginPath();
+  ctx.arc(cx, cy, worldRadius, 0, Math.PI * 2);
+  ctx.fillStyle = fa.arrow.color;
+  ctx.fill();
+
+  // Белый центр
+  ctx.globalAlpha = clamp(alpha * 0.9, 0, 1);
+  ctx.beginPath();
+  ctx.arc(cx, cy, worldRadius * 0.45, 0, Math.PI * 2);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// ============================================
+// DRAWING: Full Detail (unchanged)
 // ============================================
 
 function drawArrowFull(
@@ -361,16 +490,12 @@ function drawArrowFull(
   ctx.stroke();
   ctx.restore();
 
-  if (arrow.type !== 'normal') {
-    ctx.font = `${cellSize * 0.5}px serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(ARROW_EMOJIS[arrow.type], headX, headY);
-  }
+  // [Legacy] Special arrow emoji
+  // if (arrow.type !== 'normal') { ... }
 }
 
 // ============================================
-// DRAWING: LOD
+// DRAWING: LOD (unchanged)
 // ============================================
 
 function drawArrowLOD(

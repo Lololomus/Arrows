@@ -1,11 +1,12 @@
 import { useCallback } from 'react';
 import type { MotionValue } from 'framer-motion';
 import { ANIMATIONS } from '../../config/constants';
-import { processMove, getFreeArrows, isArrowBlocked } from '../../game/engine';
+import { processMove, getFreeArrows } from '../../game/engine';
 import { emitFlyFX } from '../../game/fxBridge';
 import { getSkin } from '../../game/skins';
 import { wakeFXOverlay } from '../../components/FXOverlay';
 import { useGameStore } from '../../stores/store';
+import { globalIndex } from '../../game/spatialIndex';
 
 interface UseArrowActionsParams {
   isIntroAnimating: boolean;
@@ -38,17 +39,19 @@ export function useArrowActions({
     if (isIntroAnimating) return;
 
     const currentState = useGameStore.getState();
-    const { arrows: currentArrows, status: currentStatus, gridSize: currentGrid } = currentState;
+    const { status: currentStatus, gridSize: currentGrid } = currentState;
 
     if (currentStatus !== 'playing') return;
 
-    const arrow = currentArrows.find((a) => a.id === arrowId);
+    // ⚡ O(1) через globalIndex вместо O(n) .find()
+    const arrow = globalIndex.getArrow(arrowId);
     if (!arrow) return;
 
     const grid = { width: currentGrid.width, height: currentGrid.height };
-    const result = processMove(arrow, currentArrows, grid);
+    const result = processMove(arrow, currentState.arrows, grid);
 
-    if (result.defrosted) return;
+    // [Legacy] result.defrosted — ледяные стрелки
+    // if (result.defrosted) return;
 
     if (result.collision) {
       setShakingArrow(arrowId);
@@ -62,15 +65,18 @@ export function useArrowActions({
       window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('light');
 
       const idsToRemove: string[] = [arrowId];
-      if (result.bombExplosion?.length) {
-        for (const exploded of result.bombExplosion) idsToRemove.push(exploded.id);
-        window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('heavy');
-      }
-      if (result.electricTarget) idsToRemove.push(result.electricTarget.id);
 
+      // [Legacy] Бомба и электро стрелки
+      // if (result.bombExplosion?.length) {
+      //   for (const exploded of result.bombExplosion) idsToRemove.push(exploded.id);
+      //   window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('heavy');
+      // }
+      // if (result.electricTarget) idsToRemove.push(result.electricTarget.id);
+
+      // ⚡ Собираем стрелки через globalIndex.getArrow() — O(1) каждая
       const arrowsToFly = idsToRemove
-        .map((id) => currentArrows.find((a) => a.id === id))
-        .filter((a): a is typeof arrow => !!a);
+        .map((id) => globalIndex.getArrow(id))
+        .filter((a): a is NonNullable<typeof a> => !!a);
 
       const activeSkin = getSkin(currentState.activeSkinId);
       emitFlyFX(arrowsToFly, baseCellSize, cameraScale.get(), activeSkin);
@@ -79,16 +85,17 @@ export function useArrowActions({
       if (idsToRemove.length === 1) removeArrow(arrowId);
       else removeArrows(idsToRemove);
 
+      // ⚡ Auto-unblock через globalIndex — O(1) getArrow + O(pathLen) isBlocked
       requestAnimationFrame(() => {
         const state = useGameStore.getState();
         const blocked = state.blockedArrowIds;
         if (blocked.length === 0) return;
-        const currentArrows2 = state.arrows;
         const currentGrid2 = { width: state.gridSize.width, height: state.gridSize.height };
         const toUnblock = blocked.filter((id) => {
-          const a = currentArrows2.find((ar) => ar.id === id);
-          if (!a) return true;
-          return !isArrowBlocked(a, currentArrows2, currentGrid2);
+          // ⚡ O(1) вместо O(n) .find()
+          const a = globalIndex.getArrow(id);
+          if (!a) return true; // стрелка удалена — разблокировать
+          return !globalIndex.isBlocked(a, currentGrid2);
         });
         if (toUnblock.length > 0) unblockArrows(toUnblock);
       });

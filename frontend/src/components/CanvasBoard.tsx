@@ -1,21 +1,30 @@
-/**
- * Arrow Puzzle - Canvas Board Renderer (VIEWPORT CANVAS + GESTURES)
+﻿/**
+ * Arrow Puzzle - Canvas Board Renderer (OPTIMIZED)
  *
- * АРХИТЕКТУРА:
- *   Canvas = viewport (100% контейнера). Камера через ctx.setTransform().
+ * ОПТИМИЗАЦИИ:
+ * 1. IMMORTAL RENDER LOOP — useEffect НЕ зависит от arrows/hints/blocked
+ *    → Render loop создаётся ОДИН раз, НЕ убивается при каждом клике
+ *    → Все данные читаются из refs (обновляются через лёгкие useEffect)
+ *    → 0 кадров мёртвой зоны между удалением стрелки и FX
  *
- * ФИЧИ:
- *   - Tap: мгновенный клик → стрелка улетает
- *   - Hold (200ms): preview ray (пунктирный луч маршрута)
- *   - Bounce: ошибочная стрелка двигается к столкновению и отскакивает назад
- *   - Red vignette: экран краснеет по краям при ошибке
- *   - Blocked arrows: после ошибки стрелка краснеет до освобождения пути
- *   - LOD, culling, sweep intro, hint glow — без изменений
+ * 2. УБРАН useMemo(currentOccupiedNum) — используется globalIndex.isOccupied()
+ *    → Экономия O(totalCells) на каждый клик
+ *
+ * 3. BBOX CACHE по arrow.id — не пересчитывается для существующих стрелок
+ *
+ * 4. STATIC CANVAS не инвалидируется на каждый клик
+ *    → Рисуется 1 раз при initLevel, обновляется инкрементально
+ *
+ * 5. getVisibleArrows — возвращает indices, не копирует массив
+ *
+ * 6. globalIndex.getArrow() вместо .find() — O(1) вместо O(n)
+ *
+ * 7. [Legacy] Специальные стрелки закомментированы
  */
 
-import { useEffect, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import type { Arrow, Cell } from '../game/types';
-import { DIRECTIONS, ARROW_EMOJIS } from '../config/constants';
+import { DIRECTIONS } from '../config/constants';
 import { useGameStore } from '../stores/store';
 import { useActiveSkin, type GameSkin } from '../game/skins';
 import type { MotionValue } from 'framer-motion';
@@ -102,6 +111,35 @@ const INTRO_MIN_DIM_FOR_SWEEP = 10;
 const INTRO_SWEEP_DURATION_MS = 650;
 
 // ============================================
+// BBOX CACHE (persists across renders)
+// ============================================
+
+const _bboxCache = new Map<string, ArrowBBox>();
+
+function getBBox(arrow: Arrow): ArrowBBox {
+  let bb = _bboxCache.get(arrow.id);
+  if (bb) return bb;
+
+  const cells = arrow.cells;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (let j = 0; j < cells.length; j++) {
+    const { x, y } = cells[j];
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  if (minX === Infinity) { minX = 0; maxX = 0; minY = 0; maxY = 0; }
+  bb = { minX, maxX, minY, maxY };
+  _bboxCache.set(arrow.id, bb);
+  return bb;
+}
+
+export function clearBBoxCache(): void {
+  _bboxCache.clear();
+}
+
+// ============================================
 // COMPONENT
 // ============================================
 
@@ -125,6 +163,11 @@ export function CanvasBoard({
   const shakingArrowId = useGameStore(s => s.shakingArrowId);
   const blockedArrowIds = useGameStore(s => s.blockedArrowIds);
 
+  // ⚡ REFS для immortal render loop — данные обновляются без пересоздания loop
+  const arrowsRef = useRef(arrows);
+  const hintedRef = useRef(hintedArrowId);
+  const blockedSetRef = useRef(new Set<string>());
+
   // Gesture refs
   const gestureRef = useRef<GestureState>({
     arrowId: null, startX: 0, startY: 0, startTime: 0, phase: 'idle',
@@ -143,25 +186,12 @@ export function CanvasBoard({
   const totalBoardH = (gridSize.height + GRID_PADDING_CELLS) * cellSize;
   const boardPadding = cellSize * (GRID_PADDING_CELLS / 2);
 
-  // --- STEP 3: Numeric cell encoding (no string alloc) ---
-  // Encode cell as single number: y * MAX_W + x. MAX_W must exceed any grid width.
-  const MAX_W = 1024; // supports grids up to 1024 wide
-
-  // Текущие занятые ячейки — numeric Set (no string keys)
-  const currentOccupiedNum = useMemo(() => {
-    const set = new Set<number>();
-    for (const arrow of arrows) {
-      for (const cell of arrow.cells) set.add(cell.y * MAX_W + cell.x);
-    }
-    return set;
-  }, [arrows]);
-
-  // Pre-parsed coordinate arrays for drawing (avoid split/map in hot path)
+  // ⚡ Initial cells — рисуется 1 раз при initLevel
   const initialCellsParsed = useRef<{ x: number; y: number }[]>([]);
-  const initialOccupiedNum = useRef<Set<number>>(new Set());
+  const initialCellsSet = useRef(false);
 
-  if (initialOccupiedNum.current.size === 0 && currentOccupiedNum.size > 0) {
-    initialOccupiedNum.current = new Set(currentOccupiedNum);
+  if (!initialCellsSet.current && arrows.length > 0) {
+    initialCellsSet.current = true;
     const arr: { x: number; y: number }[] = [];
     for (const arrow of arrows) {
       for (const cell of arrow.cells) arr.push({ x: cell.x, y: cell.y });
@@ -169,45 +199,29 @@ export function CanvasBoard({
     initialCellsParsed.current = arr;
   }
 
-  // blocked set для O(1) lookup в рендере
-  const blockedSet = useMemo(() => new Set(blockedArrowIds), [blockedArrowIds]);
-
-  // Precomputed arrow AABBs in cell-space to keep culling cheap per-frame.
-  const arrowBBoxes = useMemo<ArrowBBox[]>(() => {
-    const boxes = new Array<ArrowBBox>(arrows.length);
-    for (let i = 0; i < arrows.length; i++) {
-      const cells = arrows[i].cells;
-      let minX = Infinity;
-      let maxX = -Infinity;
-      let minY = Infinity;
-      let maxY = -Infinity;
-
-      for (let j = 0; j < cells.length; j++) {
-        const { x, y } = cells[j];
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-      }
-
-      if (minX === Infinity) {
-        minX = 0;
-        maxX = 0;
-        minY = 0;
-        maxY = 0;
-      }
-
-      boxes[i] = { minX, maxX, minY, maxY };
-    }
-    return boxes;
+  // ⚡ Sync refs (дёшево, без пересоздания render loop)
+  useEffect(() => {
+    arrowsRef.current = arrows;
+    wakeUpRenderRef.current();
   }, [arrows]);
 
-  // --- STEP 5: Offscreen canvas for static layers (background + grid dots) ---
+  useEffect(() => {
+    hintedRef.current = hintedArrowId;
+    wakeUpRenderRef.current();
+  }, [hintedArrowId]);
+
+  useEffect(() => {
+    blockedSetRef.current = new Set(blockedArrowIds);
+    wakeUpRenderRef.current();
+  }, [blockedArrowIds]);
+
+  // Static canvas
   const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const staticDirtyRef = useRef(true);
 
-  // Mark static layer dirty when arrows change (removal) or skin changes
-  useEffect(() => { staticDirtyRef.current = true; }, [arrows, skin]);
+  // ⚡ Static layer dirty ТОЛЬКО при смене уровня (skin или cellSize)
+  // НЕ при каждом удалении стрелки
+  useEffect(() => { staticDirtyRef.current = true; }, [skin, cellSize, gridSize.width, gridSize.height]);
 
   // ============================================
   // SCREEN → GRID CONVERSION
@@ -249,7 +263,6 @@ export function CanvasBoard({
   // ============================================
 
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
-    // Игнорируем всё, кроме ЛКМ или тапа
     if (e.pointerType === 'mouse' && e.button !== 0) return;
 
     const cell = screenToGrid(e.clientX, e.clientY);
@@ -264,10 +277,8 @@ export function CanvasBoard({
     };
 
     if (arrowId) {
-      // Захватываем pointer для получения move/up даже вне canvas
       e.currentTarget.setPointerCapture(e.pointerId);
 
-      // Таймер для перехода в hold-режим
       if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
       holdTimerRef.current = window.setTimeout(() => {
         const g = gestureRef.current;
@@ -275,12 +286,12 @@ export function CanvasBoard({
 
         g.phase = 'holding';
 
-        // Вычисляем preview ray
-        const arrow = arrows.find(a => a.id === g.arrowId);
+        // ⚡ globalIndex.getArrow() вместо .find()
+        const arrow = globalIndex.getArrow(g.arrowId);
         if (arrow) {
           const grid = { width: gridSize.width, height: gridSize.height };
           const path = getArrowPath(arrow, grid);
-          const collision = findCollision(arrow, arrows, grid);
+          const collision = findCollision(arrow, arrowsRef.current, grid);
           const dir = DIRECTIONS[arrow.direction];
 
           let rayCells = path;
@@ -309,7 +320,7 @@ export function CanvasBoard({
         wakeRenderLoop();
       }, HOLD_THRESHOLD_MS);
     }
-  }, [arrows, gridSize.width, gridSize.height, screenToGrid, wakeRenderLoop]);
+  }, [gridSize.width, gridSize.height, screenToGrid, wakeRenderLoop]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     const g = gestureRef.current;
@@ -318,13 +329,11 @@ export function CanvasBoard({
     const dx = e.clientX - g.startX;
     const dy = e.clientY - g.startY;
     const dist = Math.sqrt(dx * dx + dy * dy);
-
     const currentThreshold = g.phase === 'holding' ? (cellSize * 0.5) : MOVE_THRESHOLD_PX;
 
     if (dist > currentThreshold) {
       g.phase = 'cancelled';
       if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-
       if (previewRayRef.current) {
         previewRayRef.current = null;
         wakeRenderLoop();
@@ -337,43 +346,39 @@ export function CanvasBoard({
     if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
 
     if (g.phase === 'pending' && g.arrowId) {
-      // === TAP ===
-      if (blockedSet.has(g.arrowId)) {
+      if (blockedSetRef.current.has(g.arrowId)) {
         window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('light');
       } else {
         onArrowClick(g.arrowId);
       }
     } else if (g.phase === 'holding' && g.arrowId) {
-      // === HOLD RELEASE ===
       const cell = screenToGrid(e.clientX, e.clientY);
       const currentArrowId = cell ? globalIndex.getArrowAt(cell.x, cell.y) : null;
-
-      if (currentArrowId === g.arrowId && !blockedSet.has(g.arrowId)) {
+      if (currentArrowId === g.arrowId && !blockedSetRef.current.has(g.arrowId)) {
         onArrowClick(g.arrowId);
       }
-      // Иначе: отмена
     }
 
     gestureRef.current = { arrowId: null, startX: 0, startY: 0, startTime: 0, phase: 'idle' };
     previewRayRef.current = null;
     wakeRenderLoop();
-  }, [onArrowClick, screenToGrid, blockedSet, wakeRenderLoop]);
+  }, [onArrowClick, screenToGrid, wakeRenderLoop]);
 
   // ============================================
-  // BOUNCE TRIGGER (реакция на shakingArrowId из store)
+  // BOUNCE TRIGGER
   // ============================================
 
   useEffect(() => {
     if (!shakingArrowId) return;
 
-    const arrow = arrows.find(a => a.id === shakingArrowId);
+    // ⚡ globalIndex.getArrow() вместо .find()
+    const arrow = globalIndex.getArrow(shakingArrowId);
     if (!arrow) return;
 
     const dir = DIRECTIONS[arrow.direction];
     const grid = { width: gridSize.width, height: gridSize.height };
-    const collision = findCollision(arrow, arrows, grid);
+    const collision = globalIndex.findFirstOnPath(arrow, grid);
 
-    // Расстояние до столкновения, максимум 1.5 ячейки
     let distance = BOUNCE_DISTANCE_DEFAULT_CELLS;
     if (collision) {
       const head = arrow.cells[0];
@@ -400,7 +405,7 @@ export function CanvasBoard({
     };
 
     wakeRenderLoop();
-  }, [shakingArrowId, arrows, gridSize.width, gridSize.height, wakeRenderLoop]);
+  }, [shakingArrowId, gridSize.width, gridSize.height, wakeRenderLoop]);
 
   // ============================================
   // RESIZE OBSERVER
@@ -421,7 +426,9 @@ export function CanvasBoard({
   }, [wakeRenderLoop]);
 
   // ============================================
-  // RENDER LOOP
+  // ⚡ IMMORTAL RENDER LOOP
+  // Зависит ТОЛЬКО от структурных параметров (меняются при смене уровня).
+  // Данные (arrows, hints, blocked) читаются из refs.
   // ============================================
 
   useEffect(() => {
@@ -445,6 +452,7 @@ export function CanvasBoard({
         canvas.height = targetH;
         canvas.style.width = `${cw}px`;
         canvas.style.height = `${ch}px`;
+        staticDirtyRef.current = true; // resize invalidates static
       }
 
       const camX = springX.get();
@@ -454,14 +462,12 @@ export function CanvasBoard({
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Камера
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.translate(cw / 2 + camX, ch / 2 + camY);
       ctx.scale(camScale, camScale);
       ctx.translate(-totalBoardW / 2 + boardPadding, -totalBoardH / 2 + boardPadding);
 
-      // Intro sweep (visual reveal only).
-      // Camera push-in toggle lives in GameScreen (ENABLE_INTRO_CAMERA_PUSH_IN) and is independent.
+      // Intro sweep
       const elapsedSinceStart = now - levelStartTimeRef.current;
       const maxGridDim = Math.max(gridSize.width, gridSize.height);
       const shouldRunIntroSweep = skin.effects.enableAppearAnimation && maxGridDim >= INTRO_MIN_DIM_FOR_SWEEP;
@@ -474,7 +480,7 @@ export function CanvasBoard({
       ctx.save();
 
       if (isIntro) {
-        const ease = 1 - Math.pow(1 - progress, 3);
+        const ease = 1 - (1 - progress) * (1 - progress) * (1 - progress);
         const bw = gridSize.width * cellSize;
         const bh = gridSize.height * cellSize;
         const maxRadius = Math.max(0.1, Math.hypot(bw, bh));
@@ -483,17 +489,22 @@ export function CanvasBoard({
         ctx.clip();
       }
 
+      // ⚡ Read current data from refs
+      const currentArrows = arrowsRef.current;
+      const currentHinted = hintedRef.current;
+      const currentBlocked = blockedSetRef.current;
+
+      // Viewport culling
       const visibleArrows = getVisibleArrowsFromCamera(
-        arrows, arrowBBoxes, cw, ch, camX, camY, camScale,
+        currentArrows, cw, ch, camX, camY, camScale,
         totalBoardW, totalBoardH, boardPadding, cellSize,
       );
 
-      // 0+1. Static layers via offscreen canvas (Step 5)
+      // Static layers (background + grid dots)
       const gridW = gridSize.width * cellSize;
       const gridH = gridSize.height * cellSize;
 
       if (staticDirtyRef.current || !staticCanvasRef.current) {
-        // Create or resize offscreen canvas
         let offscreen = staticCanvasRef.current;
         if (!offscreen || offscreen.width !== gridW || offscreen.height !== gridH) {
           offscreen = document.createElement('canvas');
@@ -505,13 +516,15 @@ export function CanvasBoard({
         if (offCtx) {
           offCtx.clearRect(0, 0, gridW, gridH);
           drawBoardBackground(offCtx, cellSize, initialCellsParsed.current);
-          drawGridDots(offCtx, cellSize, initialCellsParsed.current, currentOccupiedNum, MAX_W, skin);
+          // ⚡ Grid dots: рисуем ВСЕ ячейки на static canvas при initLevel.
+          // Dots под существующими стрелками не видны (стрелки сверху).
+          // При удалении стрелки dot "появляется" автоматически.
+          drawGridDotsAll(offCtx, cellSize, initialCellsParsed.current, skin);
         }
         staticDirtyRef.current = false;
       }
 
       if (staticCanvasRef.current) {
-        // Step 9: Only draw visible portion of static canvas when zoomed in
         const halfVpW = cw / 2 / camScale;
         const halfVpH = ch / 2 / camScale;
         const vpCX = -camX / camScale + totalBoardW / 2 - boardPadding;
@@ -526,7 +539,6 @@ export function CanvasBoard({
         const sh = sy2 - sy;
 
         if (sw > 0 && sh > 0) {
-          // Full grid visible → simple drawImage (no sub-rect overhead)
           if (sx === 0 && sy === 0 && sw >= gridW && sh >= gridH) {
             ctx.drawImage(staticCanvasRef.current, 0, 0);
           } else {
@@ -535,13 +547,13 @@ export function CanvasBoard({
         }
       }
 
-      // 2. Стрелки (batched by color)
+      // Arrows
       let hasAnimations = isIntro;
       const bounce = bounceRef.current;
       const bounceActive = bounce && (now - bounce.startTime < bounce.duration);
       if (bounceActive) hasAnimations = true;
 
-      const globalHintPulse = hintedArrowId
+      const globalHintPulse = currentHinted
         ? 0.5 + 0.5 * Math.sin(now * 0.001 * skin.animation.hintGlowSpeed * Math.PI * 2)
         : 0;
       const ray = previewRayRef.current;
@@ -552,13 +564,13 @@ export function CanvasBoard({
 
       drawArrowsBatched(
         ctx, visibleArrows, cellSize,
-        hintedArrowId, globalHintPulse, activeHoldArrowId, holdPulse,
-        blockedSet,
+        currentHinted, globalHintPulse, activeHoldArrowId, holdPulse,
+        currentBlocked,
         bounceActive ? bounce : null,
         now, skin, isLOD,
       );
 
-      // 3. Preview ray
+      // Preview ray
       if (ray) {
         hasAnimations = true;
         drawPreviewRay(ctx, ray, cellSize, now, skin);
@@ -566,7 +578,7 @@ export function CanvasBoard({
 
       ctx.restore(); // sweep clip
 
-      // 4. Красная виньетка (screen-space)
+      // Error vignette
       const flash = errorFlashRef.current;
       const flashActive = flash && (now - flash.startTime < flash.duration);
       if (flashActive) {
@@ -581,7 +593,7 @@ export function CanvasBoard({
       if (bounce && !bounceActive) bounceRef.current = null;
       if (flash && !flashActive) errorFlashRef.current = null;
 
-      if (hasAnimations || hintedArrowId) {
+      if (hasAnimations || currentHinted) {
         animFrameRef.current = requestAnimationFrame(render);
       } else {
         animFrameRef.current = 0;
@@ -597,7 +609,7 @@ export function CanvasBoard({
     };
     wakeUpRenderRef.current = wakeUp;
 
-    // Step 8: Throttled spring wakeUp — ignore micro-drift < 0.5px / 0.001 scale
+    // Spring subscriptions
     const lastSpring = { x: springX.get(), y: springY.get(), s: springScale.get() };
     const springWake = () => {
       const x = springX.get(), y = springY.get(), s = springScale.get();
@@ -617,13 +629,11 @@ export function CanvasBoard({
       unsubX(); unsubY(); unsubScale();
     };
   }, [
-    arrows, arrowBBoxes, gridSize, cellSize, currentOccupiedNum, hintedArrowId, blockedSet,
+    // ⚡ ТОЛЬКО структурные зависимости (меняются при смене уровня)
+    cellSize, gridSize.width, gridSize.height,
     totalBoardW, totalBoardH, boardPadding, dpr, skin,
     springX, springY, springScale,
   ]);
-
-  // Перерисовка при смене blocked
-  useEffect(() => { wakeRenderLoop(); }, [blockedArrowIds, wakeRenderLoop]);
 
   return (
     <div ref={wrapperRef} style={{ width: '100%', height: '100%', position: 'absolute', inset: 0 }}>
@@ -641,59 +651,62 @@ export function CanvasBoard({
 }
 
 // ============================================
-// BOUNCE EASING: вперёд → назад
+// BOUNCE EASING
 // ============================================
 
 function bounceEasing(t: number): number {
   if (t < 0.4) {
-    // easeIn cubic: резкое ускорение к преграде (рывок)
     const p = t / 0.4;
     return p * p * p;
   } else {
-    // easeOut quad: плавный откат назад по инерции
     const p = (t - 0.4) / 0.6;
     return 1 - p * p;
   }
 }
 
 // ============================================
-// VIEWPORT CULLING
+// VIEWPORT CULLING (⚡ uses cached BBoxes)
 // ============================================
 
 function getVisibleArrowsFromCamera(
-  arrows: Arrow[], arrowBBoxes: ArrowBBox[], containerW: number, containerH: number,
+  arrows: Arrow[], containerW: number, containerH: number,
   camX: number, camY: number, camScale: number,
   totalBoardW: number, totalBoardH: number, boardPadding: number, cellSize: number,
 ): Arrow[] {
-  // Step 6: Compute viewport AABB in world-space for ANY scale
-  const halfVpW = containerW / 2 / camScale;
-  const halfVpH = containerH / 2 / camScale;
-  const vpCX = -camX / camScale + totalBoardW / 2 - boardPadding;
-  const vpCY = -camY / camScale + totalBoardH / 2 - boardPadding;
-  const margin = cellSize * 2;
+  // ⚡ Защита от нулевого/негативного масштаба
+  const safeCamScale = Math.max(camScale, 0.001);
+
+  const halfVpW = containerW / 2 / safeCamScale;
+  const halfVpH = containerH / 2 / safeCamScale;
+  const vpCX = -camX / safeCamScale + totalBoardW / 2 - boardPadding;
+  const vpCY = -camY / safeCamScale + totalBoardH / 2 - boardPadding;
+
+  // ⚡ FIX: margin покрывает bounce (до 4.5 cells) + chevron (~0.5 cell) + запас
+  // Плюс гарантируем минимум 100 screen-pixels в world-coords
+  const worldMargin = cellSize * 6;
+  const screenMargin = 100 / safeCamScale;
+  const margin = Math.max(worldMargin, screenMargin);
 
   const left = vpCX - halfVpW - margin;
   const right = vpCX + halfVpW + margin;
   const top = vpCY - halfVpH - margin;
   const bottom = vpCY + halfVpH + margin;
 
-  // Fast path: if viewport covers entire grid, skip filtering
   const gridPixelW = totalBoardW - 2 * boardPadding;
   const gridPixelH = totalBoardH - 2 * boardPadding;
   if (left <= 0 && top <= 0 && right >= gridPixelW && bottom >= gridPixelH) {
     return arrows;
   }
 
-  // Filter by precomputed arrow AABB over all cells (works for bent shapes too).
   const result: Arrow[] = [];
   for (let i = 0; i < arrows.length; i++) {
     const a = arrows[i];
-    const bbox = arrowBBoxes[i];
-    if (!bbox) continue;
+    const bbox = getBBox(a); // ⚡ cached
+    // ⚡ FIX: bbox.maxX/maxY — индекс ячейки, нужен правый/нижний край → +1
     const minX = bbox.minX * cellSize;
-    const maxX = bbox.maxX * cellSize;
+    const maxX = (bbox.maxX + 1) * cellSize;
     const minY = bbox.minY * cellSize;
-    const maxY = bbox.maxY * cellSize;
+    const maxY = (bbox.maxY + 1) * cellSize;
     if (maxX >= left && minX <= right && maxY >= top && minY <= bottom) {
       result.push(a);
     }
@@ -702,7 +715,7 @@ function getVisibleArrowsFromCamera(
 }
 
 // ============================================
-// DRAWING: Background, Grid Dots
+// DRAWING: Background
 // ============================================
 
 function drawBoardBackground(ctx: CanvasRenderingContext2D, cellSize: number, cells: { x: number; y: number }[]) {
@@ -720,13 +733,13 @@ function drawBoardBackground(ctx: CanvasRenderingContext2D, cellSize: number, ce
   ctx.restore();
 }
 
-function drawGridDots(ctx: CanvasRenderingContext2D, cellSize: number, initialCells: { x: number; y: number }[], currentOccupied: Set<number>, MAX_W: number, skin: GameSkin) {
+// ⚡ Рисуем ВСЕ dots (не проверяем occupied). Стрелки рисуются поверх.
+function drawGridDotsAll(ctx: CanvasRenderingContext2D, cellSize: number, cells: { x: number; y: number }[], skin: GameSkin) {
   const half = cellSize / 2;
   const dotR = cellSize * skin.geometry.gridDotRadius;
   ctx.fillStyle = skin.colors.gridDotColor;
-  for (let i = 0; i < initialCells.length; i++) {
-    const { x, y } = initialCells[i];
-    if (currentOccupied.has(y * MAX_W + x)) continue;
+  for (let i = 0; i < cells.length; i++) {
+    const { x, y } = cells[i];
     ctx.beginPath();
     ctx.arc(x * cellSize + half, y * cellSize + half, dotR, 0, Math.PI * 2);
     ctx.fill();
@@ -734,7 +747,7 @@ function drawGridDots(ctx: CanvasRenderingContext2D, cellSize: number, initialCe
 }
 
 // ============================================
-// DRAWING: Preview Ray (SOLID & DIMMED VERSION)
+// DRAWING: Preview Ray
 // ============================================
 
 function drawPreviewRay(ctx: CanvasRenderingContext2D, ray: PreviewRay, cellSize: number, now: number, skin: GameSkin) {
@@ -856,7 +869,6 @@ function drawPreviewRay(ctx: CanvasRenderingContext2D, ray: PreviewRay, cellSize
 
 function drawErrorVignette(ctx: CanvasRenderingContext2D, width: number, height: number, t: number) {
   let alpha: number;
-  // Пиковая альфа повышена до 0.6
   if (t < 0.2) alpha = (t / 0.2) * 0.6;
   else if (t < 0.5) alpha = 0.6;
   else alpha = 0.6 * (1 - (t - 0.5) / 0.5);
@@ -864,7 +876,6 @@ function drawErrorVignette(ctx: CanvasRenderingContext2D, width: number, height:
 
   const cx = width / 2;
   const cy = height / 2;
-  // Честная диагональ, чтобы углы не обрезались
   const outerR = Math.hypot(width, height) / 2;
   const grad = ctx.createRadialGradient(cx, cy, outerR * 0.4, cx, cy, outerR);
   grad.addColorStop(0, 'rgba(255, 0, 0, 0)');
@@ -874,7 +885,7 @@ function drawErrorVignette(ctx: CanvasRenderingContext2D, width: number, height:
 }
 
 // ============================================
-// PRECOMPUTED DIRECTION ROTATIONS (for batch chevrons)
+// PRECOMPUTED DIRECTION ROTATIONS
 // ============================================
 
 const _dirRot: Record<string, { cos: number; sin: number }> = {};
@@ -888,14 +899,6 @@ for (const key in DIRECTIONS) {
 // BATCHED ARROW RENDERING
 // ============================================
 
-/**
- * Draw all arrows with color batching.
- *
- * Normal arrows are grouped by color → 1 stroke per color instead of 1 per arrow.
- * Special arrows (blocked, hinted, bouncing, non-normal type) use individual drawArrow.
- *
- * Typical: 300 arrows × 9 colors → ~30 stroke calls instead of ~900.
- */
 function drawArrowsBatched(
   ctx: CanvasRenderingContext2D,
   arrows: Arrow[],
@@ -918,18 +921,17 @@ function drawArrowsBatched(
   const chevSpread = cellSize * skin.geometry.chevronSpreadRatio;
   const chevStroke = strokeWidth * skin.geometry.chevronStrokeMultiplier;
 
-  // --- Partition: batchable vs individual ---
   const byColor = new Map<string, Arrow[]>();
   const individual: Arrow[] = [];
 
   for (let i = 0; i < arrows.length; i++) {
     const a = arrows[i];
     if (
-      a.type !== 'normal' ||
       blockedSet.has(a.id) ||
       a.id === hintedArrowId ||
       a.id === activeHoldArrowId ||
       (bounce && bounce.arrowId === a.id)
+      // [Legacy] || a.type !== 'normal'
     ) {
       individual.push(a);
     } else {
@@ -941,7 +943,6 @@ function drawArrowsBatched(
 
   // === LOD BATCHED ===
   if (isLOD) {
-    // Bodies by color
     for (const [color, group] of byColor) {
       ctx.beginPath();
       for (let g = 0; g < group.length; g++) {
@@ -950,7 +951,6 @@ function drawArrowsBatched(
         const len = cells.length;
         if (len < 2) continue;
         const dir = DIRECTIONS[a.direction];
-        // tail → head (reversed)
         ctx.moveTo(cells[len - 1].x * cellSize + half, cells[len - 1].y * cellSize + half);
         for (let j = len - 2; j > 0; j--) {
           ctx.lineTo(cells[j].x * cellSize + half, cells[j].y * cellSize + half);
@@ -967,7 +967,6 @@ function drawArrowsBatched(
       ctx.stroke();
     }
 
-    // Head triangles by color (pre-rotated, filled)
     for (const [color, group] of byColor) {
       ctx.beginPath();
       for (let g = 0; g < group.length; g++) {
@@ -977,7 +976,6 @@ function drawArrowsBatched(
         const hy = head.y * cellSize + half;
         const sz = cellSize * 0.7;
         const rot = _dirRot[a.direction];
-        // Triangle: (0.4, 0), (-0.4, -0.4), (-0.4, 0.4) — rotated
         const tipX = sz * 0.4, tipY = 0;
         const blX = -sz * 0.4, blY = -sz * 0.4;
         const brX = -sz * 0.4, brY = sz * 0.4;
@@ -992,7 +990,6 @@ function drawArrowsBatched(
 
   // === FULL DETAIL BATCHED ===
   } else {
-    // 1. Bodies by color
     for (const [color, group] of byColor) {
       ctx.beginPath();
       for (let g = 0; g < group.length; g++) {
@@ -1017,7 +1014,6 @@ function drawArrowsBatched(
       ctx.stroke();
     }
 
-    // 2. Chevrons by color (pre-rotated V-shape, no save/translate/rotate)
     for (const [color, group] of byColor) {
       ctx.beginPath();
       for (let g = 0; g < group.length; g++) {
@@ -1026,7 +1022,6 @@ function drawArrowsBatched(
         const hx = head.x * cellSize + half;
         const hy = head.y * cellSize + half;
         const rot = _dirRot[a.direction];
-        // V-shape local: (-chevLen, -chevSpread) → (0,0) → (-chevLen, chevSpread)
         const ax = -chevLen, ay = -chevSpread;
         const bx = -chevLen, by = chevSpread;
         ctx.moveTo(hx + ax * rot.cos - ay * rot.sin, hy + ax * rot.sin + ay * rot.cos);
@@ -1041,7 +1036,7 @@ function drawArrowsBatched(
     }
   }
 
-  // === Individual arrows (blocked, hinted, bouncing, special types) ===
+  // Individual arrows (blocked, hinted, bouncing)
   for (let i = 0; i < individual.length; i++) {
     const a = individual[i];
     const isBouncing = bounce && bounce.arrowId === a.id;
@@ -1059,7 +1054,7 @@ function drawArrowsBatched(
 }
 
 // ============================================
-// STATIC POINT BUFFER (Step 4: zero-alloc drawArrow)
+// STATIC POINT BUFFER (zero-alloc)
 // ============================================
 
 const _ptBuf: { x: number; y: number }[] = [];
@@ -1068,7 +1063,7 @@ function ensurePtBuf(len: number) {
 }
 
 // ============================================
-// DRAWING: Arrow
+// DRAWING: Individual Arrow
 // ============================================
 
 function drawArrow(
@@ -1114,7 +1109,6 @@ function drawArrow(
   const holdBodyHaloWidth = monolithStrokeWidth * 2.2;
   const holdBodyCoreWidth = monolithStrokeWidth * 1.28;
 
-  // Step 4: fill static buffer reversed (tail->head), zero allocs
   const cells = arrow.cells;
   const len = cells.length;
   ensurePtBuf(len);
@@ -1298,12 +1292,13 @@ function drawArrow(
 
   ctx.restore();
 
-  if (arrow.type !== 'normal') {
-    ctx.font = `${cellSize * 0.5}px serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(ARROW_EMOJIS[arrow.type], headX, headY);
-  }
+  // [Legacy] Special arrow emoji
+  // if (arrow.type !== 'normal') {
+  //   ctx.font = `${cellSize * 0.5}px serif`;
+  //   ctx.textAlign = 'center';
+  //   ctx.textBaseline = 'middle';
+  //   ctx.fillText(ARROW_EMOJIS[arrow.type], headX, headY);
+  // }
 
   if (applyBlockedDim) ctx.restore();
 }

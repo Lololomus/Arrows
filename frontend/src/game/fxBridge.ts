@@ -1,23 +1,9 @@
 /**
- * Arrow Puzzle — FX Event Bridge (SYNCHRONOUS)
+ * Arrow Puzzle — FX Event Bridge (OPTIMIZED)
  *
- * Синхронный канал между GameScreen (продюсер) и FXOverlay (консьюмер).
- *
- * ЗАЧЕМ:
- * Раньше FXOverlay ловил удалённые стрелки через useEffect + history diff.
- * useEffect выполняется ПОСЛЕ paint → 2-10 кадров задержки на мобиле.
- * Стрелка "просто исчезала" без анимации.
- *
- * Теперь: handleArrowClick() → emitFlyFX() → queue пополняется синхронно.
- * FXOverlay render loop (rAF) → drainFlyFX() → анимация в ЭТОМ ЖЕ кадре.
- * Zero delay. Стрелка бесшовно переходит из CanvasBoard в FXOverlay.
- *
- * АРХИТЕКТУРА:
- * - Модуль без React-зависимостей (чистый TS)
- * - Глобальный синглтон (как globalIndex в spatialIndex.ts)
- * - Продюсер: GameScreen.handleArrowClick() вызывает emitFlyFX()
- * - Консьюмер: FXOverlay render() вызывает drainFlyFX()
- * - Undo: GameScreen вызывает cancelFlyFX(arrowId) при undo
+ * Изменения:
+ * 1. camScale сохраняется в FlyFXItem — FXOverlay использует для адаптивного эффекта
+ * 2. screenCellSize сохраняется — для выбора типа эффекта (fly/shrink/pop)
  */
 
 import type { Arrow } from '../game/types';
@@ -29,11 +15,15 @@ import type { GameSkin } from '../game/skins';
 
 export interface FlyFXItem {
   arrow: Arrow;
-  startTime: number;        // performance.now() в момент КЛИКА
-  duration: number;          // Залочена при создании
-  flyDistanceWorld: number;  // Залочена при создании
-  minStrokeWorld: number;    // Залочена при создании
-  isLOD: boolean;            // Залочена при создании
+  startTime: number;
+  duration: number;
+  flyDistanceWorld: number;
+  minStrokeWorld: number;
+  isLOD: boolean;
+  /** ⚡ Масштаб камеры в момент клика — для адаптивного эффекта */
+  camScale: number;
+  /** ⚡ Размер ячейки на экране в момент клика */
+  screenCellSize: number;
 }
 
 // ============================================
@@ -67,13 +57,6 @@ function computeFlyDuration(baseDuration: number, cellSize: number, camScale: nu
 
 const _queue: FlyFXItem[] = [];
 
-/**
- * Вызывается из GameScreen.handleArrowClick() СИНХРОННО.
- *
- * Принимает массив удалённых стрелок + текущие параметры камеры/скина.
- * Создаёт FlyFXItem'ы и складывает в очередь.
- * startTime = now (момент клика, не момент useEffect).
- */
 export function emitFlyFX(
   removedArrows: Arrow[],
   cellSize: number,
@@ -83,14 +66,13 @@ export function emitFlyFX(
   const scale = Math.max(camScale, MIN_CAM_SCALE);
   const screenCellSize = cellSize * scale;
 
-  // Вся карта субпиксельная — не создаём анимации
+  // Субпиксельная карта — не создаём анимации
   if (screenCellSize < CULL_CELL_SCREEN_PX) return;
 
   const invScale = 1 / scale;
   const isLOD = screenCellSize < LOD_THRESHOLD;
   const now = performance.now();
 
-  // Fly distance: оригинальная формула clamped в screen-space
   const rawWorldDist = cellSize * skin.animation.flyDistanceMultiplier;
   const rawScreenDist = rawWorldDist * scale;
   const clampedScreenDist = clamp(rawScreenDist, MIN_FLY_SCREEN_PX, MAX_FLY_SCREEN_PX);
@@ -107,23 +89,17 @@ export function emitFlyFX(
       flyDistanceWorld: flyDistWorld,
       minStrokeWorld,
       isLOD,
+      camScale: scale,
+      screenCellSize,
     });
   }
 }
 
-/**
- * Вызывается из FXOverlay render loop (rAF).
- * Забирает все накопленные элементы из очереди.
- * Возвращает пустой массив если очереди нет.
- */
 export function drainFlyFX(): FlyFXItem[] {
-  if (_queue.length === 0) return _queue; // fast path: вернуть тот же пустой массив
+  if (_queue.length === 0) return _queue;
   return _queue.splice(0);
 }
 
-/**
- * Вызывается при undo — убирает стрелки из очереди (если ещё не забраны).
- */
 export function cancelFlyFX(arrowIds: Set<string>): void {
   for (let i = _queue.length - 1; i >= 0; i--) {
     if (arrowIds.has(_queue[i].arrow.id)) {
@@ -132,16 +108,10 @@ export function cancelFlyFX(arrowIds: Set<string>): void {
   }
 }
 
-/**
- * Полный сброс (при смене уровня).
- */
 export function clearFlyFX(): void {
   _queue.length = 0;
 }
 
-/**
- * Есть ли что-то в очереди? (Для wake-up FXOverlay render loop)
- */
 export function hasPendingFX(): boolean {
   return _queue.length > 0;
 }

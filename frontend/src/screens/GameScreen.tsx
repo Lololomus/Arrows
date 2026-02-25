@@ -7,6 +7,10 @@
  * - Убран GameBoard (SVG) и useCanvas threshold — всегда Canvas.
  * - cameraX/Y/Scale прокидываются напрямую в CanvasBoard и FXOverlay.
  * - Кинематографичное интро и zoom controls — без изменений.
+ *
+ * ОПТИМИЗАЦИИ (merged from old):
+ * - getHintCameraTarget: globalIndex.getArrow() O(1) вместо arrows.find() O(n)
+ * - arrows убран из deps getHintCameraTarget — globalIndex всегда актуален
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
@@ -22,6 +26,7 @@ import { GameHUD } from './game-screen/GameHUD';
 import { GameMenuModal } from './game-screen/GameMenuModal';
 import { GameResultModal } from './game-screen/GameResultModal';
 import { useArrowActions } from './game-screen/useArrowActions';
+import { globalIndex } from '../game/spatialIndex';
 
 import gameBgImage from '../assets/game-bg.jpg?url';
 
@@ -286,8 +291,10 @@ export function GameScreen() {
 
   useEffect(() => () => cancelPanTween(), [cancelPanTween]);
 
+  // ⚡ globalIndex.getArrow() O(1) вместо arrows.find() O(n)
+  // ⚡ arrows убран из deps — globalIndex всегда актуален
   const getHintCameraTarget = useCallback((arrowId: string) => {
-    const arrow = arrows.find(a => a.id === arrowId);
+    const arrow = globalIndex.getArrow(arrowId);
     if (!arrow) return null;
 
     let minX = Infinity;
@@ -328,7 +335,8 @@ export function GameScreen() {
 
     return { camX, camY, targetScale };
   }, [
-    arrows, viewW, viewH, baseCellSize, cameraScale, zoomBounds.minScale, zoomBounds.maxScale, gridSize.width, gridSize.height,
+    // ⚡ Убран arrows из deps — globalIndex всегда актуален
+    viewW, viewH, baseCellSize, cameraScale, zoomBounds.minScale, zoomBounds.maxScale, gridSize.width, gridSize.height,
   ]);
 
   const focusHintArrow = useCallback((arrowId: string, force = false): boolean => {
@@ -460,24 +468,24 @@ export function GameScreen() {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return null;
     return {
-      x: ((a.clientX + b.clientX) / 2) - rect.left,
-      y: ((a.clientY + b.clientY) / 2) - rect.top,
+      x: (a.clientX + b.clientX) / 2 - rect.left,
+      y: (a.clientY + b.clientY) / 2 - rect.top,
     };
   }, []);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     if (isIntroAnimating) return;
     cancelPanTween();
+
     if (e.touches.length === 2) {
-      setIsDragging(false);
-      const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-      if (dist <= 0) return;
-      pinchStartDist.current = dist;
-      pinchLastMidpoint.current = getTouchMidpointInContainer(e.touches[0], e.touches[1]);
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinchStartDist.current = Math.hypot(dx, dy);
       pinchStartScale.current = cameraScale.get();
+      pinchLastMidpoint.current = getTouchMidpointInContainer(e.touches[0], e.touches[1]);
+      setIsDragging(false);
     } else if (e.touches.length === 1) {
       setIsDragging(true);
-      pinchLastMidpoint.current = null;
       dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       lastTransform.current = { x: cameraX.get(), y: cameraY.get() };
     }
@@ -485,25 +493,26 @@ export function GameScreen() {
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (isIntroAnimating) return;
-    if (e.touches.length === 2 && pinchStartDist.current && pinchStartDist.current > 0) {
-      const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-      if (dist <= 0) return;
-      const targetScale = pinchStartScale.current * (dist / pinchStartDist.current);
-      const boundedScale = clamp(targetScale, zoomBounds.minScale, zoomBounds.maxScale);
+
+    if (e.touches.length === 2 && pinchStartDist.current) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.hypot(dx, dy);
+      const rawScale = pinchStartScale.current * (dist / pinchStartDist.current);
+      const boundedScale = clamp(rawScale, zoomBounds.minScale, zoomBounds.maxScale);
+
       const midpoint = getTouchMidpointInContainer(e.touches[0], e.touches[1]);
-      if (!midpoint) {
+      if (!midpoint || !pinchLastMidpoint.current) {
         applyScaleImmediate(boundedScale);
         return;
       }
 
-      const prevMidpoint = pinchLastMidpoint.current ?? midpoint;
-      const prevScale = cameraScale.get();
-      const safePrevScale = prevScale > 0 ? prevScale : zoomBounds.minScale;
+      const prevMidDx = pinchLastMidpoint.current.x - viewW / 2;
+      const prevMidDy = pinchLastMidpoint.current.y - viewH / 2;
       const prevX = cameraX.get();
       const prevY = cameraY.get();
+      const safePrevScale = Math.max(cameraScale.get(), 0.001);
 
-      const prevMidDx = prevMidpoint.x - viewW / 2;
-      const prevMidDy = prevMidpoint.y - viewH / 2;
       const currentMidDx = midpoint.x - viewW / 2;
       const currentMidDy = midpoint.y - viewH / 2;
 
