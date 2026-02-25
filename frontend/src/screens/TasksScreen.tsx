@@ -109,7 +109,7 @@ export function TasksScreen() {
   };
 
   return (
-    <div className="px-4 pb-nav pt-4 h-full flex flex-col relative overflow-hidden">
+    <div className="px-4 pb-nav pt-6 h-full flex flex-col relative overflow-hidden">
       <AdaptiveParticles
         variant="bg"
         tone="neutral"

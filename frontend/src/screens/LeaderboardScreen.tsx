@@ -622,7 +622,7 @@ export function LeaderboardScreen() {
   }, [leaderboard.length]);
 
   return (
-    <div className="px-4 h-full flex flex-col pt-4 relative overflow-hidden">
+    <div className="px-4 h-full flex flex-col pt-6 relative overflow-hidden">
       <AdaptiveParticles
         variant="bg"
         tone="blue"

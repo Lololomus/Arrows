@@ -383,7 +383,7 @@ export function ShopScreen() {
           </div>
         </div>
 
-        <div className="px-4 pt-4">
+        <div className="px-4 pt-6">
           <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-1 mb-4 flex relative border border-white/10">
             <div className="absolute top-1 bottom-1 left-1 w-[calc(50%-6px)] bg-white/10 rounded-xl shadow-sm" />
             <button
@@ -446,7 +446,7 @@ export function ShopScreen() {
       </div>
 
       {/* Tabs */}
-      <div className="px-4 pt-4">
+      <div className="px-4 pt-6">
         <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-1 mb-4 flex relative border border-white/10">
           <motion.div 
             className="absolute top-1 bottom-1 bg-white/10 rounded-xl shadow-sm"

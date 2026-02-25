@@ -167,6 +167,7 @@ button, .clickable {
 
 :root {
   --app-bottom-nav-offset: 96px;
+  --app-top-extra-offset: clamp(6px, 1vh, 10px);
   --app-safe-top: max(
     env(safe-area-inset-top, 0px),
     var(--tg-safe-area-inset-top, 0px),
@@ -196,7 +197,7 @@ button, .clickable {
 
 .safe-top,
 .safe-area-top {
-  padding-top: var(--app-safe-top);
+  padding-top: calc(var(--app-safe-top) + var(--app-top-extra-offset));
 }
 
 .safe-bottom,
@@ -220,19 +221,19 @@ button, .clickable {
 }
 
 .safe-y {
-  padding-top: var(--app-safe-top);
+  padding-top: calc(var(--app-safe-top) + var(--app-top-extra-offset));
   padding-bottom: var(--app-safe-bottom);
 }
 
 .safe-all {
-  padding-top: var(--app-safe-top);
+  padding-top: calc(var(--app-safe-top) + var(--app-top-extra-offset));
   padding-bottom: var(--app-safe-bottom);
   padding-left: var(--app-safe-left);
   padding-right: var(--app-safe-right);
 }
 
 .safe-fixed {
-  padding-top: var(--app-safe-top);
+  padding-top: calc(var(--app-safe-top) + var(--app-top-extra-offset));
   padding-bottom: var(--app-safe-bottom);
   padding-left: var(--app-safe-left);
   padding-right: var(--app-safe-right);

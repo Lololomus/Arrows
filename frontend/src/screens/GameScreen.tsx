@@ -149,6 +149,7 @@ export function GameScreen() {
   const dragStart = useRef({ x: 0, y: 0 });
   const lastTransform = useRef({ x: 0, y: 0 });
   const pinchStartDist = useRef<number | null>(null);
+  const pinchLastMidpoint = useRef<{ x: number; y: number } | null>(null);
   const pinchStartScale = useRef(1);
   const lastFocusedHintRef = useRef<string | null>(null);
   const panTweenFrameRef = useRef<number>(0);
@@ -451,6 +452,18 @@ export function GameScreen() {
     applyScaleImmediate(targetScale);
   }, [cameraScale, isIntroAnimating, cancelPanTween, applyScaleImmediate]);
 
+  const getTouchMidpointInContainer = useCallback((
+    a: { clientX: number; clientY: number },
+    b: { clientX: number; clientY: number },
+  ): { x: number; y: number } | null => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    return {
+      x: ((a.clientX + b.clientX) / 2) - rect.left,
+      y: ((a.clientY + b.clientY) / 2) - rect.top,
+    };
+  }, []);
+
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     if (isIntroAnimating) return;
     cancelPanTween();
@@ -459,13 +472,15 @@ export function GameScreen() {
       const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
       if (dist <= 0) return;
       pinchStartDist.current = dist;
+      pinchLastMidpoint.current = getTouchMidpointInContainer(e.touches[0], e.touches[1]);
       pinchStartScale.current = cameraScale.get();
     } else if (e.touches.length === 1) {
       setIsDragging(true);
+      pinchLastMidpoint.current = null;
       dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       lastTransform.current = { x: cameraX.get(), y: cameraY.get() };
     }
-  }, [cameraScale, cameraX, cameraY, isIntroAnimating, cancelPanTween]);
+  }, [cameraScale, cameraX, cameraY, isIntroAnimating, cancelPanTween, getTouchMidpointInContainer]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (isIntroAnimating) return;
@@ -473,7 +488,32 @@ export function GameScreen() {
       const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
       if (dist <= 0) return;
       const targetScale = pinchStartScale.current * (dist / pinchStartDist.current);
-      applyScaleImmediate(targetScale);
+      const boundedScale = clamp(targetScale, zoomBounds.minScale, zoomBounds.maxScale);
+      const midpoint = getTouchMidpointInContainer(e.touches[0], e.touches[1]);
+      if (!midpoint) {
+        applyScaleImmediate(boundedScale);
+        return;
+      }
+
+      const prevMidpoint = pinchLastMidpoint.current ?? midpoint;
+      const prevScale = cameraScale.get();
+      const safePrevScale = prevScale > 0 ? prevScale : zoomBounds.minScale;
+      const prevX = cameraX.get();
+      const prevY = cameraY.get();
+
+      const prevMidDx = prevMidpoint.x - viewW / 2;
+      const prevMidDy = prevMidpoint.y - viewH / 2;
+      const currentMidDx = midpoint.x - viewW / 2;
+      const currentMidDy = midpoint.y - viewH / 2;
+
+      const nextX = currentMidDx - ((prevMidDx - prevX) / safePrevScale) * boundedScale;
+      const nextY = currentMidDy - ((prevMidDy - prevY) / safePrevScale) * boundedScale;
+      const pan = clampPanToBounds(nextX, nextY, boundedScale);
+
+      cameraScale.set(boundedScale);
+      cameraX.set(pan.x);
+      cameraY.set(pan.y);
+      pinchLastMidpoint.current = midpoint;
     } else if (e.touches.length === 1 && isDragging) {
       const dx = e.touches[0].clientX - dragStart.current.x;
       const dy = e.touches[0].clientY - dragStart.current.y;
@@ -481,7 +521,20 @@ export function GameScreen() {
       cameraX.set(pan.x);
       cameraY.set(pan.y);
     }
-  }, [isDragging, cameraScale, cameraX, cameraY, isIntroAnimating, applyScaleImmediate, clampPanToBounds]);
+  }, [
+    isDragging,
+    cameraScale,
+    cameraX,
+    cameraY,
+    isIntroAnimating,
+    applyScaleImmediate,
+    clampPanToBounds,
+    getTouchMidpointInContainer,
+    zoomBounds.minScale,
+    zoomBounds.maxScale,
+    viewW,
+    viewH,
+  ]);
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     if (e.touches.length === 1) {
@@ -489,11 +542,13 @@ export function GameScreen() {
       dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       lastTransform.current = { x: cameraX.get(), y: cameraY.get() };
       pinchStartDist.current = null;
+      pinchLastMidpoint.current = null;
       return;
     }
 
     setIsDragging(false);
     pinchStartDist.current = null;
+    pinchLastMidpoint.current = null;
   }, [cameraX, cameraY]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -715,7 +770,7 @@ export function GameScreen() {
         </div>
 
         {/* FOOTER */}
-        <div className="flex flex-col items-center px-4 pb-8 safe-bottom pointer-events-auto bg-gradient-to-t from-slate-900/80 to-transparent pt-4">
+        <div className="flex flex-col items-center px-4 pb-8 safe-bottom pointer-events-auto bg-gradient-to-t from-slate-900/80 to-transparent pt-6">
           {!noMoreLevels && (
             <div className="flex justify-center items-center gap-3 w-full max-w-sm">
               <motion.button whileTap={{ scale: 0.9 }} onClick={onMenuClick} className="bg-slate-800/80 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-lg"><span className="text-white font-bold text-xs">MENU</span></motion.button>
