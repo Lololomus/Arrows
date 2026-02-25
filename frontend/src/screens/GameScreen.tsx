@@ -10,17 +10,18 @@
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { AnimatePresence, useMotionValue, motion } from 'framer-motion';
+import { useMotionValue, motion } from 'framer-motion';
 import { useAppStore, useGameStore } from '../stores/store';
 import { CanvasBoard } from '../components/CanvasBoard';
 import { gameApi } from '../api/client';
-import { RefreshCw, Lightbulb, RotateCcw, AlertTriangle, Heart, Trash2, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
-import { ANIMATIONS, MAX_CELL_SIZE, MIN_CELL_SIZE } from '../config/constants';
-import { processMove, getFreeArrows, isArrowBlocked } from '../game/engine';
-import { emitFlyFX, clearFlyFX } from '../game/fxBridge';
-import { getSkin } from '../game/skins';
-import { FXOverlay, wakeFXOverlay } from '../components/FXOverlay';
+import { MAX_CELL_SIZE, MIN_CELL_SIZE } from '../config/constants';
+import { clearFlyFX } from '../game/fxBridge';
+import { FXOverlay } from '../components/FXOverlay';
 import { LevelTransitionLoader } from '../components/ui/LevelTransitionLoader';
+import { GameHUD } from './game-screen/GameHUD';
+import { GameMenuModal } from './game-screen/GameMenuModal';
+import { GameResultModal } from './game-screen/GameResultModal';
+import { useArrowActions } from './game-screen/useArrowActions';
 
 import gameBgImage from '../assets/game-bg.jpg?url';
 
@@ -596,89 +597,19 @@ export function GameScreen() {
   }, [isIntroAnimating, zoomBounds.maxScale, zoomBounds.minScale, cameraScale, cancelPanTween, applyScaleImmediate]);
 
   // === КЛИК ПО СТРЕЛКЕ ===
-  const handleArrowClick = useCallback((arrowId: string) => {
-    if (isIntroAnimating) return;
-
-    const currentState = useGameStore.getState();
-    const { arrows: currentArrows, status: currentStatus, gridSize: currentGrid } = currentState;
-
-    if (currentStatus !== 'playing') return;
-
-    const arrow = currentArrows.find(a => a.id === arrowId);
-    if (!arrow) return;
-
-    const grid = { width: currentGrid.width, height: currentGrid.height };
-    const result = processMove(arrow, currentArrows, grid);
-
-    if (result.defrosted) return;
-
-    if (result.collision) {
-      setShakingArrow(arrowId);
-      blockArrow(arrowId);
-      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('error');
-      setTimeout(() => {
-        setShakingArrow(null);
-        failMove(arrowId);
-      }, ANIMATIONS.arrowError);
-    } else {
-      window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('light');
-
-      const idsToRemove: string[] = [arrowId];
-      if (result.bombExplosion?.length) {
-        for (const exploded of result.bombExplosion) idsToRemove.push(exploded.id);
-        window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('heavy');
-      }
-      if (result.electricTarget) idsToRemove.push(result.electricTarget.id);
-
-      // === v4: synchronous FX before store mutation ===
-      // emitFlyFX() queues arrows before React sees state removal.
-      // FXOverlay drains queue in the same rAF frame -> zero-frame gap.
-      const arrowsToFly = idsToRemove
-        .map(id => currentArrows.find(a => a.id === id))
-        .filter((a): a is typeof arrow => !!a);
-
-      const activeSkin = getSkin(currentState.activeSkinId);
-      emitFlyFX(arrowsToFly, baseCellSize, cameraScale.get(), activeSkin);
-      wakeFXOverlay();
-      // === end of v4 insert ===
-
-      if (idsToRemove.length === 1) removeArrow(arrowId);
-      else removeArrows(idsToRemove);
-
-      // Auto-unblock
-      requestAnimationFrame(() => {
-        const state = useGameStore.getState();
-        const blocked = state.blockedArrowIds;
-        if (blocked.length === 0) return;
-        const currentArrows2 = state.arrows;
-        const currentGrid2 = { width: state.gridSize.width, height: state.gridSize.height };
-        const toUnblock = blocked.filter(id => {
-          const a = currentArrows2.find(ar => ar.id === id);
-          if (!a) return true;
-          return !isArrowBlocked(a, currentArrows2, currentGrid2);
-        });
-        if (toUnblock.length > 0) unblockArrows(toUnblock);
-      });
-    }
-  }, [setShakingArrow, blockArrow, unblockArrows, failMove, removeArrow, removeArrows, isIntroAnimating, baseCellSize, cameraScale]);
-
-  const handleHint = useCallback(() => {
-    if (isIntroAnimating) return;
-    const {
-      arrows: currentArrows,
-      gridSize: currentGrid,
-      hintsRemaining: hints,
-      hintedArrowId: currentHinted,
-    } = useGameStore.getState();
-    if (hints <= 0) return;
-    if (currentHinted && currentArrows.some(a => a.id === currentHinted)) {
-      window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('light');
-      focusHintArrow(currentHinted, true);
-      return;
-    }
-    const free = getFreeArrows(currentArrows, { width: currentGrid.width, height: currentGrid.height });
-    if (free.length > 0) showHint(free[0].id);
-  }, [showHint, isIntroAnimating, focusHintArrow]);
+  const { handleArrowClick, handleHint } = useArrowActions({
+    isIntroAnimating,
+    baseCellSize,
+    cameraScale,
+    focusHintArrow,
+    setShakingArrow,
+    blockArrow,
+    unblockArrows,
+    failMove,
+    removeArrow,
+    removeArrows,
+    showHint,
+  });
 
   const onRestartClick = useCallback(() => { if (!isIntroAnimating) setConfirmAction('restart'); }, [isIntroAnimating]);
   const onMenuClick = useCallback(() => { if (!isIntroAnimating) setConfirmAction('menu'); }, [isIntroAnimating]);
@@ -691,41 +622,33 @@ export function GameScreen() {
     catch (e) { console.error(e); }
   }, []);
 
-  const livesUI = useMemo(() => (
-    <div className="flex gap-1.5">
-      {Array.from({ length: 3 }).map((_, i) => (
-        <motion.div key={i} initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: i * 0.1 }}>
-          <Heart size={24} fill={i < lives ? '#ef4444' : 'transparent'} stroke={i < lives ? '#ef4444' : 'rgba(255,255,255,0.3)'} strokeWidth={2} />
-        </motion.div>
-      ))}
-    </div>
-  ), [lives]);
-
   return (
     <div
       className="relative w-full h-full overflow-hidden font-sans select-none touch-none"
       style={{ backgroundImage: `url(${gameBgImage})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: '#1e3a52' }}
     >
-      <div className="relative z-10 flex flex-col h-full mx-auto pointer-events-none">
-
-        {/* HEADER */}
-        <div className="flex justify-center items-center p-4 pt-6 safe-area-top gap-4 pointer-events-auto">
-          <div className="bg-slate-800/80 backdrop-blur-md px-6 py-2 rounded-2xl border border-white/10 shadow-lg flex items-center gap-2">
-            <span className="text-white/60 text-xs font-medium uppercase tracking-wider">Level</span>
-            <span className="text-white font-bold text-xl">{currentLevel}</span>
-          </div>
-          <div className="bg-slate-800/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 shadow-lg">
-            {livesUI}
-          </div>
-          <div className="bg-slate-800/60 px-3 py-1 rounded-xl border border-white/5">
-            <span className="text-white/40 text-[10px] font-mono">🖼 Canvas {gridSize.width}×{gridSize.height}</span>
-          </div>
-        </div>
-
-        {/* GAME AREA — CanvasBoard заполняет весь контейнер */}
+      <GameHUD
+        currentLevel={currentLevel}
+        lives={lives}
+        gridSize={gridSize}
+        noMoreLevels={noMoreLevels}
+        hintsRemaining={hintsRemaining}
+        canUndo={history.length > 0}
+        onMenuClick={onMenuClick}
+        onRestartClick={onRestartClick}
+        onHintClick={handleHint}
+        onUndoClick={undo}
+        onPrevLevel={() => setCurrentLevel((l) => Math.max(1, l - 1))}
+        onJumpLevel={(lvl) => setCurrentLevel(lvl)}
+        onNextLevelClick={() => setCurrentLevel((l) => l + 1)}
+        onDevReset={handleDevReset}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onZoomReset={resetZoom}
+      >
         <div
           ref={containerRef}
-          className="flex-1 overflow-hidden relative pointer-events-auto"
+          className="h-full overflow-hidden relative pointer-events-auto"
           style={{ cursor: isDragging ? 'grabbing' : 'default' }}
           onWheel={handleWheel}
           onTouchStart={handleTouchStart}
@@ -760,40 +683,8 @@ export function GameScreen() {
               springScale={cameraScale}
             />
           )}
-
-          {/* Zoom Controls */}
-          <div className="absolute top-4 right-4 flex flex-col gap-2 z-20">
-             <button onClick={handleZoomIn} className="p-2 bg-black/40 rounded-full text-white/70 hover:text-white"><ZoomIn size={20}/></button>
-             <button onClick={handleZoomOut} className="p-2 bg-black/40 rounded-full text-white/70 hover:text-white"><ZoomOut size={20}/></button>
-             <button onClick={resetZoom} className="p-2 bg-black/40 rounded-full text-white/70 hover:text-white"><Maximize size={20}/></button>
-          </div>
         </div>
-
-        {/* FOOTER */}
-        <div className="flex flex-col items-center px-4 pb-8 safe-bottom pointer-events-auto bg-gradient-to-t from-slate-900/80 to-transparent pt-6">
-          {!noMoreLevels && (
-            <div className="flex justify-center items-center gap-3 w-full max-w-sm">
-              <motion.button whileTap={{ scale: 0.9 }} onClick={onMenuClick} className="bg-slate-800/80 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-lg"><span className="text-white font-bold text-xs">MENU</span></motion.button>
-              <motion.button whileTap={{ scale: 0.9 }} onClick={onRestartClick} className="bg-slate-800/80 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-lg"><RefreshCw size={24} className="text-white" /></motion.button>
-              <motion.button whileTap={{ scale: 0.9 }} onClick={handleHint} disabled={hintsRemaining === 0} className="flex-1 bg-gradient-to-br from-amber-600/90 to-orange-600/90 backdrop-blur-md p-4 rounded-2xl border border-amber-500/30 flex items-center justify-center gap-3 shadow-lg"><Lightbulb size={24} className={hintsRemaining > 0 ? 'text-yellow-100' : 'text-white/30'} /><span className="text-white font-bold text-lg">{hintsRemaining}</span></motion.button>
-              <motion.button whileTap={{ scale: 0.9 }} onClick={undo} disabled={history.length === 0} className="bg-slate-800/80 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-lg"><RotateCcw size={24} className="text-white" /></motion.button>
-            </div>
-          )}
-
-          <div className="flex flex-col items-center gap-2 mt-4 opacity-90 transition-opacity w-full">
-              <div className="flex items-center gap-2 text-white/50 text-xs uppercase tracking-widest mb-1">Навигация</div>
-              <div className="flex items-center gap-3 bg-slate-900/50 p-2 rounded-xl border border-white/10">
-                <button onClick={() => setCurrentLevel(l => Math.max(1, l - 1))} className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white disabled:opacity-30" disabled={currentLevel <= 1}>←</button>
-                {[1, 30, 70, 100, 150].map(lvl => (
-                  <button key={lvl} onClick={() => setCurrentLevel(lvl)} className={`px-3 py-1 text-xs rounded-lg font-bold ${currentLevel === lvl ? 'bg-blue-500 text-white' : 'bg-white/5 text-white/60'}`}>{lvl}</button>
-                ))}
-                <button onClick={() => setCurrentLevel(l => l + 1)} className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white">→</button>
-                <div className="w-px h-6 bg-white/10 mx-1"></div>
-                <button onClick={handleDevReset} className="p-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20"><Trash2 size={16} /></button>
-              </div>
-          </div>
-        </div>
-      </div>
+      </GameHUD>
 
       {/* ===== СЛОЙ ЭФФЕКТОВ (fly-out) ===== */}
       <FXOverlay
@@ -806,34 +697,20 @@ export function GameScreen() {
         active={true}
       />
 
-      <AnimatePresence>
-        {confirmAction && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 safe-fixed z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm pointer-events-auto">
-            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="w-full max-w-xs bg-slate-900 border border-white/10 rounded-3xl p-6 text-center shadow-2xl">
-              <div className="w-16 h-16 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-4"><AlertTriangle size={32} className="text-yellow-500" /></div>
-              <h3 className="text-xl font-bold text-white mb-2">{confirmAction === 'restart' ? 'Начать заново?' : 'Выйти в меню?'}</h3>
-              <div className="flex gap-3 mt-6">
-                <button onClick={() => setConfirmAction(null)} className="flex-1 py-3 bg-white/5 rounded-xl text-white">Отмена</button>
-                <button onClick={confirmAction === 'restart' ? confirmRestart : confirmMenu} className="flex-1 py-3 bg-red-500 rounded-xl text-white font-bold">{confirmAction === 'restart' ? 'Рестарт' : 'Выйти'}</button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <GameMenuModal
+        action={confirmAction}
+        onCancel={() => setConfirmAction(null)}
+        onConfirmRestart={confirmRestart}
+        onConfirmMenu={confirmMenu}
+      />
 
-      <AnimatePresence>
-        {(status === 'victory' || status === 'defeat') && !noMoreLevels && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 safe-fixed z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm pointer-events-auto">
-             <motion.div initial={{ scale: 0.8, y: 50 }} animate={{ scale: 1, y: 0 }} transition={{ delay: 0.4 }} className="w-full max-w-sm bg-gradient-to-br from-slate-900/95 to-blue-900/95 backdrop-blur-xl rounded-3xl border border-white/20 shadow-2xl p-8 text-center">
-                <h2 className="text-4xl font-black text-white mb-2">{status === 'victory' ? 'Victory!' : 'Game Over'}</h2>
-                <div className="space-y-3 mt-6">
-                    <button onClick={status === 'victory' ? handleNextLevel : confirmRestart} className="w-full bg-blue-600 text-white font-bold py-4 rounded-2xl shadow-lg">{status === 'victory' ? 'Next Level' : 'Retry'}</button>
-                    <button onClick={confirmMenu} className="w-full bg-white/10 text-white font-medium py-3 rounded-2xl">Menu</button>
-                </div>
-             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <GameResultModal
+        status={status}
+        noMoreLevels={noMoreLevels}
+        onNextLevel={handleNextLevel}
+        onRetry={confirmRestart}
+        onMenu={confirmMenu}
+      />
     </div>
   );
 }
