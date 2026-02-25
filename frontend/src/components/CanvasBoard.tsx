@@ -460,7 +460,8 @@ export function CanvasBoard({
       ctx.scale(camScale, camScale);
       ctx.translate(-totalBoardW / 2 + boardPadding, -totalBoardH / 2 + boardPadding);
 
-      // Intro sweep
+      // Intro sweep (visual reveal only).
+      // Camera push-in toggle lives in GameScreen (ENABLE_INTRO_CAMERA_PUSH_IN) and is independent.
       const elapsedSinceStart = now - levelStartTimeRef.current;
       const maxGridDim = Math.max(gridSize.width, gridSize.height);
       const shouldRunIntroSweep = skin.effects.enableAppearAnimation && maxGridDim >= INTRO_MIN_DIM_FOR_SWEEP;
@@ -543,17 +544,21 @@ export function CanvasBoard({
       const globalHintPulse = hintedArrowId
         ? 0.5 + 0.5 * Math.sin(now * 0.001 * skin.animation.hintGlowSpeed * Math.PI * 2)
         : 0;
+      const ray = previewRayRef.current;
+      const activeHoldArrowId = ray?.arrowId ?? null;
+      const holdPulse = activeHoldArrowId
+        ? 0.5 + 0.5 * Math.sin(now * 0.001 * 3 * Math.PI * 2)
+        : 0;
 
       drawArrowsBatched(
         ctx, visibleArrows, cellSize,
-        hintedArrowId, globalHintPulse,
+        hintedArrowId, globalHintPulse, activeHoldArrowId, holdPulse,
         blockedSet,
         bounceActive ? bounce : null,
         now, skin, isLOD,
       );
 
       // 3. Preview ray
-      const ray = previewRayRef.current;
       if (ray) {
         hasAnimations = true;
         drawPreviewRay(ctx, ray, cellSize, now, skin);
@@ -897,6 +902,8 @@ function drawArrowsBatched(
   cellSize: number,
   hintedArrowId: string | null,
   hintPulse: number,
+  activeHoldArrowId: string | null,
+  holdPulse: number,
   blockedSet: Set<string>,
   bounce: BounceAnim | null,
   now: number,
@@ -905,8 +912,8 @@ function drawArrowsBatched(
 ) {
   const half = cellSize / 2;
   const strokeWidth = cellSize * skin.geometry.bodyStrokeRatio;
+  const monolithStrokeWidth = strokeWidth + cellSize * skin.geometry.outlineExtraRatio;
   const headGap = cellSize * skin.geometry.headGapRatio;
-  const outlineWidth = strokeWidth + cellSize * skin.geometry.outlineExtraRatio;
   const chevLen = cellSize * skin.geometry.chevronLengthRatio;
   const chevSpread = cellSize * skin.geometry.chevronSpreadRatio;
   const chevStroke = strokeWidth * skin.geometry.chevronStrokeMultiplier;
@@ -921,6 +928,7 @@ function drawArrowsBatched(
       a.type !== 'normal' ||
       blockedSet.has(a.id) ||
       a.id === hintedArrowId ||
+      a.id === activeHoldArrowId ||
       (bounce && bounce.arrowId === a.id)
     ) {
       individual.push(a);
@@ -953,7 +961,7 @@ function drawArrowsBatched(
         );
       }
       ctx.strokeStyle = color;
-      ctx.lineWidth = strokeWidth * 1.5;
+      ctx.lineWidth = monolithStrokeWidth;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.stroke();
@@ -984,32 +992,7 @@ function drawArrowsBatched(
 
   // === FULL DETAIL BATCHED ===
   } else {
-    // 1. All outlines in one path (white border behind everything)
-    ctx.beginPath();
-    for (const [, group] of byColor) {
-      for (let g = 0; g < group.length; g++) {
-        const a = group[g];
-        const cells = a.cells;
-        const len = cells.length;
-        if (len < 2) continue;
-        const dir = DIRECTIONS[a.direction];
-        ctx.moveTo(cells[len - 1].x * cellSize + half, cells[len - 1].y * cellSize + half);
-        for (let j = len - 2; j > 0; j--) {
-          ctx.lineTo(cells[j].x * cellSize + half, cells[j].y * cellSize + half);
-        }
-        ctx.lineTo(
-          cells[0].x * cellSize + half - dir.dx * headGap,
-          cells[0].y * cellSize + half - dir.dy * headGap,
-        );
-      }
-    }
-    ctx.strokeStyle = skin.colors.outlineColor;
-    ctx.lineWidth = outlineWidth;
-    ctx.lineCap = skin.geometry.lineCap;
-    ctx.lineJoin = skin.geometry.lineJoin;
-    ctx.stroke();
-
-    // 2. Bodies by color
+    // 1. Bodies by color
     for (const [color, group] of byColor) {
       ctx.beginPath();
       for (let g = 0; g < group.length; g++) {
@@ -1028,13 +1011,13 @@ function drawArrowsBatched(
         );
       }
       ctx.strokeStyle = color;
-      ctx.lineWidth = strokeWidth;
+      ctx.lineWidth = monolithStrokeWidth;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.stroke();
     }
 
-    // 3. Chevrons by color (pre-rotated V-shape, no save/translate/rotate)
+    // 2. Chevrons by color (pre-rotated V-shape, no save/translate/rotate)
     for (const [color, group] of byColor) {
       ctx.beginPath();
       for (let g = 0; g < group.length; g++) {
@@ -1068,9 +1051,10 @@ function drawArrowsBatched(
       bounceOffset = bounce!.distance * bounceEasing(t) * cellSize;
     }
     const isHinted = a.id === hintedArrowId;
+    const isHeld = a.id === activeHoldArrowId;
     const hp = isHinted ? hintPulse : 0;
     const isBlocked = blockedSet.has(a.id);
-    drawArrow(ctx, a, cellSize, bounceOffset, isHinted, hp, skin, isLOD, isBlocked);
+    drawArrow(ctx, a, cellSize, bounceOffset, isHinted, hp, isHeld, holdPulse, skin, isLOD, isBlocked);
   }
 }
 
@@ -1091,31 +1075,46 @@ function drawArrow(
   ctx: CanvasRenderingContext2D, arrow: Arrow, cellSize: number,
   bounceOffset: number,
   isHinted: boolean, hintPulse: number,
+  isHeld: boolean, holdPulse: number,
   skin: GameSkin, isLOD: boolean, isBlocked: boolean,
 ) {
   const dir = DIRECTIONS[arrow.direction];
   const half = cellSize / 2;
   const strokeWidth = cellSize * skin.geometry.bodyStrokeRatio;
+  const monolithStrokeWidth = strokeWidth + cellSize * skin.geometry.outlineExtraRatio;
   const headGap = cellSize * skin.geometry.headGapRatio;
+  const HOLD_CORE_COLOR = '#00E5FF';
+  const isHoldActive = isHeld;
+  const isHintActive = isHinted && !isHoldActive;
+  const applyBlockedDim = isBlocked && !isHintActive && !isHoldActive;
 
   let strokeColor = arrow.color;
-  let needsWhiteHighlight = false;
-
-  if (isBlocked) {
+  if (isHoldActive) {
+    strokeColor = HOLD_CORE_COLOR;
+  } else if (isHintActive) {
+    strokeColor = skin.colors.hintColor;
+  } else if (isBlocked) {
     const upperColor = arrow.color.toUpperCase();
     if (upperColor === '#FF3B30' || upperColor === '#FF0000' || upperColor === '#FF2D55') {
       strokeColor = '#8B0000';
-      needsWhiteHighlight = true;
     } else {
       strokeColor = BLOCKED_COLOR;
     }
-  } else if (isHinted) {
-    strokeColor = skin.colors.hintColor;
   }
 
-  if (isBlocked) { ctx.save(); ctx.globalAlpha = BLOCKED_ALPHA; }
+  if (applyBlockedDim) {
+    ctx.save();
+    ctx.globalAlpha = BLOCKED_ALPHA;
+  }
 
-  // Step 4: fill static buffer reversed (tail→head), zero allocs
+  const hintGlowAlpha = Math.max(0, Math.min(1, 0.18 + 0.22 * hintPulse));
+  const hintBodyGlowWidth = monolithStrokeWidth * 2.4;
+  const hintBodyCoreWidth = monolithStrokeWidth * (1.02 + 0.18 * hintPulse);
+  const holdHaloAlpha = Math.max(0, Math.min(1, 0.28 + 0.30 * holdPulse));
+  const holdBodyHaloWidth = monolithStrokeWidth * 2.2;
+  const holdBodyCoreWidth = monolithStrokeWidth * 1.28;
+
+  // Step 4: fill static buffer reversed (tail->head), zero allocs
   const cells = arrow.cells;
   const len = cells.length;
   ensurePtBuf(len);
@@ -1144,31 +1143,66 @@ function drawArrow(
     }
   };
 
+  const strokeBodyPath = () => {
+    if (isHoldActive) {
+      buildPath();
+      ctx.save();
+      ctx.globalAlpha = holdHaloAlpha;
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = holdBodyHaloWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+      ctx.restore();
+
+      buildPath();
+      ctx.strokeStyle = HOLD_CORE_COLOR;
+      ctx.lineWidth = holdBodyCoreWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+      return;
+    }
+
+    if (isHintActive) {
+      buildPath();
+      ctx.save();
+      ctx.globalAlpha = hintGlowAlpha;
+      ctx.strokeStyle = skin.colors.hintColor;
+      ctx.lineWidth = hintBodyGlowWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+      ctx.restore();
+
+      buildPath();
+      ctx.strokeStyle = skin.colors.hintColor;
+      ctx.lineWidth = hintBodyCoreWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+      return;
+    }
+
+    buildPath();
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = monolithStrokeWidth;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  };
+
   // LOD
   if (isLOD) {
     if (len >= 2) {
-      buildPath();
       if (bounceOffset > 0) {
         ctx.setLineDash([geometricLength, 20000]);
         ctx.lineDashOffset = -bounceOffset;
       }
-      if (needsWhiteHighlight) {
-        // Step 7: wide white stroke instead of shadowBlur
-        buildPath();
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = strokeWidth * 1.5 + 4;
-        ctx.globalAlpha = 0.35;
-        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        ctx.stroke();
-        ctx.globalAlpha = isBlocked ? BLOCKED_ALPHA : 1;
-        buildPath();
-      }
-      ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = strokeWidth * 1.5;
-      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-      ctx.stroke();
+      strokeBodyPath();
       ctx.setLineDash([]);
     }
+
     const head = cells[0];
     const hx = head.x * cellSize + half + dir.dx * bounceOffset;
     const hy = head.y * cellSize + half + dir.dy * bounceOffset;
@@ -1181,74 +1215,46 @@ function drawArrow(
     ctx.lineTo(-sz * 0.4, -sz * 0.4);
     ctx.lineTo(-sz * 0.4, sz * 0.4);
     ctx.closePath();
-    ctx.fillStyle = strokeColor;
-    if (needsWhiteHighlight) {
+
+    if (isHoldActive) {
+      ctx.save();
+      ctx.globalAlpha = holdHaloAlpha;
       ctx.strokeStyle = 'white';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = Math.max(1.5, cellSize * 0.08);
       ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = HOLD_CORE_COLOR;
+      ctx.fill();
+    } else if (isHintActive) {
+      ctx.save();
+      ctx.globalAlpha = hintGlowAlpha;
+      ctx.strokeStyle = skin.colors.hintColor;
+      ctx.lineWidth = Math.max(1.5, cellSize * 0.1);
+      ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = skin.colors.hintColor;
+      ctx.fill();
+    } else {
+      ctx.fillStyle = strokeColor;
+      ctx.fill();
     }
-    ctx.fill();
+
     ctx.restore();
-    if (isBlocked) ctx.restore();
+    if (applyBlockedDim) ctx.restore();
     return;
   }
 
   // Full detail
   if (len >= 2) {
-    buildPath();
     if (bounceOffset > 0) {
       ctx.setLineDash([geometricLength, 20000]);
       ctx.lineDashOffset = -bounceOffset;
     }
-
-    ctx.strokeStyle = needsWhiteHighlight ? 'white' : skin.colors.outlineColor;
-    ctx.lineWidth = strokeWidth + cellSize * skin.geometry.outlineExtraRatio;
-    ctx.lineCap = skin.geometry.lineCap; ctx.lineJoin = skin.geometry.lineJoin;
-    ctx.stroke();
-
-    buildPath();
-    ctx.strokeStyle = isHinted && hintPulse > 0 ? skin.colors.hintColor : strokeColor;
-    ctx.lineWidth = isHinted && hintPulse > 0 ? strokeWidth * skin.animation.hintGlowStrokeMultiplier : strokeWidth;
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-
-    if ((isHinted && hintPulse > 0) || needsWhiteHighlight) {
-      // Step 7: Double-stroke glow (no shadowBlur)
-      ctx.save();
-      if (isHinted && hintPulse > 0) {
-        // Wide translucent glow stroke underneath
-        buildPath();
-        ctx.globalAlpha = hintPulse * skin.animation.hintGlowAlpha;
-        ctx.strokeStyle = skin.colors.hintColor;
-        ctx.lineWidth = strokeWidth * skin.animation.hintGlowStrokeMultiplier * 2.5;
-        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        ctx.stroke();
-        // Crisp stroke on top
-        buildPath();
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = skin.colors.hintColor;
-        ctx.lineWidth = strokeWidth * skin.animation.hintGlowStrokeMultiplier;
-        ctx.stroke();
-      } else if (needsWhiteHighlight) {
-        buildPath();
-        ctx.globalAlpha = 0.3;
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = strokeWidth + cellSize * 0.25;
-        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        ctx.stroke();
-        buildPath();
-        ctx.globalAlpha = isBlocked ? BLOCKED_ALPHA : 1;
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = strokeWidth;
-        ctx.stroke();
-      }
-      ctx.restore();
-    } else {
-      ctx.stroke();
-    }
+    strokeBodyPath();
     ctx.setLineDash([]);
   }
 
-  // Шеврон
+  // Chevron
   const head = cells[0];
   const headX = head.x * cellSize + half + dir.dx * bounceOffset;
   const headY = head.y * cellSize + half + dir.dy * bounceOffset;
@@ -1260,28 +1266,44 @@ function drawArrow(
   ctx.moveTo(-cellSize * skin.geometry.chevronLengthRatio, -cellSize * skin.geometry.chevronSpreadRatio);
   ctx.lineTo(0, 0);
   ctx.lineTo(-cellSize * skin.geometry.chevronLengthRatio, cellSize * skin.geometry.chevronSpreadRatio);
-  ctx.strokeStyle = strokeColor;
-  ctx.lineWidth = strokeWidth * skin.geometry.chevronStrokeMultiplier;
-  ctx.lineCap = skin.geometry.lineCap; ctx.lineJoin = skin.geometry.lineJoin;
-  if (needsWhiteHighlight) {
-    // Step 7: wide white chevron underneath instead of shadowBlur
+  const baseChevronStroke = strokeWidth * skin.geometry.chevronStrokeMultiplier;
+  ctx.lineCap = skin.geometry.lineCap;
+  ctx.lineJoin = skin.geometry.lineJoin;
+
+  if (isHoldActive) {
     ctx.save();
-    ctx.globalAlpha = 0.35;
+    ctx.globalAlpha = holdHaloAlpha;
     ctx.strokeStyle = 'white';
-    ctx.lineWidth = strokeWidth * skin.geometry.chevronStrokeMultiplier + 4;
+    ctx.lineWidth = Math.max(1.5, baseChevronStroke + cellSize * 0.03);
     ctx.stroke();
     ctx.restore();
+    ctx.strokeStyle = HOLD_CORE_COLOR;
+    ctx.lineWidth = baseChevronStroke * 1.12;
+    ctx.stroke();
+  } else if (isHintActive) {
+    ctx.save();
+    ctx.globalAlpha = hintGlowAlpha;
+    ctx.strokeStyle = skin.colors.hintColor;
+    ctx.lineWidth = baseChevronStroke * 2.2;
+    ctx.stroke();
+    ctx.restore();
+    ctx.strokeStyle = skin.colors.hintColor;
+    ctx.lineWidth = baseChevronStroke * (1.02 + 0.18 * hintPulse);
+    ctx.stroke();
+  } else {
     ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = strokeWidth * skin.geometry.chevronStrokeMultiplier;
+    ctx.lineWidth = baseChevronStroke;
+    ctx.stroke();
   }
-  ctx.stroke();
+
   ctx.restore();
 
   if (arrow.type !== 'normal') {
     ctx.font = `${cellSize * 0.5}px serif`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     ctx.fillText(ARROW_EMOJIS[arrow.type], headX, headY);
   }
 
-  if (isBlocked) ctx.restore();
+  if (applyBlockedDim) ctx.restore();
 }

@@ -256,7 +256,7 @@ export const useGameStore = create<GameStore>()(
        * Для обычных ходов без спецэффектов.
        */
       removeArrow: (arrowId) => {
-        const { arrows, removedArrowIds, lives } = get();
+        const { arrows, removedArrowIds, lives, hintedArrowId } = get();
         
         const arrow = arrows.find(a => a.id === arrowId);
         if (!arrow) return;
@@ -283,7 +283,7 @@ export const useGameStore = create<GameStore>()(
           moves: get().moves + 1,
           history: [...get().history, diff],
           status: newArrows.length === 0 ? 'victory' : 'playing',
-          hintedArrowId: null,
+          hintedArrowId: hintedArrowId === arrowId ? null : hintedArrowId,
           lives: newLives,
         });
       },
@@ -302,7 +302,7 @@ export const useGameStore = create<GameStore>()(
       removeArrows: (arrowIds) => {
         if (arrowIds.length === 0) return;
         
-        const { arrows, removedArrowIds, lives } = get();
+        const { arrows, removedArrowIds, lives, hintedArrowId } = get();
         
         const idsToRemove = new Set(arrowIds);
         
@@ -340,7 +340,7 @@ export const useGameStore = create<GameStore>()(
           moves: get().moves + 1,
           history: [...get().history, diff],
           status: newArrows.length === 0 ? 'victory' : 'playing',
-          hintedArrowId: null,
+          hintedArrowId: (hintedArrowId && idsToRemove.has(hintedArrowId)) ? null : hintedArrowId,
           lives: newLives,
         });
       },

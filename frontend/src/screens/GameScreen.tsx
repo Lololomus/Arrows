@@ -1,16 +1,16 @@
-﻿/**
+/**
  * Arrow Puzzle - Game Screen (VIEWPORT CANVAS)
  *
  * ИЗМЕНЕНИЯ:
  * - Убран <motion.div style={{ x, y, scale }}> вокруг доски.
  * - CanvasBoard заполняет весь containerRef, камера внутри ctx.setTransform().
  * - Убран GameBoard (SVG) и useCanvas threshold — всегда Canvas.
- * - springX/Y/Scale прокидываются напрямую в CanvasBoard и FXOverlay.
+ * - cameraX/Y/Scale прокидываются напрямую в CanvasBoard и FXOverlay.
  * - Кинематографичное интро и zoom controls — без изменений.
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { AnimatePresence, useMotionValue, useSpring, motion } from 'framer-motion';
+import { AnimatePresence, useMotionValue, motion } from 'framer-motion';
 import { useAppStore, useGameStore } from '../stores/store';
 import { CanvasBoard } from '../components/CanvasBoard';
 import { gameApi } from '../api/client';
@@ -24,25 +24,36 @@ import gameBgImage from '../assets/game-bg.jpg?url';
 
 type ZoomBounds = { minScale: number; maxScale: number; fitScale: number };
 type PanBounds = { minX: number; maxX: number; minY: number; maxY: number };
-type ZoomSource = 'wheel' | 'pinch' | 'button';
 
 const GRID_PADDING_CELLS = 0.4;
+const FIT_MARGIN_RATIO = 0.05;
 const ZOOM_OUT_MARGIN_RATIO = 0.10;
 const PAN_EDGE_SLACK_RATIO = 0.15;
-const MIN_ABS_SCALE = 0.35;
+const MIN_ABS_SCALE = 0.02;
 const MIN_VISIBLE_CELLS = 7;
 const MAX_ABS_SCALE = 4.0;
 const ZOOM_EPS = 0.001;
 const INTRO_MIN_DIM_FOR_BLOCK = 10;
 const INTRO_INPUT_LOCK_MS = 650;
 const INTRO_ZOOM_DELAY_MS = 350;
+const HINT_MIN_VISIBLE_CELLS = 12;
+const HINT_FOCUS_PADDING_CELLS = 2;
+const HINT_FOCUS_BASE_DURATION_MS = 320;
+const HINT_FOCUS_MIN_DURATION_MS = 280;
+const HINT_FOCUS_MAX_DURATION_MS = 460;
+const HINT_REFOCUS_PAN_EPS_PX = 6;
+const HINT_REFOCUS_SCALE_EPS = 0.02;
+// false: start and stay at fitScale. true: restore delayed intro push-in zoom.
+const ENABLE_INTRO_CAMERA_PUSH_IN = false;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
+function easeInOutCubic(t: number): number {
+  return t < 0.5
+    ? 4 * t * t * t
+    : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
 function computeZoomBounds(
@@ -53,8 +64,8 @@ function computeZoomBounds(
 ): ZoomBounds {
   const boardPixelW = (gridSize.width + GRID_PADDING_CELLS) * baseCellSize;
   const boardPixelH = (gridSize.height + GRID_PADDING_CELLS) * baseCellSize;
-  const safeW = Math.max(1, viewW - 64);
-  const safeH = Math.max(1, viewH - 64);
+  const safeW = Math.max(1, viewW * (1 - FIT_MARGIN_RATIO * 2));
+  const safeH = Math.max(1, viewH * (1 - FIT_MARGIN_RATIO * 2));
 
   const fitScale = Math.min(safeW / boardPixelW, safeH / boardPixelH, 1);
   const minScale = Math.max(MIN_ABS_SCALE, fitScale / (1 + ZOOM_OUT_MARGIN_RATIO));
@@ -114,7 +125,6 @@ export function GameScreen() {
   const failMove = useGameStore(s => s.failMove);
   const undo = useGameStore(s => s.undo);
   const showHint = useGameStore(s => s.showHint);
-  const clearHint = useGameStore(s => s.clearHint);
   const setStatus = useGameStore(s => s.setStatus);
   const setShakingArrow = useGameStore(s => s.setShakingArrow);
   const blockArrow = useGameStore(s => s.blockArrow);
@@ -132,18 +142,15 @@ export function GameScreen() {
   const cameraY = useMotionValue(0);
   const cameraScale = useMotionValue(1);
 
-  const springConfig = { stiffness: 300, damping: 30 };
-  const springX = useSpring(cameraX, springConfig);
-  const springY = useSpring(cameraY, springConfig);
-  const springScale = useSpring(cameraScale, springConfig);
-
   const [isDragging, setIsDragging] = useState(false);
   const [isIntroAnimating, setIsIntroAnimating] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const lastTransform = useRef({ x: 0, y: 0 });
   const pinchStartDist = useRef<number | null>(null);
   const pinchStartScale = useRef(1);
-  const lastZoomTsRef = useRef(performance.now());
+  const lastFocusedHintRef = useRef<string | null>(null);
+  const panTweenFrameRef = useRef<number>(0);
+  const panTweenTokenRef = useRef(0);
 
   const [confirmAction, setConfirmAction] = useState<'restart' | 'menu' | null>(null);
   const [noMoreLevels, setNoMoreLevels] = useState(false);
@@ -199,43 +206,158 @@ export function GameScreen() {
     return clampPan(x, y, panBounds);
   }, [viewW, viewH, boardPixelW, boardPixelH]);
 
+  const cancelPanTween = useCallback(() => {
+    panTweenTokenRef.current += 1;
+    if (panTweenFrameRef.current) {
+      cancelAnimationFrame(panTweenFrameRef.current);
+      panTweenFrameRef.current = 0;
+    }
+  }, []);
+
   const applyScaleImmediate = useCallback((targetScale: number) => {
     const boundedScale = clamp(targetScale, zoomBounds.minScale, zoomBounds.maxScale);
     cameraScale.set(boundedScale);
     const pan = clampPanToBounds(cameraX.get(), cameraY.get(), boundedScale);
     cameraX.set(pan.x);
     cameraY.set(pan.y);
-    lastZoomTsRef.current = performance.now();
   }, [zoomBounds.minScale, zoomBounds.maxScale, cameraScale, cameraX, cameraY, clampPanToBounds]);
 
-  const applyScaleWithRateLimit = useCallback((targetScale: number, nowMs: number, _source: ZoomSource) => {
-    const currentScale = cameraScale.get();
-    const boundedTarget = clamp(targetScale, zoomBounds.minScale, zoomBounds.maxScale);
-    const levelFactor = clamp((Math.max(gridSize.width, gridSize.height) - 4) / 16, 0, 1);
-    const zoomInRate = lerp(0.9, 1.6, levelFactor);
-    const zoomOutRate = lerp(1.2, 2.0, levelFactor);
-    const dtSec = clamp((nowMs - lastZoomTsRef.current) / 1000, 1 / 120, 0.1);
-    const rate = boundedTarget >= currentScale ? zoomInRate : zoomOutRate;
-    const maxDelta = rate * dtSec;
-    const delta = clamp(boundedTarget - currentScale, -maxDelta, maxDelta);
-    const nextScale = clamp(currentScale + delta, zoomBounds.minScale, zoomBounds.maxScale);
+  const animateCameraTo = useCallback((targetX: number, targetY: number, targetScale: number, durationMs = 180) => {
+    const boundedScale = clamp(targetScale, zoomBounds.minScale, zoomBounds.maxScale);
+    const target = clampPanToBounds(targetX, targetY, boundedScale);
+    const startScale = cameraScale.get();
+    const startPan = clampPanToBounds(cameraX.get(), cameraY.get(), startScale);
+    const startX = startPan.x;
+    const startY = startPan.y;
 
-    if (Math.abs(nextScale - currentScale) > ZOOM_EPS) {
-      cameraScale.set(nextScale);
-      const pan = clampPanToBounds(cameraX.get(), cameraY.get(), nextScale);
-      cameraX.set(pan.x);
-      cameraY.set(pan.y);
+    cancelPanTween();
+
+    if (
+      durationMs <= 0
+      || (
+        Math.abs(target.x - startX) < 0.5
+        && Math.abs(target.y - startY) < 0.5
+        && Math.abs(boundedScale - startScale) < 0.001
+      )
+    ) {
+      cameraScale.set(boundedScale);
+      cameraX.set(target.x);
+      cameraY.set(target.y);
+      return;
     }
 
-    lastZoomTsRef.current = nowMs;
-  }, [
-    cameraScale, cameraX, cameraY, zoomBounds.minScale, zoomBounds.maxScale,
-    gridSize.width, gridSize.height, clampPanToBounds,
-  ]);
+    const token = ++panTweenTokenRef.current;
+    const startTime = performance.now();
+
+    const tick = (now: number) => {
+      if (token !== panTweenTokenRef.current) return;
+      const t = Math.min(1, (now - startTime) / durationMs);
+      const eased = easeInOutCubic(t);
+      const scale = startScale + (boundedScale - startScale) * eased;
+      const x = startX + (target.x - startX) * eased;
+      const y = startY + (target.y - startY) * eased;
+      const clamped = clampPanToBounds(x, y, scale);
+      const nextX = Math.abs(clamped.x - x) < 0.01 ? x : clamped.x;
+      const nextY = Math.abs(clamped.y - y) < 0.01 ? y : clamped.y;
+      cameraScale.set(scale);
+      cameraX.set(nextX);
+      cameraY.set(nextY);
+      if (t < 1) {
+        panTweenFrameRef.current = requestAnimationFrame(tick);
+      } else {
+        cameraScale.set(boundedScale);
+        const finalPan = clampPanToBounds(target.x, target.y, boundedScale);
+        cameraX.set(finalPan.x);
+        cameraY.set(finalPan.y);
+        panTweenFrameRef.current = 0;
+      }
+    };
+
+    panTweenFrameRef.current = requestAnimationFrame(tick);
+  }, [zoomBounds.minScale, zoomBounds.maxScale, clampPanToBounds, cameraScale, cameraX, cameraY, cancelPanTween]);
 
   useEffect(() => {
     applyScaleImmediate(cameraScale.get());
   }, [zoomBounds.minScale, zoomBounds.maxScale, viewW, viewH, applyScaleImmediate, cameraScale]);
+
+  useEffect(() => () => cancelPanTween(), [cancelPanTween]);
+
+  const getHintCameraTarget = useCallback((arrowId: string) => {
+    const arrow = arrows.find(a => a.id === arrowId);
+    if (!arrow) return null;
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < arrow.cells.length; i++) {
+      const c = arrow.cells[i];
+      if (c.x < minX) minX = c.x;
+      if (c.x > maxX) maxX = c.x;
+      if (c.y < minY) minY = c.y;
+      if (c.y > maxY) maxY = c.y;
+    }
+    if (minX === Infinity || minY === Infinity) return null;
+
+    const hintWidthCells = maxX - minX + 1 + HINT_FOCUS_PADDING_CELLS * 2;
+    const hintHeightCells = maxY - minY + 1 + HINT_FOCUS_PADDING_CELLS * 2;
+    const minFocusWCells = Math.max(HINT_MIN_VISIBLE_CELLS, hintWidthCells);
+    const minFocusHCells = Math.max(HINT_MIN_VISIBLE_CELLS, hintHeightCells);
+
+    const safeW = Math.max(1, viewW * (1 - FIT_MARGIN_RATIO * 2));
+    const safeH = Math.max(1, viewH * (1 - FIT_MARGIN_RATIO * 2));
+    const hintFocusScale = Math.min(
+      safeW / (Math.max(1, minFocusWCells) * baseCellSize),
+      safeH / (Math.max(1, minFocusHCells) * baseCellSize),
+      zoomBounds.maxScale,
+    );
+    const currentScale = cameraScale.get();
+    const targetScale = clamp(Math.max(currentScale, hintFocusScale), zoomBounds.minScale, zoomBounds.maxScale);
+
+    const targetX = ((minX + maxX + 1) / 2) * baseCellSize;
+    const targetY = ((minY + maxY + 1) / 2) * baseCellSize;
+    const boardPadding = baseCellSize * (GRID_PADDING_CELLS / 2);
+    const totalBoardW = (gridSize.width + GRID_PADDING_CELLS) * baseCellSize;
+    const totalBoardH = (gridSize.height + GRID_PADDING_CELLS) * baseCellSize;
+    const camX = -targetScale * (targetX - totalBoardW / 2 + boardPadding);
+    const camY = -targetScale * (targetY - totalBoardH / 2 + boardPadding);
+
+    return { camX, camY, targetScale };
+  }, [
+    arrows, viewW, viewH, baseCellSize, cameraScale, zoomBounds.minScale, zoomBounds.maxScale, gridSize.width, gridSize.height,
+  ]);
+
+  const focusHintArrow = useCallback((arrowId: string, force = false): boolean => {
+    if (isIntroAnimating) return false;
+    const target = getHintCameraTarget(arrowId);
+    if (!target) return false;
+
+    const currentX = cameraX.get();
+    const currentY = cameraY.get();
+    const currentScale = cameraScale.get();
+    const panDelta = Math.hypot(target.camX - currentX, target.camY - currentY);
+    const scaleDelta = Math.abs(target.targetScale - currentScale);
+
+    const alreadyFocused = panDelta <= HINT_REFOCUS_PAN_EPS_PX && scaleDelta <= HINT_REFOCUS_SCALE_EPS;
+    if (alreadyFocused) {
+      lastFocusedHintRef.current = arrowId;
+      return false;
+    }
+
+    if (!force && lastFocusedHintRef.current === arrowId) return false;
+
+    const scaleDeltaPx = scaleDelta * Math.min(viewW, viewH);
+    const travel = panDelta + scaleDeltaPx;
+    const duration = clamp(
+      HINT_FOCUS_BASE_DURATION_MS + travel * 0.12,
+      HINT_FOCUS_MIN_DURATION_MS,
+      HINT_FOCUS_MAX_DURATION_MS,
+    );
+
+    animateCameraTo(target.camX, target.camY, target.targetScale, duration);
+    lastFocusedHintRef.current = arrowId;
+    return true;
+  }, [isIntroAnimating, getHintCameraTarget, animateCameraTo, cameraX, cameraY, cameraScale, viewW, viewH]);
 
   // === ЗАГРУЗКА УРОВНЯ ===
   const loadLevel = useCallback(async (levelNum: number) => {
@@ -261,18 +383,20 @@ export function GameScreen() {
     if (status !== 'playing') return;
 
     const fitAllScale = zoomBounds.fitScale;
-    const playScaleRaw = Math.min((viewW - 64) / (10 * baseCellSize), (viewH - 64) / (10 * baseCellSize), 1.5);
+    const safeW = Math.max(1, viewW * (1 - FIT_MARGIN_RATIO * 2));
+    const safeH = Math.max(1, viewH * (1 - FIT_MARGIN_RATIO * 2));
+    const playScaleRaw = Math.min(safeW / (10 * baseCellSize), safeH / (10 * baseCellSize), 1.5);
 
     // Масштаб чтобы влез весь уровень
     const playScale = clamp(playScaleRaw, zoomBounds.minScale, zoomBounds.maxScale);
+    const shouldUseIntroPushIn = ENABLE_INTRO_CAMERA_PUSH_IN && (gridSize.width > 12 || gridSize.height > 12);
     // Масштаб для комфортной игры (~10x10 ячеек на экране)
 
     // Жёсткий сброс камеры
-    springX.jump(0);
-    springY.jump(0);
-    springScale.jump(fitAllScale);
+    cancelPanTween();
     cameraX.set(0);
     cameraY.set(0);
+    cameraScale.set(fitAllScale);
     applyScaleImmediate(fitAllScale);
 
     const maxGridDim = Math.max(gridSize.width, gridSize.height);
@@ -281,11 +405,11 @@ export function GameScreen() {
 
     // Ждём sweep-волну, затем зумим
     const t1 = setTimeout(() => {
-      const finalScale = (gridSize.width > 12 || gridSize.height > 12) ? playScale : fitAllScale;
+      const finalScale = shouldUseIntroPushIn ? playScale : fitAllScale;
       cameraX.set(0);
       cameraY.set(0);
       applyScaleImmediate(finalScale);
-    }, shouldLockInputForIntro ? INTRO_ZOOM_DELAY_MS : 0);
+    }, shouldLockInputForIntro && shouldUseIntroPushIn ? INTRO_ZOOM_DELAY_MS : 0);
 
     if (!shouldLockInputForIntro) {
       return () => { clearTimeout(t1); };
@@ -299,37 +423,46 @@ export function GameScreen() {
   }, [
     status, gridSize.width, gridSize.height, baseCellSize,
     zoomBounds.fitScale, zoomBounds.minScale, zoomBounds.maxScale, viewW, viewH,
-    cameraX, cameraY, springX, springY, springScale, applyScaleImmediate,
+    cameraX, cameraY, cameraScale, applyScaleImmediate, cancelPanTween,
   ]);
+
+  useEffect(() => {
+    if (!hintedArrowId) {
+      lastFocusedHintRef.current = null;
+      return;
+    }
+    focusHintArrow(hintedArrowId);
+  }, [hintedArrowId, focusHintArrow]);
 
   // === ZOOM / PAN HANDLERS ===
   const handleWheel = useCallback((e: React.WheelEvent) => {
     if (isIntroAnimating) return;
     if (e.cancelable) e.preventDefault();
+    cancelPanTween();
 
     const normalized = clamp(-e.deltaY, -120, 120) / 120;
     if (Math.abs(normalized) < ZOOM_EPS) return;
 
     const currentScale = cameraScale.get();
     const targetScale = currentScale * Math.pow(1.12, normalized);
-    applyScaleWithRateLimit(targetScale, performance.now(), 'wheel');
-  }, [cameraScale, isIntroAnimating, applyScaleWithRateLimit]);
+    applyScaleImmediate(targetScale);
+  }, [cameraScale, isIntroAnimating, cancelPanTween, applyScaleImmediate]);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     if (isIntroAnimating) return;
+    cancelPanTween();
     if (e.touches.length === 2) {
       setIsDragging(false);
       const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
       if (dist <= 0) return;
       pinchStartDist.current = dist;
       pinchStartScale.current = cameraScale.get();
-      lastZoomTsRef.current = performance.now();
     } else if (e.touches.length === 1) {
       setIsDragging(true);
       dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       lastTransform.current = { x: cameraX.get(), y: cameraY.get() };
     }
-  }, [cameraScale, cameraX, cameraY, isIntroAnimating]);
+  }, [cameraScale, cameraX, cameraY, isIntroAnimating, cancelPanTween]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (isIntroAnimating) return;
@@ -337,7 +470,7 @@ export function GameScreen() {
       const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
       if (dist <= 0) return;
       const targetScale = pinchStartScale.current * (dist / pinchStartDist.current);
-      applyScaleWithRateLimit(targetScale, performance.now(), 'pinch');
+      applyScaleImmediate(targetScale);
     } else if (e.touches.length === 1 && isDragging) {
       const dx = e.touches[0].clientX - dragStart.current.x;
       const dy = e.touches[0].clientY - dragStart.current.y;
@@ -345,7 +478,7 @@ export function GameScreen() {
       cameraX.set(pan.x);
       cameraY.set(pan.y);
     }
-  }, [isDragging, cameraScale, cameraX, cameraY, isIntroAnimating, applyScaleWithRateLimit, clampPanToBounds]);
+  }, [isDragging, cameraScale, cameraX, cameraY, isIntroAnimating, applyScaleImmediate, clampPanToBounds]);
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     if (e.touches.length === 1) {
@@ -363,12 +496,13 @@ export function GameScreen() {
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (isIntroAnimating) return;
     if (e.ctrlKey && e.button === 0) {
+      cancelPanTween();
       setIsDragging(true);
       dragStart.current = { x: e.clientX, y: e.clientY };
       lastTransform.current = { x: cameraX.get(), y: cameraY.get() };
       e.preventDefault();
     }
-  }, [cameraX, cameraY, isIntroAnimating]);
+  }, [cameraX, cameraY, isIntroAnimating, cancelPanTween]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (isDragging && !isIntroAnimating) {
@@ -384,38 +518,36 @@ export function GameScreen() {
 
   const resetZoom = useCallback(() => {
     if (isIntroAnimating) return;
-    cameraX.set(0);
-    cameraY.set(0);
-    applyScaleImmediate(zoomBounds.fitScale);
-  }, [cameraX, cameraY, isIntroAnimating, applyScaleImmediate, zoomBounds.fitScale]);
+    animateCameraTo(0, 0, zoomBounds.fitScale, 180);
+  }, [isIntroAnimating, zoomBounds.fitScale, animateCameraTo]);
 
   const handleZoomIn = useCallback(() => {
     if (isIntroAnimating) return;
+    cancelPanTween();
     const step = clamp((zoomBounds.maxScale - zoomBounds.minScale) * 0.12, 0.08, 0.25);
     const target = cameraScale.get() + step;
-    applyScaleWithRateLimit(target, performance.now(), 'button');
-  }, [isIntroAnimating, zoomBounds.maxScale, zoomBounds.minScale, cameraScale, applyScaleWithRateLimit]);
+    applyScaleImmediate(target);
+  }, [isIntroAnimating, zoomBounds.maxScale, zoomBounds.minScale, cameraScale, cancelPanTween, applyScaleImmediate]);
 
   const handleZoomOut = useCallback(() => {
     if (isIntroAnimating) return;
+    cancelPanTween();
     const step = clamp((zoomBounds.maxScale - zoomBounds.minScale) * 0.12, 0.08, 0.25);
     const target = cameraScale.get() - step;
-    applyScaleWithRateLimit(target, performance.now(), 'button');
-  }, [isIntroAnimating, zoomBounds.maxScale, zoomBounds.minScale, cameraScale, applyScaleWithRateLimit]);
+    applyScaleImmediate(target);
+  }, [isIntroAnimating, zoomBounds.maxScale, zoomBounds.minScale, cameraScale, cancelPanTween, applyScaleImmediate]);
 
   // === КЛИК ПО СТРЕЛКЕ ===
   const handleArrowClick = useCallback((arrowId: string) => {
     if (isIntroAnimating) return;
 
     const currentState = useGameStore.getState();
-    const { arrows: currentArrows, status: currentStatus, gridSize: currentGrid, hintedArrowId: currentHint } = currentState;
+    const { arrows: currentArrows, status: currentStatus, gridSize: currentGrid } = currentState;
 
     if (currentStatus !== 'playing') return;
 
     const arrow = currentArrows.find(a => a.id === arrowId);
     if (!arrow) return;
-
-    if (currentHint) clearHint();
 
     const grid = { width: currentGrid.width, height: currentGrid.height };
     const result = processMove(arrow, currentArrows, grid);
@@ -458,15 +590,25 @@ export function GameScreen() {
         if (toUnblock.length > 0) unblockArrows(toUnblock);
       });
     }
-  }, [clearHint, setShakingArrow, blockArrow, unblockArrows, failMove, removeArrow, removeArrows, isIntroAnimating]);
+  }, [setShakingArrow, blockArrow, unblockArrows, failMove, removeArrow, removeArrows, isIntroAnimating]);
 
   const handleHint = useCallback(() => {
     if (isIntroAnimating) return;
-    const { arrows: currentArrows, gridSize: currentGrid, hintsRemaining: hints } = useGameStore.getState();
+    const {
+      arrows: currentArrows,
+      gridSize: currentGrid,
+      hintsRemaining: hints,
+      hintedArrowId: currentHinted,
+    } = useGameStore.getState();
     if (hints <= 0) return;
+    if (currentHinted && currentArrows.some(a => a.id === currentHinted)) {
+      window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('light');
+      focusHintArrow(currentHinted, true);
+      return;
+    }
     const free = getFreeArrows(currentArrows, { width: currentGrid.width, height: currentGrid.height });
     if (free.length > 0) showHint(free[0].id);
-  }, [showHint, isIntroAnimating]);
+  }, [showHint, isIntroAnimating, focusHintArrow]);
 
   const onRestartClick = useCallback(() => { if (!isIntroAnimating) setConfirmAction('restart'); }, [isIntroAnimating]);
   const onMenuClick = useCallback(() => { if (!isIntroAnimating) setConfirmAction('menu'); }, [isIntroAnimating]);
@@ -543,9 +685,9 @@ export function GameScreen() {
               cellSize={baseCellSize}
               hintedArrowId={hintedArrowId}
               onArrowClick={handleArrowClick}
-              springX={springX}
-              springY={springY}
-              springScale={springScale}
+              springX={cameraX}
+              springY={cameraY}
+              springScale={cameraScale}
             />
           )}
 
@@ -572,7 +714,7 @@ export function GameScreen() {
               <div className="flex items-center gap-2 text-white/50 text-xs uppercase tracking-widest mb-1">Навигация</div>
               <div className="flex items-center gap-3 bg-slate-900/50 p-2 rounded-xl border border-white/10">
                 <button onClick={() => setCurrentLevel(l => Math.max(1, l - 1))} className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white disabled:opacity-30" disabled={currentLevel <= 1}>←</button>
-                {[1, 5, 10, 15, 20].map(lvl => (
+                {[1, 30, 70, 100, 150].map(lvl => (
                   <button key={lvl} onClick={() => setCurrentLevel(lvl)} className={`px-3 py-1 text-xs rounded-lg font-bold ${currentLevel === lvl ? 'bg-blue-500 text-white' : 'bg-white/5 text-white/60'}`}>{lvl}</button>
                 ))}
                 <button onClick={() => setCurrentLevel(l => l + 1)} className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white">→</button>
@@ -588,9 +730,9 @@ export function GameScreen() {
         containerRef={containerRef}
         gridSize={gridSize}
         cellSize={baseCellSize}
-        springX={springX}
-        springY={springY}
-        springScale={springScale}
+        springX={cameraX}
+        springY={cameraY}
+        springScale={cameraScale}
         active={true}
       />
 

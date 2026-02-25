@@ -228,6 +228,7 @@ function drawArrow(
   const dir = DIRECTIONS[arrow.direction];
   const half = cellSize / 2;
   const strokeWidth = cellSize * skin.geometry.bodyStrokeRatio;
+  const monolithStrokeWidth = strokeWidth + cellSize * skin.geometry.outlineExtraRatio;
   const headGap = cellSize * skin.geometry.headGapRatio;
   const isFlying = flyState.isFlying;
   const flyDistance = flyState.flyDistance;
@@ -265,15 +266,10 @@ function drawArrow(
       ctx.lineDashOffset = -flyDistance;
     }
 
-    ctx.strokeStyle = skin.colors.outlineColor;
-    ctx.lineWidth = strokeWidth + cellSize * skin.geometry.outlineExtraRatio;
+    ctx.strokeStyle = arrow.color;
+    ctx.lineWidth = monolithStrokeWidth;
     ctx.lineCap = skin.geometry.lineCap;
     ctx.lineJoin = skin.geometry.lineJoin;
-    ctx.stroke();
-
-    buildPath();
-    ctx.strokeStyle = arrow.color;
-    ctx.lineWidth = strokeWidth;
     ctx.stroke();
     ctx.setLineDash([]);
   }
