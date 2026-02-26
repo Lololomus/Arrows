@@ -182,7 +182,7 @@ export function FriendsScreen() {
   };
 
   return (
-    <div className="px-4 pb-nav h-full flex flex-col pt-6 relative overflow-hidden">
+    <div className={`px-4 h-full flex flex-col pt-6 relative overflow-hidden ${activeTab === 'friends' ? 'pb-nav' : ''}`}>
       <AdaptiveParticles
         variant="bg"
         tone="neutral"
@@ -191,34 +191,31 @@ export function FriendsScreen() {
         className="z-0 opacity-30"
       />
 
-      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-1 mb-6 flex relative border border-white/10 shrink-0">
-        <div className="absolute top-1 bottom-1 left-1 right-1 flex">
-          <div className="flex-1 px-0.5">
-            {activeTab === 'friends' && <div className="h-full bg-white/10 rounded-xl shadow-sm" />}
-          </div>
-          <div className="flex-1 px-0.5">
-            {activeTab === 'leaderboard' && <div className="h-full bg-white/10 rounded-xl shadow-sm" />}
-          </div>
-        </div>
+      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-1 mt-2 mb-6 flex relative border border-white/10 shrink-0">
+        <motion.div
+          className="absolute top-1 bottom-1 bg-white/10 rounded-xl shadow-sm"
+          initial={false}
+          animate={{
+            left: activeTab === 'friends' ? '4px' : '50%',
+            width: 'calc(50% - 6px)',
+          }}
+          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+        />
         <button
           onClick={() => setActiveTab('friends')}
-          className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${
-            activeTab === 'friends' ? 'text-white' : 'text-white/50 hover:text-white'
-          }`}
+          className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${activeTab === 'friends' ? 'text-white' : 'text-white/50'}`}
         >
           <Users size={16} className="inline mr-1 mb-1" /> Мои друзья
         </button>
         <button
           onClick={() => setActiveTab('leaderboard')}
-          className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${
-            activeTab === 'leaderboard' ? 'text-white' : 'text-white/50 hover:text-white'
-          }`}
+          className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${activeTab === 'leaderboard' ? 'text-white' : 'text-white/50'}`}
         >
           <Trophy size={16} className="inline mr-1 mb-1" /> Leaderboard
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar relative">
+      <div className="flex-1 overflow-hidden relative">
         <AnimatePresence mode="wait" initial={false}>
           {activeTab === 'friends' ? (
             <motion.div
@@ -227,6 +224,7 @@ export function FriendsScreen() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 10 }}
               transition={{ duration: 0.2 }}
+              className="h-full overflow-y-auto custom-scrollbar"
             >
               <FriendsListContent
                 referralCode={referralCode}
@@ -241,8 +239,9 @@ export function FriendsScreen() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -10 }}
               transition={{ duration: 0.2 }}
+              className="h-full"
             >
-              <FriendsLeaderboardScreen />
+              <FriendsLeaderboardScreen embedded />
             </motion.div>
           )}
         </AnimatePresence>

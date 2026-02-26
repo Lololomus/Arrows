@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ShoppingBag, Sparkles, X, Zap, Gift, Package, CheckCircle, Clock } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
+import { CoinStashCard } from '../components/ui/CoinStashCard';
 
 // --- ИСПРАВЛЕННЫЕ АНИМАЦИИ (БЕЗ МАСШТАБИРОВАНИЯ) ---
 
@@ -244,10 +245,49 @@ const rarityStyles = {
   },
 };
 
+type ShopTab = 'shop' | 'inventory';
+
+function ShopTabs({
+  activeTab,
+  onChange,
+}: {
+  activeTab: ShopTab;
+  onChange: (tab: ShopTab) => void;
+}) {
+  return (
+    <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-1 mt-2 mb-6 flex relative border border-white/10 shrink-0">
+      <motion.div
+        className="absolute top-1 bottom-1 bg-white/10 rounded-xl shadow-sm"
+        initial={false}
+        animate={{
+          left: activeTab === 'shop' ? '4px' : '50%',
+          width: 'calc(50% - 6px)',
+        }}
+        transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+      />
+
+      <button
+        onClick={() => onChange('shop')}
+        className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${activeTab === 'shop' ? 'text-white' : 'text-white/50'}`}
+      >
+        <ShoppingBag size={16} className="inline mr-1 mb-1" />
+        {"\u041c\u0430\u0433\u0430\u0437\u0438\u043d"}
+      </button>
+      <button
+        onClick={() => onChange('inventory')}
+        className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${activeTab === 'inventory' ? 'text-white' : 'text-white/50'}`}
+      >
+        <Package size={16} className="inline mr-1 mb-1" />
+        {"\u0418\u043d\u0432\u0435\u043d\u0442\u0430\u0440\u044c"}
+      </button>
+    </div>
+  );
+}
+
 export function ShopScreen() {
   const isComingSoon = true;
   const userBalance = { coins: 1250, stars: 75 };
-  const [activeTab, setActiveTab] = useState<'shop' | 'inventory'>('shop');
+  const [activeTab, setActiveTab] = useState<ShopTab>('shop');
   const [selectedItem, setSelectedItem] = useState<typeof shopItems[0] | null>(null);
   const [isOpeningBox, setIsOpeningBox] = useState(false);
   const [boxReward, setBoxReward] = useState<typeof mysteryBoxRewards[0] | null>(null);
@@ -370,40 +410,12 @@ export function ShopScreen() {
 
   if (isComingSoon) {
     return (
-      <div className="h-full flex flex-col">
-        <div className="sticky top-0 bg-gray-900/90 backdrop-blur-xl px-4 py-4 border-b border-white/10 z-20">
-          <div className="flex items-center justify-center">
-            <div className="flex items-center gap-2 bg-gradient-to-r from-yellow-500/20 to-amber-600/20 px-4 py-2 rounded-full border border-yellow-500/30">
-              <span className="text-2xl">💰</span>
-              <div className="flex flex-col">
-                <span className="text-white font-bold text-lg leading-none">{userBalance.coins.toLocaleString()}</span>
-                <span className="text-yellow-400/60 text-[10px] uppercase tracking-wider">монет</span>
-              </div>
-            </div>
-          </div>
-        </div>
+      <div className="px-4 pb-nav pt-6 h-full flex flex-col relative overflow-hidden">
+        <ShopTabs activeTab={activeTab} onChange={setActiveTab} />
 
-        <div className="px-4 pt-6">
-          <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-1 mb-4 flex relative border border-white/10">
-            <div className="absolute top-1 bottom-1 left-1 w-[calc(50%-6px)] bg-white/10 rounded-xl shadow-sm" />
-            <button
-              disabled
-              className="flex-1 py-3 text-sm font-bold z-10 text-white/70 cursor-not-allowed"
-            >
-              <ShoppingBag size={16} className="inline mr-1 mb-1" />
-              Магазин
-            </button>
-            <button
-              disabled
-              className="flex-1 py-3 text-sm font-bold z-10 text-white/50 cursor-not-allowed"
-            >
-              <Package size={16} className="inline mr-1 mb-1" />
-              Инвентарь
-            </button>
-          </div>
-        </div>
+        <CoinStashCard balance={userBalance.coins} animated={false} className="mb-4 shrink-0" />
 
-        <div className="relative flex-1 overflow-hidden px-4 pb-nav">
+        <div className="relative flex-1 overflow-hidden">
           <AdaptiveParticles
             variant="bg"
             tone="neutral"
@@ -413,8 +425,8 @@ export function ShopScreen() {
           />
           <div className="absolute inset-0 rounded-3xl border border-white/10 bg-gray-950/85 backdrop-blur-md flex items-center justify-center z-10">
             <div className="text-center">
-              <div className="text-white font-black text-5xl tracking-wider uppercase">СКОРО</div>
-              <p className="text-white/60 text-sm mt-3">Магазин и инвентарь временно недоступны</p>
+              <div className="text-white font-black text-5xl tracking-wider uppercase">{"\u0421\u041a\u041e\u0420\u041e"}</div>
+              <p className="text-white/60 text-sm mt-3">{"\u041c\u0430\u0433\u0430\u0437\u0438\u043d \u0438 \u0438\u043d\u0432\u0435\u043d\u0442\u0430\u0440\u044c \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b"}</p>
             </div>
           </div>
         </div>
@@ -423,59 +435,14 @@ export function ShopScreen() {
   }
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Sticky Balance Header */}
-      <div className="sticky top-0 bg-gray-900/90 backdrop-blur-xl px-4 py-4 border-b border-white/10 z-20">
-        <div className="flex items-center justify-center gap-6">
-          <div className="flex items-center gap-2 bg-gradient-to-r from-yellow-500/20 to-amber-600/20 px-4 py-2 rounded-full border border-yellow-500/30">
-            <span className="text-2xl">💰</span>
-            <div className="flex flex-col">
-              <span className="text-white font-bold text-lg leading-none">{userBalance.coins.toLocaleString()}</span>
-              <span className="text-yellow-400/60 text-[10px] uppercase tracking-wider">монет</span>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-2 bg-gradient-to-r from-purple-500/20 to-pink-600/20 px-4 py-2 rounded-full border border-purple-500/30">
-            <span className="text-2xl">⭐</span>
-            <div className="flex flex-col">
-              <span className="text-white font-bold text-lg leading-none">{userBalance.stars}</span>
-              <span className="text-purple-400/60 text-[10px] uppercase tracking-wider">звёзд</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
+    <div className="px-4 pb-nav pt-6 h-full flex flex-col relative overflow-hidden">
       {/* Tabs */}
-      <div className="px-4 pt-6">
-        <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-1 mb-4 flex relative border border-white/10">
-          <motion.div 
-            className="absolute top-1 bottom-1 bg-white/10 rounded-xl shadow-sm"
-            initial={false}
-            animate={{ 
-              left: activeTab === 'shop' ? '4px' : '50%', 
-              width: 'calc(50% - 6px)' 
-            }}
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-          />
-          <button 
-            onClick={() => setActiveTab('shop')}
-            className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${activeTab === 'shop' ? 'text-white' : 'text-white/50'}`}
-          >
-            <ShoppingBag size={16} className="inline mr-1 mb-1" />
-            Магазин
-          </button>
-          <button 
-            onClick={() => setActiveTab('inventory')}
-            className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${activeTab === 'inventory' ? 'text-white' : 'text-white/50'}`}
-          >
-            <Package size={16} className="inline mr-1 mb-1" />
-            Инвентарь
-          </button>
-        </div>
-      </div>
+      <ShopTabs activeTab={activeTab} onChange={setActiveTab} />
+
+      <CoinStashCard balance={userBalance.coins} animated={false} className="mb-4 shrink-0" />
 
       {/* Content */}
-      <div className="relative flex-1 overflow-y-auto custom-scrollbar px-4 pb-nav">
+      <div className="relative flex-1 overflow-y-auto custom-scrollbar">
         <AdaptiveParticles
           variant="bg"
           tone="neutral"

@@ -82,7 +82,6 @@ const generateLeaderboard = (count: number): Player[] => {
       displayName: normalizeDisplayName(baseName, normalizedUsername, DEFAULT_PLAYER_NAME),
       username: normalizedUsername,
       score: Math.max(1000, 10000 - i * 50 - Math.floor(Math.random() * 30)),
-      prize: i === 0 ? 'Эксклюзивный Пепе' : i === 1 ? 'Telegram Premium' : i === 2 ? '1000 звёзд' : undefined,
       avatarSeed: i + 1,
     };
   });
@@ -189,13 +188,13 @@ const SeasonInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose: (
               <div className="space-y-4 text-left">
                 <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
                   <p className="text-white/90 font-medium text-sm leading-relaxed">
-                    По завершении сезона игроки, пригласившие <span className="text-yellow-400 font-bold">наибольшее количество активных пользователей</span>, получат награды.
+                    По завершении сезона 3 игрока, прошедших <span className="text-yellow-400 font-bold">наибольшее количество уровней</span>, получат награды.
                   </p>
                 </div>
                 
                 <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
                   <p className="text-white/90 font-medium text-sm leading-relaxed">
-                    Также <span className="text-cyan-400 font-bold">5 случайных пользователей</span>, попавших в топ-1000 получат призы.
+                    Также <span className="text-yellow-400 font-bold">5 случайных пользователей</span>, попавших в топ-1000, получат призы.
                   </p>
                 </div>
               </div>
@@ -216,7 +215,7 @@ const AsyncAvatar = memo(({ seed, rank, photoUrl }: { seed: number, rank?: numbe
   const [loaded, setLoaded] = useState(false);
 
   return (
-    <div className={`w-12 h-12 rounded-full overflow-hidden shrink-0 ring-2 relative bg-[#1A1A24] ${rank && rank <= 3 ? 'ring-white/10' : 'ring-transparent'}`}>
+    <div className={`w-10 h-10 rounded-full overflow-hidden shrink-0 ring-2 relative bg-[#1A1A24] ${rank && rank <= 3 ? 'ring-white/10' : 'ring-transparent'}`}>
       <div className={`absolute inset-0 bg-white/5 ${!loaded && !photoUrl ? 'animate-pulse' : ''}`} />
       <img 
         src={photoUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}`} 
@@ -255,8 +254,7 @@ PlayerIdentityText.displayName = 'PlayerIdentityText';
 // --- КОМПОНЕНТ: ЭЛЕМЕНТ ТОП-3 ---
 const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Player, index: number, animateEntry: boolean }) => {
   const styles = RANK_STYLES[player.rank];
-  const [isStamped, setIsStamped] = useState(!animateEntry);
-  const [showShockwave, setShowShockwave] = useState(false);
+  const [isAnimationDone, setIsAnimationDone] = useState(!animateEntry);
   const { isReducedMotion, isLowEnd, isPageVisible } = useParticleRuntimeProfile();
   const topParticleProfile = useMemo(() => {
     if (isReducedMotion) {
@@ -269,32 +267,24 @@ const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Play
     return { enabled: true, count: 20, speed: 0.28 };
   }, [isReducedMotion, isLowEnd]);
 
-  const handleStampComplete = useCallback(() => {
+  const handleAnimationComplete = useCallback(() => {
     if (!animateEntry) return; 
-    setIsStamped(true);
-    setShowShockwave(true);
-    if (player.rank === 1) triggerHaptic('heavy');
-    else if (player.rank === 2) triggerHaptic('medium');
-    else triggerHaptic('light');
-  }, [player.rank, animateEntry]);
+    setIsAnimationDone(true);
+    // Хаптики удалены
+  }, [animateEntry]);
+
+  // Свайп-появление: первый справа, второй слева, третий справа
+  const startX = index % 2 === 0 ? 80 : -80;
 
   return (
     <motion.div
-      initial={animateEntry ? { opacity: 0, scale: 2.5, y: -40 } : false}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      transition={animateEntry ? { delay: index * 0.3, type: "spring", stiffness: 350, damping: 24, mass: 1 } : { duration: 0 }} 
-      onAnimationComplete={handleStampComplete}
-      className={`flex items-center p-4 rounded-2xl border relative overflow-hidden min-h-[100px] mb-3 ${styles.bg} ${styles.border} shadow-lg`}
+      initial={animateEntry ? { opacity: 0, x: startX } : false}
+      animate={{ opacity: 1, x: 0 }}
+      transition={animateEntry ? { delay: index * 0.1, duration: 0.4, ease: "easeOut" } : { duration: 0 }} 
+      onAnimationComplete={handleAnimationComplete}
+      className={`flex items-center px-3 py-2 rounded-2xl border relative overflow-hidden h-[72px] mb-3 ${styles.bg} ${styles.border} shadow-lg`}
     >
-      {showShockwave && (
-        <motion.div
-          initial={{ opacity: 0.8, scale: 0.8 }}
-          animate={{ opacity: 0, scale: 2 }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
-          className="absolute inset-0 bg-white/30 rounded-2xl pointer-events-none z-10"
-        />
-      )}
-      {isStamped && styles.particleColor && topParticleProfile.enabled && (
+      {isAnimationDone && styles.particleColor && topParticleProfile.enabled && (
         <div className="absolute inset-0 z-0 opacity-80 mix-blend-screen pointer-events-none overflow-hidden">
           <StarParticles
             colorRGB={styles.particleColor}
@@ -305,25 +295,13 @@ const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Play
         </div>
       )}
       <div className="flex items-center justify-center w-8 mr-2 relative z-20 shrink-0">
-        <span className="text-2xl drop-shadow-md">{styles.icon}</span>
+        <span className="text-xl drop-shadow-md">{styles.icon}</span>
       </div>
       <div className="relative z-20 mr-3">
         <AsyncAvatar seed={player.avatarSeed} rank={player.rank} />
       </div>
       <div className="flex-1 min-w-0 relative z-20 py-1">
         <PlayerIdentityText displayName={player.displayName} username={player.username} />
-        {player.prize && (
-          <div className="flex items-start gap-1.5 mt-1">
-            <Gift size={12} className="text-purple-300 mt-[1px] shrink-0" />
-            <span
-              title={player.prize}
-              style={TWO_LINE_CLAMP_STYLE}
-              className="text-[10px] font-bold uppercase tracking-[0.12em] leading-[1.2] bg-gradient-to-r from-purple-300 to-pink-300 bg-clip-text text-transparent"
-            >
-              {player.prize}
-            </span>
-          </div>
-        )}
       </div>
       <div className="font-mono text-base font-black relative z-20 text-yellow-400 drop-shadow-md shrink-0 pl-2 text-right">
         {player.score.toLocaleString()}
@@ -337,7 +315,7 @@ TopLeaderboardItem.displayName = 'TopLeaderboardItem';
 const RegularLeaderboardItem = memo(({ player }: { player: Player }) => {
   const styles = DEFAULT_RANK_STYLE;
   return (
-    <div className={`flex items-center p-4 rounded-2xl border relative overflow-hidden h-[82px] mb-3 ${styles.bg} ${styles.border}`}>
+    <div className={`flex items-center px-3 py-2 rounded-2xl border relative overflow-hidden h-[72px] mb-3 ${styles.bg} ${styles.border}`}>
       <div className="flex items-center justify-center w-8 mr-2 relative z-10 shrink-0">
         <span className={`font-bold text-lg ${styles.rankClass}`}>{player.rank}</span>
       </div>
@@ -367,21 +345,20 @@ const SkeletonLeaderboardItem = memo(({ rank }: { rank: number }) => {
     : `${DEFAULT_RANK_STYLE.bg} ${DEFAULT_RANK_STYLE.border}`;
 
   return (
-    <div className={`flex items-center p-4 rounded-2xl border relative overflow-hidden mb-3 ${cardClass} ${isTop ? 'min-h-[100px]' : 'h-[82px]'}`}>
+    <div className={`flex items-center px-3 py-2 rounded-2xl border relative overflow-hidden mb-3 ${cardClass} h-[72px]`}>
       <div className="flex items-center justify-center w-8 mr-2 relative z-10 shrink-0">
         {isTop ? (
-          <span className="text-2xl opacity-35">{topStyles.icon}</span>
+          <span className="text-xl opacity-35">{topStyles.icon}</span>
         ) : (
           <div className="h-5 w-5 rounded-md bg-white/10 animate-pulse" />
         )}
       </div>
       <div className="relative z-10 mr-3">
-        <div className={`w-12 h-12 rounded-full bg-white/10 animate-pulse ${isTop ? 'ring-2 ring-white/10' : ''}`} />
+        <div className={`w-10 h-10 rounded-full bg-white/10 animate-pulse ${isTop ? 'ring-2 ring-white/10' : ''}`} />
       </div>
       <div className="flex-1 min-w-0 relative z-10 py-1">
         <div className="h-4 w-28 rounded bg-white/12 animate-pulse mb-1.5" />
         <div className="h-2.5 w-24 rounded bg-white/10 animate-pulse" />
-        {isTop && <div className="h-2.5 w-32 rounded bg-white/10 animate-pulse mt-2" />}
       </div>
       <div className="h-5 w-16 rounded bg-white/12 animate-pulse" />
     </div>
@@ -450,7 +427,7 @@ const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger }: { user: any, i
     <motion.div
       animate={isDocked ? (isPulseActive ? pulseDocked : baseDocked) : floating}
       transition={isPulseActive ? { duration: 0.55, ease: 'easeOut', times: [0, 0.5, 1] } : { duration: 0.25, ease: "easeOut" }}
-      className="relative overflow-hidden rounded-2xl border-2 flex items-center h-[82px] p-4 pointer-events-auto"
+      className="relative overflow-hidden rounded-2xl border-2 flex items-center h-[72px] px-3 py-2 pointer-events-auto"
     >
       <motion.div
         animate={{ opacity: isDocked ? 0 : 0.6 }}
@@ -461,7 +438,7 @@ const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger }: { user: any, i
       <div className="flex flex-col items-center justify-center w-8 mr-2 leading-none relative z-10 shrink-0">
          <span className="text-white/40 font-bold text-[10px] uppercase mb-1">Место</span>
          <span className={`font-black tracking-tighter transition-colors ${isDocked ? 'text-blue-200 text-sm' : 'text-cyan-300 text-sm drop-shadow-md'}`}>
-            #{currentUserRank.rank.toLocaleString()}
+           #{currentUserRank.rank.toLocaleString()}
          </span>
       </div>
 
@@ -504,6 +481,7 @@ export function LeaderboardScreen() {
     campaign: generateLeaderboard(100),
   }), []);
   const leaderboard = leaderboards[displayTab];
+  const isAdventureComingSoon = displayTab === 'campaign';
   const stickyBottomPx = bottomNavHeight + CARD_GAP_PX;
   const shouldAnimateListEnter = listRenderVersion > 0;
 
@@ -528,6 +506,11 @@ export function LeaderboardScreen() {
   }, []);
 
   useEffect(() => {
+    if (isAdventureComingSoon) {
+      setIsDocked(false);
+      return;
+    }
+
     if (visibleCount < leaderboard.length) {
       setIsDocked(false);
       return;
@@ -544,7 +527,7 @@ export function LeaderboardScreen() {
 
     observer.observe(target);
     return () => observer.disconnect();
-  }, [visibleCount, leaderboard.length, displayTab]);
+  }, [visibleCount, leaderboard.length, displayTab, isAdventureComingSoon]);
 
   const prevDocked = useRef(isDocked);
   useEffect(() => {
@@ -574,6 +557,13 @@ export function LeaderboardScreen() {
     setVisibleCount(INITIAL_VISIBLE_COUNT);
     visibleCountRef.current = INITIAL_VISIBLE_COUNT;
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
+
+    if (tab === 'campaign') {
+      setDisplayTab(tab);
+      setListRenderVersion((prev) => prev + 1);
+      setIsSwitchingTab(false);
+      return;
+    }
 
     const startedAt = performance.now();
     const targetLeaderboard = leaderboards[tab];
@@ -631,6 +621,25 @@ export function LeaderboardScreen() {
         className="z-0 opacity-35"
       />
       
+      {/* Tabs */}
+      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-1 mt-2 mb-6 flex relative border border-white/10 shrink-0">
+        <motion.div
+          className="absolute top-1 bottom-1 bg-white/10 rounded-xl shadow-sm"
+          initial={false}
+          animate={{
+            left: activeTab === 'arcade' ? '4px' : '50%',
+            width: 'calc(50% - 6px)',
+          }}
+          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+        />
+        <button onClick={() => handleTabChange('arcade')} className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${activeTab === 'arcade' ? 'text-white' : 'text-white/50'}`}>
+          <span className="inline mr-1 mb-1" aria-hidden="true">🕹</span> Arcade
+        </button>
+        <button onClick={() => handleTabChange('campaign')} className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${activeTab === 'campaign' ? 'text-white' : 'text-white/50'}`}>
+          <span className="inline mr-1 mb-1" aria-hidden="true">⚡️</span> Adventure
+        </button>
+      </div>
+
       {/* Banner */}
       <div className="bg-gradient-to-b from-yellow-500/20 to-transparent p-6 rounded-3xl border border-yellow-500/30 mb-6 text-center relative overflow-hidden shrink-0">
         <AdaptiveParticles
@@ -659,34 +668,37 @@ export function LeaderboardScreen() {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-1 mb-6 flex relative border border-white/10 shrink-0">
-        <div className="absolute top-1 bottom-1 left-1 right-1 flex">
-          {activeTab === 'arcade' ? (
-            <motion.div layoutId="activeTab" className="flex-1 bg-white/10 rounded-xl shadow-sm" transition={{ type: "spring", stiffness: 400, damping: 30 }} />
-          ) : <div className="flex-1" />}
-          {activeTab === 'campaign' ? (
-            <motion.div layoutId="activeTab" className="flex-1 bg-white/10 rounded-xl shadow-sm" transition={{ type: "spring", stiffness: 400, damping: 30 }} />
-          ) : <div className="flex-1" />}
-        </div>
-        <button onClick={() => handleTabChange('arcade')} className={`flex-1 py-3 text-sm font-bold z-10 transition-colors flex items-center justify-center gap-2 ${activeTab === 'arcade' ? 'text-white' : 'text-white/50'}`}>
-          <span aria-hidden="true">🕹</span> Arcade
-        </button>
-        <button onClick={() => handleTabChange('campaign')} className={`flex-1 py-3 text-sm font-bold z-10 transition-colors flex items-center justify-center gap-2 ${activeTab === 'campaign' ? 'text-white' : 'text-white/50'}`}>
-          <span aria-hidden="true">⚡️</span> Adventure
-        </button>
-      </div>
-
       {/* List Container */}
       <div className="flex-1 overflow-hidden relative rounded-t-2xl">
         <div 
           ref={scrollRef} 
-          onScroll={isSwitchingTab ? undefined : handleScroll}
+          onScroll={isSwitchingTab || isAdventureComingSoon ? undefined : handleScroll}
           style={{ paddingBottom: stickyBottomPx }}
           className="h-full overflow-y-auto overflow-x-hidden custom-scrollbar px-1"
         >
           {isSwitchingTab ? (
             <LeaderboardSkeleton />
+          ) : isAdventureComingSoon ? (
+            <motion.div
+              key="campaign-coming-soon"
+              initial={shouldAnimateListEnter ? { opacity: 0, y: 10, filter: 'blur(4px)' } : false}
+              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              transition={shouldAnimateListEnter ? { duration: 0.28, ease: 'easeOut' } : { duration: 0 }}
+              className="h-full flex items-center justify-center px-2"
+            >
+              <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 backdrop-blur-lg p-6 text-center relative overflow-hidden">
+                <AdaptiveParticles
+                  variant="accent"
+                  tone="neutral"
+                  baseCount={12}
+                  baseSpeed={0.14}
+                  className="z-0 opacity-55"
+                />
+                <span className="text-4xl mb-3 block relative z-10" aria-hidden="true">⚡️</span>
+                <h3 className="text-white text-xl font-bold mb-2 relative z-10">Adventure</h3>
+                <p className="text-white/60 text-sm relative z-10">Скоро</p>
+              </div>
+            </motion.div>
           ) : (
             <motion.div
               key={`${displayTab}-${listRenderVersion}`}
@@ -720,7 +732,7 @@ export function LeaderboardScreen() {
           )}
         </div>
 
-        {!isSwitchingTab && !isDocked && (
+        {!isSwitchingTab && !isDocked && !isAdventureComingSoon && (
           <div className="absolute left-1 right-1 z-50 pointer-events-none" style={{ bottom: stickyBottomPx }}>
             <CurrentUserFooter user={user} isDocked={false} />
           </div>

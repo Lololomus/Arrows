@@ -118,22 +118,7 @@ export function TasksScreen() {
         className="z-0 opacity-30"
       />
 
-      <div className="mb-6 text-center shrink-0">
-        <div className="relative inline-block rounded-2xl overflow-hidden">
-          <AdaptiveParticles
-            variant="accent"
-            tone="neutral"
-            baseCount={14}
-            baseSpeed={0.16}
-            className="z-0 opacity-55"
-          />
-          <ClipboardList size={48} className="mx-auto text-purple-400 mb-2 drop-shadow-[0_0_15px_rgba(168,85,247,0.4)] relative z-10" />
-        </div>
-        <h2 className="text-2xl font-bold text-white">Задания</h2>
-        <p className="text-white/60 text-sm">Выполняй задания и получай награды</p>
-      </div>
-
-      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-1 mb-6 flex relative border border-white/10 shrink-0">
+      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-1 mt-2 mb-6 flex relative border border-white/10 shrink-0">
         <motion.div
           className="absolute top-1 bottom-1 bg-white/10 rounded-xl shadow-sm"
           initial={false}
