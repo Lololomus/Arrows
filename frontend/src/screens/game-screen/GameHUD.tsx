@@ -1,105 +1,268 @@
-import { useMemo, type ReactNode } from 'react';
-import { motion } from 'framer-motion';
-import { RefreshCw, Lightbulb, RotateCcw, Heart, Trash2, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
+/**
+ * Arrow Puzzle — Game HUD (v5 - Spring Animations & SE Safe Area)
+ */
+
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Heart, Lightbulb } from 'lucide-react';
+import {
+  getDifficultyConfig,
+  type DifficultyValue,
+} from './difficultyConfig';
+
+// ============================================
+// PROPS
+// ============================================
 
 interface GameHUDProps {
   currentLevel: number;
   lives: number;
-  gridSize: { width: number; height: number };
-  noMoreLevels: boolean;
+  difficulty: DifficultyValue;
   hintsRemaining: number;
-  canUndo: boolean;
-  onMenuClick: () => void;
-  onRestartClick: () => void;
   onHintClick: () => void;
-  onUndoClick: () => void;
-  onPrevLevel: () => void;
-  onJumpLevel: (lvl: number) => void;
-  onNextLevelClick: () => void;
-  onDevReset: () => void;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  onZoomReset: () => void;
+  onMenuClick: () => void;
   children: ReactNode;
 }
+
+// ============================================
+// LIVES DISPLAY
+// ============================================
+
+function LivesDisplay({ lives, difficulty }: { lives: number; difficulty: DifficultyValue }) {
+  const prevLivesRef = useRef(lives);
+  const [isHit, setIsHit] = useState(false);
+
+  useEffect(() => {
+    if (lives < prevLivesRef.current) {
+      setIsHit(true);
+      window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('medium');
+      const timer = setTimeout(() => setIsHit(false), 600);
+      prevLivesRef.current = lives;
+      return () => clearTimeout(timer);
+    }
+    prevLivesRef.current = lives;
+  }, [lives]);
+
+  const isCritical = lives <= 1;
+
+  const numberColor = isHit
+    ? 'text-red-400'
+    : isCritical
+      ? 'text-red-500'
+      : 'text-white';
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <motion.div
+        animate={
+          isHit
+            ? { x: [0, -3, 3, -2, 2, 0], scale: [1, 1.3, 0.9, 1.1, 1] }
+            : isCritical
+              ? { scale: [1, 1.15, 1] }
+              : {}
+        }
+        transition={
+          isHit
+            ? { duration: 0.5, ease: 'easeOut' }
+            : isCritical
+              ? { duration: 1.5, repeat: Infinity, ease: 'easeInOut' }
+              : {}
+        }
+        className="flex items-center"
+      >
+        <Heart
+          size={16}
+          fill="#ef4444"
+          stroke="none"
+          className="drop-shadow-[0_0_4px_rgba(239,68,68,0.6)]"
+        />
+      </motion.div>
+
+      <AnimatePresence mode="popLayout">
+        <motion.span
+          key={lives}
+          initial={{ scale: 1.4, opacity: 0.5 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 0.4, ease: 'easeOut' }}
+          className={`text-sm font-bold tabular-nums leading-none ${numberColor}`}
+        >
+          ×{lives}
+        </motion.span>
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ============================================
+// TOP BAR — Slide down with spring
+// ============================================
+
+function TopBar({
+  currentLevel,
+  lives,
+  difficulty,
+}: {
+  currentLevel: number;
+  lives: number;
+  difficulty: DifficultyValue;
+}) {
+  const cfg = getDifficultyConfig(difficulty);
+
+  return (
+    <div className="relative z-20 w-full">
+      <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-slate-950/70 to-transparent pointer-events-none -z-10" />
+
+      <div 
+        className="flex justify-center px-4 pointer-events-auto"
+        // Защита для iPhone SE: если env(safe-area-inset-top) = 0, берем минимум 48px для кнопок TG
+        style={{ paddingTop: 'calc(max(env(safe-area-inset-top), 48px) + 12px)' }} 
+      >
+        <motion.div
+          // Выезд сверху
+          initial={{ y: -100, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          // Физика пружины: damping гасит колебания, stiffness отвечает за скорость
+          transition={{ type: 'spring', stiffness: 260, damping: 20 }}
+          className="flex items-center bg-slate-900/80 backdrop-blur-md rounded-full border border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.6)] overflow-hidden"
+        >
+          {/* Level */}
+          <div className="flex items-center gap-2 pl-4 pr-3 py-2.5">
+            <span className="text-white/40 text-[10px] font-semibold uppercase tracking-widest leading-none">
+              LVL
+            </span>
+            <span className="text-white font-bold text-base leading-none tabular-nums">
+              {currentLevel}
+            </span>
+          </div>
+
+          {/* Divider */}
+          <div className="w-px h-5 bg-white/10" />
+
+          {/* Difficulty */}
+          <div className="flex items-center gap-1.5 px-3 py-2.5">
+            <div className={`w-1.5 h-1.5 rounded-full ${cfg.hudDotColor} shadow-[0_0_6px_currentColor]`} />
+            <span className={`text-xs font-bold uppercase tracking-wider leading-none ${cfg.hudBadgeColor}`}>
+              {cfg.label}
+            </span>
+          </div>
+
+          {/* Divider */}
+          <div className="w-px h-5 bg-white/10" />
+
+          {/* Lives */}
+          <div className="pl-3 pr-4 py-2.5">
+            <LivesDisplay lives={lives} difficulty={difficulty} />
+          </div>
+        </motion.div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// BOTTOM BAR — Slide up synchronously & Smooth Gradient
+// ============================================
+
+function BottomBar({
+  hintsRemaining,
+  onHintClick,
+  onMenuClick,
+}: {
+  hintsRemaining: number;
+  onHintClick: () => void;
+  onMenuClick: () => void;
+}) {
+  const disabled = hintsRemaining <= 0;
+
+  return (
+    // ВАЖНО: Убрали overflow-hidden, чтобы градиент мог "вытекать" наверх
+    <div className="relative z-20 w-full mt-auto">
+      {/* Сделали градиент выше (h-56) и добавили via-slate-950/40 
+        для максимально плавного растворения в фон 
+      */}
+      <div className="absolute bottom-0 left-0 right-0 h-56 bg-gradient-to-t from-slate-950/90 via-slate-950/40 to-transparent pointer-events-none -z-10" />
+
+      {/* Анимируем ВЕСЬ контейнер с кнопками снизу вверх */}
+      <motion.div 
+        initial={{ y: 100, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ type: 'spring', stiffness: 260, damping: 20 }}
+        className="flex justify-center items-center gap-4 px-6 pointer-events-auto"
+        // Защита снизу для старых устройств
+        style={{ paddingBottom: 'calc(max(env(safe-area-inset-bottom), 16px) + 24px)' }} 
+      >
+        {/* Menu button */}
+        <motion.button
+          whileTap={{ scale: 0.9 }}
+          onClick={onMenuClick}
+          className="bg-slate-800/80 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.4)] shrink-0"
+        >
+          <span className="text-white/80 font-bold text-xs tracking-wider">MENU</span>
+        </motion.button>
+
+        {/* Hint button */}
+        <motion.button
+          whileTap={{ scale: 0.93 }}
+          onClick={onHintClick}
+          disabled={disabled}
+          className={`
+            flex-1 flex items-center justify-center gap-3
+            py-4 rounded-2xl
+            border 
+            transition-all duration-200
+            ${disabled
+              ? 'bg-slate-800/50 border-white/5 opacity-50 shadow-none'
+              : 'bg-gradient-to-b from-amber-500 to-orange-600 border-orange-400/30 shadow-[0_8px_24px_rgba(245,158,11,0.3)]'
+            }
+          `}
+        >
+          <Lightbulb
+            size={24}
+            className={disabled ? 'text-white/30' : 'text-yellow-100'}
+          />
+          <span
+            className={`font-bold text-xl tabular-nums leading-none ${
+              disabled ? 'text-white/30' : 'text-white'
+            }`}
+          >
+            {hintsRemaining}
+          </span>
+        </motion.button>
+      </motion.div>
+    </div>
+  );
+}
+
+// ============================================
+// MAIN HUD LAYOUT
+// ============================================
 
 export function GameHUD({
   currentLevel,
   lives,
-  gridSize,
-  noMoreLevels,
+  difficulty,
   hintsRemaining,
-  canUndo,
-  onMenuClick,
-  onRestartClick,
   onHintClick,
-  onUndoClick,
-  onPrevLevel,
-  onJumpLevel,
-  onNextLevelClick,
-  onDevReset,
-  onZoomIn,
-  onZoomOut,
-  onZoomReset,
+  onMenuClick,
   children,
 }: GameHUDProps) {
-  const livesUI = useMemo(() => (
-    <div className="flex gap-1.5">
-      {Array.from({ length: 3 }).map((_, i) => (
-        <motion.div key={i} initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: i * 0.1 }}>
-          <Heart size={24} fill={i < lives ? '#ef4444' : 'transparent'} stroke={i < lives ? '#ef4444' : 'rgba(255,255,255,0.3)'} strokeWidth={2} />
-        </motion.div>
-      ))}
-    </div>
-  ), [lives]);
-
   return (
-    <div className="relative z-10 flex flex-col h-full mx-auto pointer-events-none">
-      <div className="flex justify-center items-center p-4 pt-6 safe-area-top gap-4 pointer-events-auto">
-        <div className="bg-slate-800/80 backdrop-blur-md px-6 py-2 rounded-2xl border border-white/10 shadow-lg flex items-center gap-2">
-          <span className="text-white/60 text-xs font-medium uppercase tracking-wider">Level</span>
-          <span className="text-white font-bold text-xl">{currentLevel}</span>
-        </div>
-        <div className="bg-slate-800/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 shadow-lg">
-          {livesUI}
-        </div>
-        <div className="bg-slate-800/60 px-3 py-1 rounded-xl border border-white/5">
-          <span className="text-white/40 text-[10px] font-mono">🖼 Canvas {gridSize.width}×{gridSize.height}</span>
-        </div>
-      </div>
+    <div className="relative z-10 flex flex-col h-full mx-auto pointer-events-none overflow-hidden">
+      <TopBar
+        currentLevel={currentLevel}
+        lives={lives}
+        difficulty={difficulty}
+      />
 
-      <div className="flex-1 relative">
+      <div className="flex-1 relative min-h-0 pointer-events-auto">
         {children}
-        <div className="absolute top-4 right-4 flex flex-col gap-2 z-20 pointer-events-auto">
-          <button onClick={onZoomIn} className="p-2 bg-black/40 rounded-full text-white/70 hover:text-white"><ZoomIn size={20} /></button>
-          <button onClick={onZoomOut} className="p-2 bg-black/40 rounded-full text-white/70 hover:text-white"><ZoomOut size={20} /></button>
-          <button onClick={onZoomReset} className="p-2 bg-black/40 rounded-full text-white/70 hover:text-white"><Maximize size={20} /></button>
-        </div>
       </div>
 
-      <div className="flex flex-col items-center px-4 pb-8 safe-bottom pointer-events-auto bg-gradient-to-t from-slate-900/80 to-transparent pt-6">
-        {!noMoreLevels && (
-          <div className="flex justify-center items-center gap-3 w-full max-w-sm">
-            <motion.button whileTap={{ scale: 0.9 }} onClick={onMenuClick} className="bg-slate-800/80 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-lg"><span className="text-white font-bold text-xs">MENU</span></motion.button>
-            <motion.button whileTap={{ scale: 0.9 }} onClick={onRestartClick} className="bg-slate-800/80 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-lg"><RefreshCw size={24} className="text-white" /></motion.button>
-            <motion.button whileTap={{ scale: 0.9 }} onClick={onHintClick} disabled={hintsRemaining === 0} className="flex-1 bg-gradient-to-br from-amber-600/90 to-orange-600/90 backdrop-blur-md p-4 rounded-2xl border border-amber-500/30 flex items-center justify-center gap-3 shadow-lg"><Lightbulb size={24} className={hintsRemaining > 0 ? 'text-yellow-100' : 'text-white/30'} /><span className="text-white font-bold text-lg">{hintsRemaining}</span></motion.button>
-            <motion.button whileTap={{ scale: 0.9 }} onClick={onUndoClick} disabled={!canUndo} className="bg-slate-800/80 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-lg"><RotateCcw size={24} className="text-white" /></motion.button>
-          </div>
-        )}
-
-        <div className="flex flex-col items-center gap-2 mt-4 opacity-90 transition-opacity w-full">
-          <div className="flex items-center gap-2 text-white/50 text-xs uppercase tracking-widest mb-1">Навигация</div>
-          <div className="flex items-center gap-3 bg-slate-900/50 p-2 rounded-xl border border-white/10">
-            <button onClick={onPrevLevel} className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white disabled:opacity-30" disabled={currentLevel <= 1}>←</button>
-            {[1, 30, 70, 100, 150].map((lvl) => (
-              <button key={lvl} onClick={() => onJumpLevel(lvl)} className={`px-3 py-1 text-xs rounded-lg font-bold ${currentLevel === lvl ? 'bg-blue-500 text-white' : 'bg-white/5 text-white/60'}`}>{lvl}</button>
-            ))}
-            <button onClick={onNextLevelClick} className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white">→</button>
-            <div className="w-px h-6 bg-white/10 mx-1" />
-            <button onClick={onDevReset} className="p-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20"><Trash2 size={16} /></button>
-          </div>
-        </div>
-      </div>
+      <BottomBar
+        hintsRemaining={hintsRemaining}
+        onHintClick={onHintClick}
+        onMenuClick={onMenuClick}
+      />
     </div>
   );
 }

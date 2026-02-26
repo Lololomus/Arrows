@@ -100,14 +100,12 @@ async def get_level(
 ):
     """
     Получить данные уровня из файла.
-    (Unlocked Mode: Доступ открыт ко всем уровням)
+    (Strict Linear Mode: only current unlocked level is accessible)
     """
     if level_num < 1:
         raise HTTPException(status_code=400, detail="Invalid level number")
-    
-    # 🔥 UNLOCKED MODE: Убрали проверку доступа
-    # if level_num > user.current_level + 1:
-    #     raise HTTPException(status_code=403, detail="Level not unlocked")
+    if level_num != user.current_level:
+        raise HTTPException(status_code=403, detail="Level not unlocked")
     
     print(f"🎮 Loading level {level_num} for user {user.id}")
     
@@ -167,9 +165,8 @@ async def start_level(
     db: AsyncSession = Depends(get_db)
 ):
     """Начать уровень - тратит энергию."""
-    # 🔥 UNLOCKED MODE: Убрали проверку доступа
-    # if level_num > user.current_level + 1:
-    #     raise HTTPException(status_code=403, detail="Level not unlocked")
+    if level_num != user.current_level:
+        raise HTTPException(status_code=403, detail="Level not unlocked")
     
     # Проверяем и тратим энергию
     if not await spend_energy(user, db):
@@ -212,10 +209,8 @@ async def complete_level(
         return CompleteResponse(valid=False, error="Invalid level number")
     if request.time_seconds <= 0:
         return CompleteResponse(valid=False, error="Invalid completion time")
-    
-    # 🔥 UNLOCKED MODE: Убрали проверку
-    # if level_num > user.current_level + 1:
-    #     return CompleteResponse(valid=False, error="Level not unlocked")
+    if level_num != user.current_level:
+        return CompleteResponse(valid=False, error="Level not unlocked")
     
     # One reward per level: repeated valid submissions should not grant rewards again.
     rewarded_attempt_result = await db.execute(
@@ -291,7 +286,7 @@ async def complete_level(
     
     # Если прошли уровень, который равен ИЛИ БОЛЬШЕ текущего максимального -> повышаем планку
     # Пример: Был на 1, прошел 5 -> Теперь на 6.
-    if level_num >= user.current_level:
+    if level_num == user.current_level:
         user.current_level = level_num + 1
         new_level = True
     
@@ -307,7 +302,7 @@ async def complete_level(
         stats.levels_completed += 1
         stats.total_moves += total_moves
         stats.total_mistakes += mistakes
-        if mistakes <= 0:
+        if mistakes <= 0 and hasattr(stats, "perfect_levels"):
             stats.perfect_levels += 1
     
     # Сохраняем попытку

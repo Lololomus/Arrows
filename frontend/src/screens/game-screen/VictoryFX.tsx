@@ -278,5 +278,7 @@ export function VictoryFX({
       return <MediumFX primary={primary} secondary={secondary} />;
     case 'hard':
       return <HardFX primary={primary} secondary={secondary} />;
+    case 'extreme':
+      return <HardFX primary={primary} secondary={secondary} />;
   }
 }

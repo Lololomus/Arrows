@@ -1,24 +1,34 @@
 /**
  * Arrow Puzzle - Difficulty & Defeat Visual Config
  *
- * Source of truth for victory/defeat visuals.
+ * Source of truth for victory/defeat visuals + lives-per-difficulty.
+ *
  * `difficulty` comes from `level.meta.difficulty` and may be:
  * - string from JSON levels: "Легкий" | "Нормальный" | "Сложный" | "Экстремальный"
  * - numeric legacy value from older generated levels
+ *
+ * LIVES LOGIC (inverted): harder levels give MORE lives
+ * because complex puzzles need more room for error.
  */
 
-import { Trophy, Crown, Medal, HeartCrack, type LucideIcon } from 'lucide-react';
+import { Trophy, Crown, Medal, Flame, HeartCrack, type LucideIcon } from 'lucide-react';
 
 // ============================================
 // TYPES
 // ============================================
 
-export type DifficultyTier = 'easy' | 'normal' | 'hard';
+export type DifficultyTier = 'easy' | 'normal' | 'hard' | 'extreme';
 export type DifficultyValue = number | string | null | undefined;
 
 export interface DifficultyVisualConfig {
   label: string;
   headerColor: string;
+  /** Tailwind text color for difficulty badge in HUD pill */
+  hudBadgeColor: string;
+  /** Tailwind dot/accent color for HUD */
+  hudDotColor: string;
+  /** Lives granted for this difficulty tier (harder = more) */
+  lives: number;
   victoryTitle: string;
   victoryIcon: LucideIcon;
   victoryIconColor: string;
@@ -52,6 +62,9 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
   easy: {
     label: 'Easy',
     headerColor: 'text-blue-400',
+    hudBadgeColor: 'text-blue-400',
+    hudDotColor: 'bg-blue-400',
+    lives: 3,
     victoryTitle: 'ПРОЙДЕНО',
     victoryIcon: Medal,
     victoryIconColor: 'text-blue-200',
@@ -69,6 +82,9 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
   normal: {
     label: 'Normal',
     headerColor: 'text-yellow-400',
+    hudBadgeColor: 'text-yellow-400',
+    hudDotColor: 'bg-yellow-400',
+    lives: 5,
     victoryTitle: 'ПОБЕДА!',
     victoryIcon: Trophy,
     victoryIconColor: 'text-yellow-400',
@@ -86,6 +102,9 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
   hard: {
     label: 'Hard',
     headerColor: 'text-rose-400',
+    hudBadgeColor: 'text-rose-400',
+    hudDotColor: 'bg-rose-400',
+    lives: 7,
     victoryTitle: 'ПРЕВОСХОДНО!',
     victoryIcon: Crown,
     victoryIconColor: 'text-amber-100',
@@ -99,6 +118,26 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     scale: 1.3,
     bounce: 0.7,
     reward: 1000,
+  },
+  extreme: {
+    label: 'Extreme',
+    headerColor: 'text-purple-400',
+    hudBadgeColor: 'text-purple-400',
+    hudDotColor: 'bg-purple-400',
+    lives: 10,
+    victoryTitle: 'ЛЕГЕНДА!',
+    victoryIcon: Flame,
+    victoryIconColor: 'text-purple-200',
+    victoryGlow: 'bg-purple-600',
+    victoryTextGradient: 'from-purple-200 via-fuchsia-400 to-orange-400',
+    victoryButton:
+      'bg-gradient-to-r from-purple-700 to-fuchsia-600 shadow-[0_0_35px_rgba(147,51,234,0.5)]',
+    badgeStyle: 'bg-purple-500/20 border-purple-500/30 text-purple-300',
+    primary: '#9333ea',
+    secondary: '#c084fc',
+    scale: 1.4,
+    bounce: 0.8,
+    reward: 2000,
   },
 };
 
@@ -134,10 +173,10 @@ const RU_EXTREME = '\u044d\u043a\u0441\u0442\u0440\u0435\u043c\u0430\u043b\u044c
 
 /**
  * Maps backend difficulty to UI tier.
- * Required mapping from JSON:
  * - Легкий -> easy
  * - Нормальный -> normal
- * - Сложный + Экстремальный -> hard
+ * - Сложный -> hard
+ * - Экстремальный -> extreme
  */
 export function getDifficultyTier(difficulty: DifficultyValue): DifficultyTier {
   if (typeof difficulty === 'string') {
@@ -146,24 +185,28 @@ export function getDifficultyTier(difficulty: DifficultyValue): DifficultyTier {
     if (text === RU_NORMAL || text === 'normal' || text === 'medium' || text === 'mid') {
       return 'normal';
     }
-    if (text === RU_HARD || text === RU_EXTREME || text === 'hard' || text === 'extreme') {
-      return 'hard';
-    }
+    if (text === RU_HARD || text === 'hard') return 'hard';
+    if (text === RU_EXTREME || text === 'extreme') return 'extreme';
   }
 
   if (typeof difficulty === 'number' && Number.isFinite(difficulty)) {
     if (difficulty <= 3) return 'easy';
     if (difficulty <= 6) return 'normal';
-    return 'hard';
+    if (difficulty <= 8) return 'hard';
+    return 'extreme';
   }
 
-  // Safe fallback for unexpected payloads.
   return 'normal';
 }
 
 /** Returns visual config for backend difficulty value */
 export function getDifficultyConfig(difficulty: DifficultyValue): DifficultyVisualConfig {
   return DIFFICULTY_CONFIG[getDifficultyTier(difficulty)];
+}
+
+/** Returns lives count for difficulty tier */
+export function getLivesForDifficulty(difficulty: DifficultyValue): number {
+  return getDifficultyConfig(difficulty).lives;
 }
 
 /** Formats seconds to MM:SS */

@@ -23,6 +23,8 @@ import { clearFlyFX } from '../game/fxBridge';
 import { FXOverlay } from '../components/FXOverlay';
 import { LevelTransitionLoader } from '../components/ui/LevelTransitionLoader';
 import { GameHUD } from './game-screen/GameHUD';
+import { getLivesForDifficulty } from './game-screen/difficultyConfig';
+import { ErrorVignette } from './game-screen/ErrorVignette';
 import { GameMenuModal } from './game-screen/GameMenuModal';
 import { GameResultModal } from './game-screen/GameResultModal';
 import { useArrowActions } from './game-screen/useArrowActions';
@@ -53,7 +55,8 @@ const HINT_REFOCUS_PAN_EPS_PX = 6;
 const HINT_REFOCUS_SCALE_EPS = 0.02;
 // false: start and stay at fitScale. true: restore delayed intro push-in zoom.
 const ENABLE_INTRO_CAMERA_PUSH_IN = false;
-const ENABLE_SERVER_PROGRESS_PERSIST = import.meta.env.PROD;
+// Server progression must stay enabled in all envs, because backend is authoritative.
+const ENABLE_SERVER_PROGRESS_PERSIST = true;
 const ENABLE_TEMP_SMART_CONTEXT = true;
 // TODO [ВАЖНЫЙ ДО РЕЛИЗА]: удалить временный smart context и вернуть обычный flow сохранения.
 
@@ -140,7 +143,6 @@ export function GameScreen() {
   const status = useGameStore(s => s.status);
   const hintsRemaining = useGameStore(s => s.hintsRemaining);
   const hintedArrowId = useGameStore(s => s.hintedArrowId);
-  const history = useGameStore(s => s.history);
   const removedArrowIds = useGameStore(s => s.removedArrowIds);
   const levelStartTime = useGameStore(s => s.startTime);
   const levelEndTime = useGameStore(s => s.endTime);
@@ -149,7 +151,6 @@ export function GameScreen() {
   const removeArrow = useGameStore(s => s.removeArrow);
   const removeArrows = useGameStore(s => s.removeArrows);
   const failMove = useGameStore(s => s.failMove);
-  const undo = useGameStore(s => s.undo);
   const showHint = useGameStore(s => s.showHint);
   const setStatus = useGameStore(s => s.setStatus);
   const setShakingArrow = useGameStore(s => s.setShakingArrow);
@@ -184,6 +185,8 @@ export function GameScreen() {
   const completedLevelsSentRef = useRef<Set<number>>(new Set());
   const pendingLevelCompletionRef = useRef<Set<number>>(new Set());
   const hasInitialLevelSyncRef = useRef(false);
+  const lockedNextLevelRef = useRef<number | null>(null);
+  const queuedNextLevelRef = useRef<number | null>(null);
 
   const [confirmAction, setConfirmAction] = useState<'restart' | 'menu' | null>(null);
   const [noMoreLevels, setNoMoreLevels] = useState(false);
@@ -200,6 +203,17 @@ export function GameScreen() {
     () => (status === 'victory' ? getElapsedSeconds() : 1),
     [status, getElapsedSeconds],
   );
+
+  useEffect(() => {
+    if (status === 'victory' && !noMoreLevels) {
+      if (lockedNextLevelRef.current == null) {
+        lockedNextLevelRef.current = gameLevel + 1;
+      }
+      return;
+    }
+    lockedNextLevelRef.current = null;
+    queuedNextLevelRef.current = null;
+  }, [status, noMoreLevels, gameLevel]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -416,8 +430,10 @@ export function GameScreen() {
     setNoMoreLevels(false);
     try {
       const levelData = await gameApi.getLevel(levelNum);
-      setLevelDifficulty(levelData.meta?.difficulty ?? 1);
-      initLevel(levelNum, levelData.seed, levelData.grid, levelData.arrows);
+      const diff = levelData.meta?.difficulty ?? 1;
+      setLevelDifficulty(diff);
+      const livesForLevel = getLivesForDifficulty(diff);
+      initLevel(levelNum, levelData.seed, levelData.grid, levelData.arrows, livesForLevel);
     } catch (error: any) {
       console.error(error);
       if (error?.status === 404) { setNoMoreLevels(true); setStatus('victory'); }
@@ -463,6 +479,9 @@ export function GameScreen() {
 
         if (!response.valid) {
           pendingLevelCompletionRef.current.delete(completedLevel);
+          if (queuedNextLevelRef.current === completedLevel + 1) {
+            queuedNextLevelRef.current = null;
+          }
           console.warn(`[Progress] Completion rejected for level ${completedLevel}: ${response.error ?? 'unknown error'}`);
           return;
         }
@@ -478,12 +497,21 @@ export function GameScreen() {
           };
           setUser(nextUser);
         }
+
+        if (queuedNextLevelRef.current === completedLevel + 1) {
+          const queuedLevel = queuedNextLevelRef.current;
+          queuedNextLevelRef.current = null;
+          setCurrentLevel(queuedLevel);
+        }
       } catch (error) {
         pendingLevelCompletionRef.current.delete(completedLevel);
+        if (queuedNextLevelRef.current === completedLevel + 1) {
+          queuedNextLevelRef.current = null;
+        }
         console.error('[Progress] Failed to persist level completion:', error);
       }
     })();
-  }, [status, noMoreLevels, gameLevel, removedArrowIds, user, setUser, getElapsedSeconds]);
+  }, [status, noMoreLevels, gameLevel, removedArrowIds, user, setUser, getElapsedSeconds, setCurrentLevel]);
 
   // === КИНЕМАТОГРАФИЧНОЕ ИНТРО ===
   useEffect(() => {
@@ -683,28 +711,6 @@ export function GameScreen() {
   }, [isDragging, cameraX, cameraY, cameraScale, isIntroAnimating, clampPanToBounds]);
 
   const handleMouseUp = useCallback(() => setIsDragging(false), []);
-
-  const resetZoom = useCallback(() => {
-    if (isIntroAnimating) return;
-    animateCameraTo(0, 0, zoomBounds.fitScale, 180);
-  }, [isIntroAnimating, zoomBounds.fitScale, animateCameraTo]);
-
-  const handleZoomIn = useCallback(() => {
-    if (isIntroAnimating) return;
-    cancelPanTween();
-    const step = clamp((zoomBounds.maxScale - zoomBounds.minScale) * 0.12, 0.08, 0.25);
-    const target = cameraScale.get() + step;
-    applyScaleImmediate(target);
-  }, [isIntroAnimating, zoomBounds.maxScale, zoomBounds.minScale, cameraScale, cancelPanTween, applyScaleImmediate]);
-
-  const handleZoomOut = useCallback(() => {
-    if (isIntroAnimating) return;
-    cancelPanTween();
-    const step = clamp((zoomBounds.maxScale - zoomBounds.minScale) * 0.12, 0.08, 0.25);
-    const target = cameraScale.get() - step;
-    applyScaleImmediate(target);
-  }, [isIntroAnimating, zoomBounds.maxScale, zoomBounds.minScale, cameraScale, cancelPanTween, applyScaleImmediate]);
-
   // === КЛИК ПО СТРЕЛКЕ ===
   const { handleArrowClick, handleHint } = useArrowActions({
     isIntroAnimating,
@@ -720,32 +726,22 @@ export function GameScreen() {
     showHint,
   });
 
-  const onRestartClick = useCallback(() => { if (!isIntroAnimating) setConfirmAction('restart'); }, [isIntroAnimating]);
   const onMenuClick = useCallback(() => { if (!isIntroAnimating) setConfirmAction('menu'); }, [isIntroAnimating]);
   const confirmRestart = useCallback(() => { setConfirmAction(null); loadLevel(currentLevel); }, [currentLevel, loadLevel]);
   const confirmMenu = useCallback(() => { setConfirmAction(null); setScreen('home'); }, [setScreen]);
-  const handleNextLevel = useCallback(() => setCurrentLevel(prev => prev + 1), []);
-  const markManualNavigation = useCallback(() => {
-    if (!ENABLE_TEMP_SMART_CONTEXT) return;
-    hasManualNavigationInSessionRef.current = true;
-  }, []);
-  const handlePrevLevel = useCallback(() => {
-    markManualNavigation();
-    setCurrentLevel((l) => Math.max(1, l - 1));
-  }, [markManualNavigation]);
-  const handleJumpLevel = useCallback((lvl: number) => {
-    markManualNavigation();
-    setCurrentLevel(Math.max(1, lvl));
-  }, [markManualNavigation]);
-  const handleHudNextLevelClick = useCallback(() => {
-    markManualNavigation();
-    setCurrentLevel((l) => l + 1);
-  }, [markManualNavigation]);
-  const handleDevReset = useCallback(async () => {
-    if (!confirm('⚠️ СБРОС ПРОГРЕССА (DEV)')) return;
-    try { await gameApi.resetProgress(); setCurrentLevel(1); window.location.reload(); }
-    catch (e) { console.error(e); }
-  }, []);
+  const handleNextLevel = useCallback(() => {
+    if (status !== 'victory' || noMoreLevels) return;
+    const strictNextLevel = lockedNextLevelRef.current ?? (gameLevel + 1);
+    if (ENABLE_SERVER_PROGRESS_PERSIST) {
+      const completedLevel = strictNextLevel - 1;
+      const isCompletionSynced = completedLevelsSentRef.current.has(completedLevel);
+      if (!isCompletionSynced) {
+        queuedNextLevelRef.current = strictNextLevel;
+        return;
+      }
+    }
+    setCurrentLevel(strictNextLevel);
+  }, [status, noMoreLevels, gameLevel]);
 
   return (
     <div
@@ -755,21 +751,10 @@ export function GameScreen() {
       <GameHUD
         currentLevel={currentLevel}
         lives={lives}
-        gridSize={gridSize}
-        noMoreLevels={noMoreLevels}
+        difficulty={levelDifficulty}
         hintsRemaining={hintsRemaining}
-        canUndo={history.length > 0}
-        onMenuClick={onMenuClick}
-        onRestartClick={onRestartClick}
         onHintClick={handleHint}
-        onUndoClick={undo}
-        onPrevLevel={handlePrevLevel}
-        onJumpLevel={handleJumpLevel}
-        onNextLevelClick={handleHudNextLevelClick}
-        onDevReset={handleDevReset}
-        onZoomIn={handleZoomIn}
-        onZoomOut={handleZoomOut}
-        onZoomReset={resetZoom}
+        onMenuClick={onMenuClick}
       >
         <div
           ref={containerRef}
@@ -810,6 +795,7 @@ export function GameScreen() {
           )}
         </div>
       </GameHUD>
+      <ErrorVignette />
 
       {/* ===== СЛОЙ ЭФФЕКТОВ (fly-out) ===== */}
       <FXOverlay

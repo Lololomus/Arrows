@@ -120,7 +120,13 @@ interface GameStore {
   /** Стрелки заблокированные после ошибки */
   blockedArrowIds: string[];
 
-  initLevel: (level: number, seed: number, gridSize: { width: number; height: number }, arrows: Arrow[]) => void;
+  initLevel: (
+    level: number,
+    seed: number,
+    gridSize: { width: number; height: number },
+    arrows: Arrow[],
+    lives?: number
+  ) => void;
   removeArrow: (arrowId: string) => void;
   // [Legacy] removeArrows: batch-удаление для бомбы/электро
   removeArrows: (arrowIds: string[]) => void;
@@ -169,7 +175,7 @@ export const useGameStore = create<GameStore>()(
   (set, get) => ({
     ...initialGameState,
 
-    initLevel: (level, seed, serverGridSize, arrows) => {
+    initLevel: (level, seed, serverGridSize, arrows, lives = INITIAL_LIVES) => {
       // === НОРМАЛИЗАЦИЯ КООРДИНАТ ===
       let minX = Infinity, minY = Infinity;
       let maxX = -Infinity, maxY = -Infinity;
@@ -218,7 +224,7 @@ export const useGameStore = create<GameStore>()(
         gridSize: { width: strictWidth, height: strictHeight },
         arrows: normalizedArrows,
         removedArrowIds: [],
-        lives: INITIAL_LIVES,
+        lives,
         moves: 0,
         status: 'playing',
         startTime: Date.now(),

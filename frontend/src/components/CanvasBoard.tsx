@@ -62,11 +62,6 @@ interface BounceAnim {
   distance: number;
 }
 
-interface ErrorFlash {
-  startTime: number;
-  duration: number;
-}
-
 interface ArrowBBox {
   minX: number;
   maxX: number;
@@ -178,7 +173,6 @@ export function CanvasBoard({
 
   // Animation refs
   const bounceRef = useRef<BounceAnim | null>(null);
-  const errorFlashRef = useRef<ErrorFlash | null>(null);
 
   const containerSizeRef = useRef({ w: window.innerWidth, h: window.innerHeight });
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -193,7 +187,7 @@ export function CanvasBoard({
 
   if (!initialCellsSet.current && arrows.length > 0) {
     initialCellsSet.current = true;
-    // ⚡ FIX: очищаем bbox cache при смене уровня.
+    // ⚡ FIX: очищаем bbox cache при смене уровня.а
     // Без этого протухшие bbox от предыдущих уровней (с теми же arrow.id)
     // приводят к фантомным стрелкам при зуме.
     _bboxCache.clear();
@@ -404,11 +398,6 @@ export function CanvasBoard({
       distance,
     };
 
-    errorFlashRef.current = {
-      startTime: performance.now(),
-      duration: VIGNETTE_DURATION,
-    };
-
     wakeRenderLoop();
   }, [shakingArrowId, gridSize.width, gridSize.height, wakeRenderLoop]);
 
@@ -598,20 +587,7 @@ export function CanvasBoard({
 
       ctx.restore(); // sweep clip
 
-      // Error vignette
-      const flash = errorFlashRef.current;
-      const flashActive = flash && (now - flash.startTime < flash.duration);
-      if (flashActive) {
-        hasAnimations = true;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        const ft = (now - flash!.startTime) / flash!.duration;
-        ctx.globalCompositeOperation = 'multiply';
-        drawErrorVignette(ctx, cw, ch, ft);
-        ctx.globalCompositeOperation = 'source-over';
-      }
-
       if (bounce && !bounceActive) bounceRef.current = null;
-      if (flash && !flashActive) errorFlashRef.current = null;
 
       if (hasAnimations || currentHinted) {
         animFrameRef.current = requestAnimationFrame(render);
@@ -881,27 +857,6 @@ function drawPreviewRay(ctx: CanvasRenderingContext2D, ray: PreviewRay, cellSize
   }
 
   ctx.restore();
-}
-
-// ============================================
-// DRAWING: Error Vignette
-// ============================================
-
-function drawErrorVignette(ctx: CanvasRenderingContext2D, width: number, height: number, t: number) {
-  let alpha: number;
-  if (t < 0.2) alpha = (t / 0.2) * 0.6;
-  else if (t < 0.5) alpha = 0.6;
-  else alpha = 0.6 * (1 - (t - 0.5) / 0.5);
-  alpha = Math.max(0, Math.min(0.6, alpha));
-
-  const cx = width / 2;
-  const cy = height / 2;
-  const outerR = Math.hypot(width, height) / 2;
-  const grad = ctx.createRadialGradient(cx, cy, outerR * 0.4, cx, cy, outerR);
-  grad.addColorStop(0, 'rgba(255, 0, 0, 0)');
-  grad.addColorStop(1, `rgba(255, 0, 0, ${alpha})`);
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, width, height);
 }
 
 // ============================================
