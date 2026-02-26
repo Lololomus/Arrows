@@ -167,7 +167,7 @@ button, .clickable {
 
 :root {
   --app-bottom-nav-offset: 96px;
-  --app-top-extra-offset: clamp(6px, 1vh, 10px);
+  --app-top-extra-offset: clamp(8px, 1.2vh, 12px);
   --app-safe-top: max(
     env(safe-area-inset-top, 0px),
     var(--tg-safe-area-inset-top, 0px),

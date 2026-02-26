@@ -60,7 +60,7 @@ const ENABLE_TEMP_SMART_CONTEXT = true;
 function resolveUserCurrentLevel(rawUser: unknown): number {
   if (!rawUser || typeof rawUser !== 'object') return 1;
 
-  const userRecord = rawUser as Record<string, unknown>;
+  const userRecord = rawUser as { currentLevel?: unknown; current_level?: unknown };
   const rawLevel = userRecord.currentLevel ?? userRecord.current_level;
   const parsedLevel = Number(rawLevel);
   if (!Number.isFinite(parsedLevel) || parsedLevel < 1) return 1;
@@ -458,11 +458,10 @@ export function GameScreen() {
         if (response.newLevelUnlocked && user) {
           const nextUnlockedLevel = Math.max(resolveUserCurrentLevel(user), completedLevel + 1);
           const nextUser = {
-            ...(user as Record<string, unknown>),
+            ...user,
             currentLevel: nextUnlockedLevel,
-            current_level: nextUnlockedLevel,
           };
-          setUser(nextUser as any);
+          setUser(nextUser);
         }
       } catch (error) {
         pendingLevelCompletionRef.current.delete(completedLevel);
