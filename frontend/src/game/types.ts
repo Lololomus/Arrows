@@ -63,7 +63,7 @@ export interface Level {
 
 /** Метаданные уровня */
 export interface LevelMeta {
-  difficulty: number;
+  difficulty: number | string;
   arrowCount: number;
   specialArrowCount: number;
   dagDepth: number;

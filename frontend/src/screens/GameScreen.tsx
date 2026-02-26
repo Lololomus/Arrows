@@ -143,6 +143,7 @@ export function GameScreen() {
   const history = useGameStore(s => s.history);
   const removedArrowIds = useGameStore(s => s.removedArrowIds);
   const levelStartTime = useGameStore(s => s.startTime);
+  const levelEndTime = useGameStore(s => s.endTime);
 
   const initLevel = useGameStore(s => s.initLevel);
   const removeArrow = useGameStore(s => s.removeArrow);
@@ -186,6 +187,20 @@ export function GameScreen() {
 
   const [confirmAction, setConfirmAction] = useState<'restart' | 'menu' | null>(null);
   const [noMoreLevels, setNoMoreLevels] = useState(false);
+  const [levelDifficulty, setLevelDifficulty] = useState<string | number>(1);
+
+  const getElapsedSeconds = useCallback(() => {
+    if (levelStartTime <= 0) return 1;
+    const finishAt = levelEndTime > 0 ? levelEndTime : Date.now();
+    const elapsedMs = Math.max(0, finishAt - levelStartTime);
+    return Math.max(1, Math.floor(elapsedMs / 1000));
+  }, [levelStartTime, levelEndTime]);
+
+  const resultTimeSeconds = useMemo(
+    () => (status === 'victory' ? getElapsedSeconds() : 1),
+    [status, getElapsedSeconds],
+  );
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -401,6 +416,7 @@ export function GameScreen() {
     setNoMoreLevels(false);
     try {
       const levelData = await gameApi.getLevel(levelNum);
+      setLevelDifficulty(levelData.meta?.difficulty ?? 1);
       initLevel(levelNum, levelData.seed, levelData.grid, levelData.arrows);
     } catch (error: any) {
       console.error(error);
@@ -433,8 +449,7 @@ export function GameScreen() {
     if (completedLevelsSentRef.current.has(completedLevel)) return;
     if (pendingLevelCompletionRef.current.has(completedLevel)) return;
 
-    const elapsedMs = levelStartTime > 0 ? Date.now() - levelStartTime : 0;
-    const timeSeconds = Math.max(1, Math.floor(elapsedMs / 1000));
+    const timeSeconds = getElapsedSeconds();
     pendingLevelCompletionRef.current.add(completedLevel);
 
     void (async () => {
@@ -468,7 +483,7 @@ export function GameScreen() {
         console.error('[Progress] Failed to persist level completion:', error);
       }
     })();
-  }, [status, noMoreLevels, gameLevel, levelStartTime, removedArrowIds, user, setUser]);
+  }, [status, noMoreLevels, gameLevel, removedArrowIds, user, setUser, getElapsedSeconds]);
 
   // === КИНЕМАТОГРАФИЧНОЕ ИНТРО ===
   useEffect(() => {
@@ -816,6 +831,9 @@ export function GameScreen() {
 
       <GameResultModal
         status={status}
+        difficulty={levelDifficulty}
+        currentLevel={currentLevel}
+        timeSeconds={resultTimeSeconds}
         noMoreLevels={noMoreLevels}
         onNextLevel={handleNextLevel}
         onRetry={confirmRestart}

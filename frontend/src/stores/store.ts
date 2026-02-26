@@ -107,6 +107,7 @@ interface GameStore {
   moves: number;
   status: GameStatus;
   startTime: number;
+  endTime: number;
 
   history: HistoryDiff[];
 
@@ -152,6 +153,7 @@ const initialGameState: Omit<GameStore, 'initLevel' | 'removeArrow' | 'removeArr
   moves: 0,
   status: 'loading',
   startTime: 0,
+  endTime: 0,
   history: [],
   hintsRemaining: HINTS_PER_LEVEL,
   hintedArrowId: null,
@@ -220,6 +222,7 @@ export const useGameStore = create<GameStore>()(
         moves: 0,
         status: 'playing',
         startTime: Date.now(),
+        endTime: 0,
         history: [],
         hintsRemaining: HINTS_PER_LEVEL,
         hintedArrowId: null,
@@ -256,12 +259,14 @@ export const useGameStore = create<GameStore>()(
       const newRemovedIds = [...removedArrowIds, arrowId];
       const newHistory = [...get().history, diff];
 
+      const isVictory = newArrows.length === 0;
       set({
         arrows: newArrows,
         removedArrowIds: newRemovedIds,
         moves: get().moves + 1,
         history: newHistory,
-        status: newArrows.length === 0 ? 'victory' : 'playing',
+        status: isVictory ? 'victory' : 'playing',
+        endTime: isVictory ? Date.now() : 0,
         hintedArrowId: hintedArrowId === arrowId ? null : hintedArrowId,
         lives,
       });
@@ -302,12 +307,14 @@ export const useGameStore = create<GameStore>()(
       const newRemovedIds = [...removedArrowIds, ...arrowIds];
       const newHistory = [...get().history, diff];
 
+      const isVictory = newArrows.length === 0;
       set({
         arrows: newArrows,
         removedArrowIds: newRemovedIds,
         moves: get().moves + 1,
         history: newHistory,
-        status: newArrows.length === 0 ? 'victory' : 'playing',
+        status: isVictory ? 'victory' : 'playing',
+        endTime: isVictory ? Date.now() : 0,
         hintedArrowId: (hintedArrowId && idsToRemove.has(hintedArrowId)) ? null : hintedArrowId,
         lives,
       });
@@ -328,11 +335,13 @@ export const useGameStore = create<GameStore>()(
       // ⚡ FIX: иммутабельный новый массив
       const newHistory = [...get().history, diff];
 
+      const isDefeat = newLives <= 0;
       set({
         lives: newLives,
         moves: get().moves + 1,
         history: newHistory,
-        status: newLives <= 0 ? 'defeat' : 'playing',
+        status: isDefeat ? 'defeat' : 'playing',
+        endTime: 0,
       });
     },
 
@@ -360,6 +369,7 @@ export const useGameStore = create<GameStore>()(
         history: history.slice(0, -1),
         hintedArrowId: null,
         status: 'playing',
+        endTime: 0,
       });
     },
 
@@ -376,6 +386,8 @@ export const useGameStore = create<GameStore>()(
     reset: () => {
       set({
         status: 'loading',
+        startTime: 0,
+        endTime: 0,
         history: [],
         removedArrowIds: [],
         moves: 0,
