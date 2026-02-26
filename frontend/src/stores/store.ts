@@ -3,7 +3,7 @@
  *
  * Оптимизации:
  * 1. devtools() УБРАН — сериализовал весь state на каждый set() (~5-15ms на мобиле)
- * 2. Мутабельные push вместо spread для history/removedArrowIds
+ * 2. Иммутабельные spread для history/removedArrowIds (FIX: мутабельный push нарушал reference equality)
  * 3. Единый removeArrow() — removeArrows() batch удалён (только normal стрелки)
  * 4. globalIndex.getArrow() вместо .find() — O(1) вместо O(n)
  * 5. Специальные стрелки закомментированы как Legacy
@@ -252,15 +252,15 @@ export const useGameStore = create<GameStore>()(
       // ⚡ Инкрементальное обновление индекса
       removeFromIndex(arrowId);
 
-      // ⚡ Мутабельный push вместо spread
-      removedArrowIds.push(arrowId);
-      get().history.push(diff);
+      // ⚡ FIX: иммутабельные новые массивы — мутация get() нарушает reference equality
+      const newRemovedIds = [...removedArrowIds, arrowId];
+      const newHistory = [...get().history, diff];
 
       set({
         arrows: newArrows,
-        removedArrowIds,
+        removedArrowIds: newRemovedIds,
         moves: get().moves + 1,
-        history: get().history,
+        history: newHistory,
         status: newArrows.length === 0 ? 'victory' : 'playing',
         hintedArrowId: hintedArrowId === arrowId ? null : hintedArrowId,
         lives,
@@ -298,15 +298,15 @@ export const useGameStore = create<GameStore>()(
       // ⚡ Инкрементальное batch-удаление
       for (const id of arrowIds) removeFromIndex(id);
 
-      // ⚡ Мутабельный push
-      for (const id of arrowIds) removedArrowIds.push(id);
-      get().history.push(diff);
+      // ⚡ FIX: иммутабельные новые массивы
+      const newRemovedIds = [...removedArrowIds, ...arrowIds];
+      const newHistory = [...get().history, diff];
 
       set({
         arrows: newArrows,
-        removedArrowIds,
+        removedArrowIds: newRemovedIds,
         moves: get().moves + 1,
-        history: get().history,
+        history: newHistory,
         status: newArrows.length === 0 ? 'victory' : 'playing',
         hintedArrowId: (hintedArrowId && idsToRemove.has(hintedArrowId)) ? null : hintedArrowId,
         lives,
@@ -325,13 +325,13 @@ export const useGameStore = create<GameStore>()(
         prevLives: lives,
       };
 
-      // ⚡ Мутабельный push
-      get().history.push(diff);
+      // ⚡ FIX: иммутабельный новый массив
+      const newHistory = [...get().history, diff];
 
       set({
         lives: newLives,
         moves: get().moves + 1,
-        history: get().history,
+        history: newHistory,
         status: newLives <= 0 ? 'defeat' : 'playing',
       });
     },

@@ -193,6 +193,10 @@ export function CanvasBoard({
 
   if (!initialCellsSet.current && arrows.length > 0) {
     initialCellsSet.current = true;
+    // ⚡ FIX: очищаем bbox cache при смене уровня.
+    // Без этого протухшие bbox от предыдущих уровней (с теми же arrow.id)
+    // приводят к фантомным стрелкам при зуме.
+    _bboxCache.clear();
     const arr: { x: number; y: number }[] = [];
     for (const arrow of arrows) {
       for (const cell of arrow.cells) arr.push({ x: cell.x, y: cell.y });
