@@ -28,7 +28,7 @@ import { GameResultModal } from './game-screen/GameResultModal';
 import { useArrowActions } from './game-screen/useArrowActions';
 import { globalIndex } from '../game/spatialIndex';
 
-import gameBgImage from '../assets/game-bg.jpg?url';
+import gameBgImage from '../assets/game-bg.webp?url';
 
 type ZoomBounds = { minScale: number; maxScale: number; fitScale: number };
 type PanBounds = { minX: number; maxX: number; minY: number; maxY: number };

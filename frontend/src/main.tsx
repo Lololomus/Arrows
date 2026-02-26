@@ -7,6 +7,7 @@ type SafeAreaInsets = Partial<Record<'top' | 'bottom' | 'left' | 'right', unknow
 
 const TG_SAFE_PREFIX = '--tg-safe-area-inset';
 const TG_CONTENT_SAFE_PREFIX = '--tg-content-safe-area-inset';
+const ALLOW_SELECT_SELECTOR = '.allow-select, [data-allow-select="true"], input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]';
 
 const normalizeInset = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -100,7 +101,49 @@ const setupTelegramSafeAreaSync = (tg: any): (() => void) => {
   };
 };
 
+const toElement = (target: EventTarget | Node | null): Element | null => {
+  if (!(target instanceof Node)) return null;
+  if (target.nodeType === Node.ELEMENT_NODE) return target as Element;
+  return target.parentElement;
+};
+
+const isSelectionAllowed = (target: EventTarget | Node | null): boolean => {
+  const element = toElement(target);
+  return !!element?.closest(ALLOW_SELECT_SELECTOR);
+};
+
+const setupSelectionGuards = (): (() => void) => {
+  const blockIfNeeded = (event: Event) => {
+    if (isSelectionAllowed(event.target)) return;
+    if (event.cancelable) event.preventDefault();
+  };
+
+  const handleSelectionChange = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
+
+    const anchorAllowed = isSelectionAllowed(selection.anchorNode);
+    const focusAllowed = isSelectionAllowed(selection.focusNode);
+    if (anchorAllowed || focusAllowed) return;
+
+    selection.removeAllRanges();
+  };
+
+  document.addEventListener('selectstart', blockIfNeeded, true);
+  document.addEventListener('contextmenu', blockIfNeeded, true);
+  document.addEventListener('dragstart', blockIfNeeded, true);
+  document.addEventListener('selectionchange', handleSelectionChange);
+
+  return () => {
+    document.removeEventListener('selectstart', blockIfNeeded, true);
+    document.removeEventListener('contextmenu', blockIfNeeded, true);
+    document.removeEventListener('dragstart', blockIfNeeded, true);
+    document.removeEventListener('selectionchange', handleSelectionChange);
+  };
+};
+
 let disposeTelegramSafeAreaSync: (() => void) | null = null;
+let disposeSelectionGuards: (() => void) | null = null;
 
 const initTelegramApp = () => {
   const tg = (window as any).Telegram?.WebApp;
@@ -148,12 +191,15 @@ const initTelegramApp = () => {
   });
 };
 
+disposeSelectionGuards = setupSelectionGuards();
 initTelegramApp();
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     disposeTelegramSafeAreaSync?.();
     disposeTelegramSafeAreaSync = null;
+    disposeSelectionGuards?.();
+    disposeSelectionGuards = null;
   });
 }
 

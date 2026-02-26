@@ -33,7 +33,7 @@ interface Player {
 type LeaderboardTab = 'arcade' | 'campaign';
 
 const RANK_STYLES: Record<number, { bg: string; border: string; rankClass: string; icon: string; particleColor?: string }> = {
-  1: { bg: 'bg-[#3f3113]', border: 'border-[#ca8a04]/30', rankClass: 'text-yellow-400 drop-shadow-glow', icon: '👑', particleColor: '255, 215, 0' },
+  1: { bg: 'bg-[#3f3113]', border: 'border-[#ca8a04]/30', rankClass: 'text-yellow-400 drop-shadow-glow', icon: '🥇', particleColor: '255, 215, 0' },
   2: { bg: 'bg-[#2c303a]', border: 'border-[#94a3b8]/30', rankClass: 'text-gray-300', icon: '🥈', particleColor: '176, 196, 222' },
   3: { bg: 'bg-[#402314]', border: 'border-[#ea580c]/30', rankClass: 'text-orange-400', icon: '🥉', particleColor: '205, 127, 50' },
 };

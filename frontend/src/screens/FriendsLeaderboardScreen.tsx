@@ -30,7 +30,7 @@ interface ReferralPlayer {
 }
 
 const CYAN_RANK_STYLES: Record<number, { bg: string; border: string; rankClass: string; icon: string; particleColor?: string }> = {
-  1: { bg: 'bg-[#0a2530]', border: 'border-[#22d3ee]/30', rankClass: 'text-cyan-400 drop-shadow-glow', icon: '👑', particleColor: '6, 182, 212' },
+  1: { bg: 'bg-[#0a2530]', border: 'border-[#22d3ee]/30', rankClass: 'text-cyan-400 drop-shadow-glow', icon: '🥇', particleColor: '6, 182, 212' },
   2: { bg: 'bg-[#121c2d]', border: 'border-[#60a5fa]/30', rankClass: 'text-blue-300', icon: '🥈', particleColor: '59, 130, 246' },
   3: { bg: 'bg-[#0f2430]', border: 'border-[#38bdf8]/30', rankClass: 'text-sky-400', icon: '🥉', particleColor: '14, 165, 233' },
 };
