@@ -159,7 +159,8 @@ export function CanvasBoard({
   const animFrameRef = useRef<number>(0);
   const wakeUpRenderRef = useRef<() => void>(() => {});
 
-  const levelStartTimeRef = useRef<number>(performance.now());
+  // ⚡ Lazy init: -1 = не стартовал, таймер запустится на первом кадре render()
+  const levelStartTimeRef = useRef<number>(-1);
   const shakingArrowId = useGameStore(s => s.shakingArrowId);
   const blockedArrowIds = useGameStore(s => s.blockedArrowIds);
 
@@ -468,11 +469,22 @@ export function CanvasBoard({
       ctx.translate(-totalBoardW / 2 + boardPadding, -totalBoardH / 2 + boardPadding);
 
       // Intro sweep
+      // ⚡ FIX: таймер стартует на первом кадре, а не на маунте компонента
+      if (levelStartTimeRef.current < 0) {
+        levelStartTimeRef.current = now;
+      }
       const elapsedSinceStart = now - levelStartTimeRef.current;
       const maxGridDim = Math.max(gridSize.width, gridSize.height);
       const shouldRunIntroSweep = skin.effects.enableAppearAnimation && maxGridDim >= INTRO_MIN_DIM_FOR_SWEEP;
+
+      // ⚡ FIX: длительность масштабируется по размеру уровня
+      // Маленькие (10-20): 650ms, средние (30-50): ~850ms, большие (100+): ~1200ms
+      const introSweepDuration = shouldRunIntroSweep
+        ? INTRO_SWEEP_DURATION_MS + Math.min(maxGridDim - INTRO_MIN_DIM_FOR_SWEEP, 100) * 5
+        : INTRO_SWEEP_DURATION_MS;
+
       const progress = shouldRunIntroSweep
-        ? Math.max(0, Math.min(1, elapsedSinceStart / INTRO_SWEEP_DURATION_MS))
+        ? Math.max(0, Math.min(1, elapsedSinceStart / introSweepDuration))
         : 1;
       const isIntro = shouldRunIntroSweep && progress < 1;
       const isLOD = (cellSize * camScale) < LOD_THRESHOLD;
@@ -480,12 +492,16 @@ export function CanvasBoard({
       ctx.save();
 
       if (isIntro) {
+        // easeOutCubic для прогресса
         const ease = 1 - (1 - progress) * (1 - progress) * (1 - progress);
         const bw = gridSize.width * cellSize;
         const bh = gridSize.height * cellSize;
         const maxRadius = Math.max(0.1, Math.hypot(bw, bh));
+        // ⚡ FIX: sqrt(ease) — площадь круга растёт как r², поэтому sqrt
+        // даёт визуально равномерное расширение площади
+        const radius = maxRadius * Math.sqrt(ease);
         ctx.beginPath();
-        ctx.arc(bw / 2, bh / 2, maxRadius * ease, 0, Math.PI * 2);
+        ctx.arc(bw / 2, bh / 2, radius, 0, Math.PI * 2);
         ctx.clip();
       }
 

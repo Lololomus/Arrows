@@ -18,6 +18,14 @@ import type {
   User,
 } from '../game/types';
 
+interface RawCompleteResponse {
+  valid: boolean;
+  stars?: number;
+  coins_earned?: number;
+  new_level_unlocked?: boolean;
+  error?: string;
+}
+
 // Определяем, запущены ли мы в режиме разработки
 const IS_DEV = import.meta.env.DEV;
 const DEV_AUTH_ENABLED = ['1', 'true', 'yes', 'on'].includes(
@@ -132,8 +140,8 @@ export const gameApi = {
   /**
    * Завершить уровень
    */
-  complete: (data: CompleteRequest): Promise<CompleteResponse> =>
-    request<CompleteResponse>(API_ENDPOINTS.game.complete, {
+  complete: async (data: CompleteRequest): Promise<CompleteResponse> => {
+    const raw = await request<RawCompleteResponse | CompleteResponse>(API_ENDPOINTS.game.complete, {
       method: 'POST',
       body: JSON.stringify({
         level: data.level,
@@ -141,7 +149,20 @@ export const gameApi = {
         moves: data.moves,
         time_seconds: data.timeSeconds,
       }),
-    }),
+    });
+
+    const normalized = raw as RawCompleteResponse & Partial<CompleteResponse>;
+    const coinsEarned = normalized.coinsEarned ?? normalized.coins_earned ?? 0;
+    const newLevelUnlocked = normalized.newLevelUnlocked ?? normalized.new_level_unlocked ?? false;
+
+    return {
+      valid: Boolean(normalized.valid),
+      stars: normalized.stars ?? 0,
+      coinsEarned,
+      newLevelUnlocked,
+      error: normalized.error,
+    };
+  },
   
   /**
    * Получить энергию

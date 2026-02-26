@@ -32,7 +32,6 @@ export default function App() {
   const { screen, setToken, setUser, setError } = useAppStore();
   const [activeTab, setActiveTab] = useState<TabId>('play');
   const handleTabChange = useCallback((id: TabId) => setActiveTab(id), []);
-  const openLeaderboardFromFriends = useCallback(() => setActiveTab('leaderboard'), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,7 +143,7 @@ export default function App() {
   const getActiveComponent = () => {
       switch (activeTab) {
       case 'friends':
-        return <FriendsScreen onOpenLeaderboard={openLeaderboardFromFriends} />;
+        return <FriendsScreen />;
       case 'tasks':
         return <TasksScreen />;
       case 'play':

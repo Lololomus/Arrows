@@ -53,6 +53,19 @@ const HINT_REFOCUS_PAN_EPS_PX = 6;
 const HINT_REFOCUS_SCALE_EPS = 0.02;
 // false: start and stay at fitScale. true: restore delayed intro push-in zoom.
 const ENABLE_INTRO_CAMERA_PUSH_IN = false;
+const ENABLE_SERVER_PROGRESS_PERSIST = import.meta.env.PROD;
+const ENABLE_TEMP_SMART_CONTEXT = true;
+// TODO [ВАЖНЫЙ ДО РЕЛИЗА]: удалить временный smart context и вернуть обычный flow сохранения.
+
+function resolveUserCurrentLevel(rawUser: unknown): number {
+  if (!rawUser || typeof rawUser !== 'object') return 1;
+
+  const userRecord = rawUser as Record<string, unknown>;
+  const rawLevel = userRecord.currentLevel ?? userRecord.current_level;
+  const parsedLevel = Number(rawLevel);
+  if (!Number.isFinite(parsedLevel) || parsedLevel < 1) return 1;
+  return Math.floor(parsedLevel);
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -117,15 +130,19 @@ function clampPan(x: number, y: number, bounds: PanBounds): { x: number; y: numb
 
 export function GameScreen() {
   const user = useAppStore(s => s.user);
+  const setUser = useAppStore(s => s.setUser);
   const setScreen = useAppStore(s => s.setScreen);
 
   const gridSize = useGameStore(s => s.gridSize);
+  const gameLevel = useGameStore(s => s.level);
   const arrows = useGameStore(s => s.arrows);
   const lives = useGameStore(s => s.lives);
   const status = useGameStore(s => s.status);
   const hintsRemaining = useGameStore(s => s.hintsRemaining);
   const hintedArrowId = useGameStore(s => s.hintedArrowId);
   const history = useGameStore(s => s.history);
+  const removedArrowIds = useGameStore(s => s.removedArrowIds);
+  const levelStartTime = useGameStore(s => s.startTime);
 
   const initLevel = useGameStore(s => s.initLevel);
   const removeArrow = useGameStore(s => s.removeArrow);
@@ -138,7 +155,9 @@ export function GameScreen() {
   const blockArrow = useGameStore(s => s.blockArrow);
   const unblockArrows = useGameStore(s => s.unblockArrows);
 
-  const [currentLevel, setCurrentLevel] = useState(user?.currentLevel || 1);
+  const [currentLevel, setCurrentLevel] = useState(() =>
+    ENABLE_SERVER_PROGRESS_PERSIST ? resolveUserCurrentLevel(user) : 1
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({
     w: window.innerWidth,
@@ -160,6 +179,10 @@ export function GameScreen() {
   const lastFocusedHintRef = useRef<string | null>(null);
   const panTweenFrameRef = useRef<number>(0);
   const panTweenTokenRef = useRef(0);
+  const hasManualNavigationInSessionRef = useRef(false);
+  const completedLevelsSentRef = useRef<Set<number>>(new Set());
+  const pendingLevelCompletionRef = useRef<Set<number>>(new Set());
+  const hasInitialLevelSyncRef = useRef(false);
 
   const [confirmAction, setConfirmAction] = useState<'restart' | 'menu' | null>(null);
   const [noMoreLevels, setNoMoreLevels] = useState(false);
@@ -391,6 +414,63 @@ export function GameScreen() {
     loadLevel(currentLevel);
   }, [currentLevel, loadLevel]);
 
+  useEffect(() => {
+    if (!ENABLE_SERVER_PROGRESS_PERSIST) return;
+    if (hasInitialLevelSyncRef.current) return;
+    if (!user) return;
+
+    hasInitialLevelSyncRef.current = true;
+    setCurrentLevel(resolveUserCurrentLevel(user));
+  }, [user]);
+
+  useEffect(() => {
+    if (status !== 'victory') return;
+    if (noMoreLevels) return;
+    if (!ENABLE_SERVER_PROGRESS_PERSIST) return;
+    if (ENABLE_TEMP_SMART_CONTEXT && hasManualNavigationInSessionRef.current) return;
+    const completedLevel = gameLevel;
+    if (completedLevel < 1) return;
+    if (completedLevelsSentRef.current.has(completedLevel)) return;
+    if (pendingLevelCompletionRef.current.has(completedLevel)) return;
+
+    const elapsedMs = levelStartTime > 0 ? Date.now() - levelStartTime : 0;
+    const timeSeconds = Math.max(1, Math.floor(elapsedMs / 1000));
+    pendingLevelCompletionRef.current.add(completedLevel);
+
+    void (async () => {
+      try {
+        const response = await gameApi.complete({
+          level: completedLevel,
+          seed: completedLevel,
+          moves: removedArrowIds,
+          timeSeconds,
+        });
+
+        if (!response.valid) {
+          pendingLevelCompletionRef.current.delete(completedLevel);
+          console.warn(`[Progress] Completion rejected for level ${completedLevel}: ${response.error ?? 'unknown error'}`);
+          return;
+        }
+
+        completedLevelsSentRef.current.add(completedLevel);
+        pendingLevelCompletionRef.current.delete(completedLevel);
+
+        if (response.newLevelUnlocked && user) {
+          const nextUnlockedLevel = Math.max(resolveUserCurrentLevel(user), completedLevel + 1);
+          const nextUser = {
+            ...(user as Record<string, unknown>),
+            currentLevel: nextUnlockedLevel,
+            current_level: nextUnlockedLevel,
+          };
+          setUser(nextUser as any);
+        }
+      } catch (error) {
+        pendingLevelCompletionRef.current.delete(completedLevel);
+        console.error('[Progress] Failed to persist level completion:', error);
+      }
+    })();
+  }, [status, noMoreLevels, gameLevel, levelStartTime, removedArrowIds, user, setUser]);
+
   // === КИНЕМАТОГРАФИЧНОЕ ИНТРО ===
   useEffect(() => {
     if (status !== 'playing') return;
@@ -416,6 +496,12 @@ export function GameScreen() {
     const shouldLockInputForIntro = maxGridDim >= INTRO_MIN_DIM_FOR_BLOCK;
     setIsIntroAnimating(shouldLockInputForIntro);
 
+    // ⚡ FIX: input lock масштабируется вместе со sweep длительностью
+    // Формула идентична CanvasBoard: base + min(dim - threshold, 100) * 5
+    const introLockMs = shouldLockInputForIntro
+      ? INTRO_INPUT_LOCK_MS + Math.min(maxGridDim - INTRO_MIN_DIM_FOR_BLOCK, 100) * 5
+      : INTRO_INPUT_LOCK_MS;
+
     // Ждём sweep-волну, затем зумим
     const t1 = setTimeout(() => {
       const finalScale = shouldUseIntroPushIn ? playScale : fitAllScale;
@@ -430,7 +516,7 @@ export function GameScreen() {
 
     const t2 = setTimeout(() => {
       setIsIntroAnimating(false);
-    }, INTRO_INPUT_LOCK_MS);
+    }, introLockMs);
 
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [
@@ -625,6 +711,22 @@ export function GameScreen() {
   const confirmRestart = useCallback(() => { setConfirmAction(null); loadLevel(currentLevel); }, [currentLevel, loadLevel]);
   const confirmMenu = useCallback(() => { setConfirmAction(null); setScreen('home'); }, [setScreen]);
   const handleNextLevel = useCallback(() => setCurrentLevel(prev => prev + 1), []);
+  const markManualNavigation = useCallback(() => {
+    if (!ENABLE_TEMP_SMART_CONTEXT) return;
+    hasManualNavigationInSessionRef.current = true;
+  }, []);
+  const handlePrevLevel = useCallback(() => {
+    markManualNavigation();
+    setCurrentLevel((l) => Math.max(1, l - 1));
+  }, [markManualNavigation]);
+  const handleJumpLevel = useCallback((lvl: number) => {
+    markManualNavigation();
+    setCurrentLevel(Math.max(1, lvl));
+  }, [markManualNavigation]);
+  const handleHudNextLevelClick = useCallback(() => {
+    markManualNavigation();
+    setCurrentLevel((l) => l + 1);
+  }, [markManualNavigation]);
   const handleDevReset = useCallback(async () => {
     if (!confirm('⚠️ СБРОС ПРОГРЕССА (DEV)')) return;
     try { await gameApi.resetProgress(); setCurrentLevel(1); window.location.reload(); }
@@ -647,9 +749,9 @@ export function GameScreen() {
         onRestartClick={onRestartClick}
         onHintClick={handleHint}
         onUndoClick={undo}
-        onPrevLevel={() => setCurrentLevel((l) => Math.max(1, l - 1))}
-        onJumpLevel={(lvl) => setCurrentLevel(lvl)}
-        onNextLevelClick={() => setCurrentLevel((l) => l + 1)}
+        onPrevLevel={handlePrevLevel}
+        onJumpLevel={handleJumpLevel}
+        onNextLevelClick={handleHudNextLevelClick}
         onDevReset={handleDevReset}
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
