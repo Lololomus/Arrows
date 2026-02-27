@@ -57,6 +57,14 @@ textarea,
   user-select: none;
 }
 
+.ios-game-field-guard,
+.ios-game-canvas-guard {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* Touch improvements */
 button, .clickable {
   @apply cursor-pointer;

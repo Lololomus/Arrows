@@ -635,12 +635,22 @@ export function CanvasBoard({
     <div ref={wrapperRef} style={{ width: '100%', height: '100%', position: 'absolute', inset: 0 }}>
       <canvas
         ref={canvasRef}
-        style={{ display: 'block', cursor: 'pointer', touchAction: 'none' }}
+        className="ios-game-canvas-guard"
+        style={{
+          display: 'block',
+          cursor: 'pointer',
+          touchAction: 'none',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          WebkitTouchCallout: 'none',
+          WebkitTapHighlightColor: 'transparent',
+        }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
         onContextMenu={(e) => e.preventDefault()}
+        onDoubleClick={(e) => e.preventDefault()}
       />
     </div>
   );

@@ -29,6 +29,7 @@ import { GameMenuModal } from './game-screen/GameMenuModal';
 import { GameResultModal } from './game-screen/GameResultModal';
 import { useArrowActions } from './game-screen/useArrowActions';
 import { globalIndex } from '../game/spatialIndex';
+import { useIOSGameFieldSelectionGuard } from '../hooks/useIOSGameFieldSelectionGuard';
 
 import gameBgImage from '../assets/game-bg.webp?url';
 
@@ -161,6 +162,7 @@ export function GameScreen() {
     ENABLE_SERVER_PROGRESS_PERSIST ? resolveUserCurrentLevel(user) : 1
   );
   const containerRef = useRef<HTMLDivElement>(null);
+  useIOSGameFieldSelectionGuard({ targetRef: containerRef, enabled: true });
   const [containerSize, setContainerSize] = useState({
     w: window.innerWidth,
     h: window.innerHeight,
@@ -768,8 +770,14 @@ export function GameScreen() {
       >
         <div
           ref={containerRef}
-          className="h-full overflow-hidden relative pointer-events-auto"
-          style={{ cursor: isDragging ? 'grabbing' : 'default' }}
+          className="h-full overflow-hidden relative pointer-events-auto ios-game-field-guard"
+          style={{
+            cursor: isDragging ? 'grabbing' : 'default',
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            WebkitTouchCallout: 'none',
+            WebkitTapHighlightColor: 'transparent',
+          }}
           onWheel={handleWheel}
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
