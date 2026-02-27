@@ -191,6 +191,7 @@ export function GameScreen() {
   const [confirmAction, setConfirmAction] = useState<'restart' | 'menu' | null>(null);
   const [noMoreLevels, setNoMoreLevels] = useState(false);
   const [levelDifficulty, setLevelDifficulty] = useState<string | number>(1);
+  const [victoryCoinsEarned, setVictoryCoinsEarned] = useState<number | undefined>(undefined);
 
   const getElapsedSeconds = useCallback(() => {
     if (levelStartTime <= 0) return 1;
@@ -428,6 +429,7 @@ export function GameScreen() {
     setStatus('loading');
     clearFlyFX();
     setNoMoreLevels(false);
+    setVictoryCoinsEarned(undefined);
     try {
       const levelData = await gameApi.getLevel(levelNum);
       const diff = levelData.meta?.difficulty ?? 1;
@@ -488,12 +490,16 @@ export function GameScreen() {
 
         completedLevelsSentRef.current.add(completedLevel);
         pendingLevelCompletionRef.current.delete(completedLevel);
+        setVictoryCoinsEarned(response.coinsEarned);
 
-        if (response.newLevelUnlocked && user) {
-          const nextUnlockedLevel = Math.max(resolveUserCurrentLevel(user), completedLevel + 1);
+        if (user) {
+          const nextUnlockedLevel = response.newLevelUnlocked
+            ? Math.max(resolveUserCurrentLevel(user), completedLevel + 1)
+            : resolveUserCurrentLevel(user);
           const nextUser = {
             ...user,
             currentLevel: nextUnlockedLevel,
+            coins: (user.coins ?? 0) + response.coinsEarned,
           };
           setUser(nextUser);
         }
@@ -820,6 +826,7 @@ export function GameScreen() {
         difficulty={levelDifficulty}
         currentLevel={currentLevel}
         timeSeconds={resultTimeSeconds}
+        coinsEarned={victoryCoinsEarned}
         noMoreLevels={noMoreLevels}
         onNextLevel={handleNextLevel}
         onRetry={confirmRestart}

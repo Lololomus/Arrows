@@ -29,7 +29,7 @@ const titleLine = {
 export function HomeScreen() {
   const { setScreen, user } = useAppStore();
   const displayTitleFont = { fontFamily: '"Bungee Inline", cursive' } as const;
-  const coinBalance = user?.coins ?? 1250;
+  const coinBalance = user?.coins ?? 0;
 
   const handlePlayArcade = () => {
     setScreen('game');

@@ -17,7 +17,7 @@ import { Trophy, Crown, Medal, Flame, HeartCrack, type LucideIcon } from 'lucide
 // TYPES
 // ============================================
 
-export type DifficultyTier = 'easy' | 'normal' | 'hard' | 'extreme';
+export type DifficultyTier = 'easy' | 'normal' | 'hard' | 'extreme' | 'impossible';
 export type DifficultyValue = number | string | null | undefined;
 
 export interface DifficultyVisualConfig {
@@ -77,7 +77,7 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     secondary: '#22d3ee',
     scale: 0.9,
     bounce: 0.4,
-    reward: 150,
+    reward: 5,
   },
   normal: {
     label: 'Normal',
@@ -97,7 +97,7 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     secondary: '#fef08a',
     scale: 1.1,
     bounce: 0.5,
-    reward: 350,
+    reward: 10,
   },
   hard: {
     label: 'Hard',
@@ -117,7 +117,7 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     secondary: '#fbbf24',
     scale: 1.3,
     bounce: 0.7,
-    reward: 1000,
+    reward: 30,
   },
   extreme: {
     label: 'Extreme',
@@ -137,7 +137,27 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     secondary: '#c084fc',
     scale: 1.4,
     bounce: 0.8,
-    reward: 2000,
+    reward: 50,
+  },
+  impossible: {
+    label: 'Impossible',
+    headerColor: 'text-purple-400',
+    hudBadgeColor: 'text-purple-400',
+    hudDotColor: 'bg-purple-400',
+    lives: 10,
+    victoryTitle: 'Р›Р•Р“Р•РќР”Рђ!',
+    victoryIcon: Flame,
+    victoryIconColor: 'text-purple-200',
+    victoryGlow: 'bg-purple-600',
+    victoryTextGradient: 'from-purple-200 via-fuchsia-400 to-orange-400',
+    victoryButton:
+      'bg-gradient-to-r from-purple-700 to-fuchsia-600 shadow-[0_0_35px_rgba(147,51,234,0.5)]',
+    badgeStyle: 'bg-purple-500/20 border-purple-500/30 text-purple-300',
+    primary: '#9333ea',
+    secondary: '#c084fc',
+    scale: 1.4,
+    bounce: 0.8,
+    reward: 100,
   },
 };
 
@@ -170,6 +190,7 @@ const RU_EASY_ALT = '\u043b\u0451\u0433\u043a\u0438\u0439';
 const RU_NORMAL = '\u043d\u043e\u0440\u043c\u0430\u043b\u044c\u043d\u044b\u0439';
 const RU_HARD = '\u0441\u043b\u043e\u0436\u043d\u044b\u0439';
 const RU_EXTREME = '\u044d\u043a\u0441\u0442\u0440\u0435\u043c\u0430\u043b\u044c\u043d\u044b\u0439';
+const RU_IMPOSSIBLE = '\u043d\u0435\u0432\u043e\u0437\u043c\u043e\u0436\u043d\u044b\u0439';
 
 /**
  * Maps backend difficulty to UI tier.
@@ -187,13 +208,15 @@ export function getDifficultyTier(difficulty: DifficultyValue): DifficultyTier {
     }
     if (text === RU_HARD || text === 'hard') return 'hard';
     if (text === RU_EXTREME || text === 'extreme') return 'extreme';
+    if (text === RU_IMPOSSIBLE || text === 'impossible') return 'impossible';
   }
 
   if (typeof difficulty === 'number' && Number.isFinite(difficulty)) {
     if (difficulty <= 3) return 'easy';
     if (difficulty <= 6) return 'normal';
     if (difficulty <= 8) return 'hard';
-    return 'extreme';
+    if (difficulty <= 10) return 'extreme';
+    return 'impossible';
   }
 
   return 'normal';

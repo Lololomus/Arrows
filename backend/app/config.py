@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     DEV_AUTH_ENABLED: bool = False
     DEV_AUTH_ALLOWLIST: str = ""
     DEV_AUTH_AUTO_CREATE: bool | None = None
-    DEV_AUTH_DEFAULT_COINS: int = 10000
+    DEV_AUTH_DEFAULT_COINS: int = 0
     DEV_AUTH_DEFAULT_ENERGY: int = 5
     
     # Database
@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     ANTICHEAT_MAX_WINRATE: int = 95
     
     # Game Settings
-    INITIAL_COINS: int = 100
+    INITIAL_COINS: int = 0
     MAX_ENERGY: int = 5
     ENERGY_REGEN_SECONDS: int = 30 * 60  # 30 minutes
     ENERGY_RECOVERY_MINUTES: int = 30
@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     HINTS_PER_LEVEL: int = 3
     COINS_PER_LEVEL: int = 10
     COINS_PER_STAR: int = 5
+    COINS_REWARD_EASY: int = 5
+    COINS_REWARD_NORMAL: int = 10
+    COINS_REWARD_HARD: int = 30
+    COINS_REWARD_EXTREME: int = 50
+    COINS_REWARD_IMPOSSIBLE: int = 100
     
     # Rewards
     BASE_COINS_PER_LEVEL: int = 10

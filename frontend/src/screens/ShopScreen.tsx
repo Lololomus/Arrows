@@ -3,6 +3,7 @@ import { ShoppingBag, Sparkles, X, Zap, Gift, Package, CheckCircle, Clock } from
 import { useEffect, useRef, useState } from 'react';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { CoinStashCard } from '../components/ui/CoinStashCard';
+import { useAppStore } from '../stores/store';
 
 // --- ИСПРАВЛЕННЫЕ АНИМАЦИИ (БЕЗ МАСШТАБИРОВАНИЯ) ---
 
@@ -286,7 +287,8 @@ function ShopTabs({
 
 export function ShopScreen() {
   const isComingSoon = true;
-  const userBalance = { coins: 1250, stars: 75 };
+  const user = useAppStore(s => s.user);
+  const userBalance = { coins: user?.coins ?? 0, stars: 75 };
   const [activeTab, setActiveTab] = useState<ShopTab>('shop');
   const [selectedItem, setSelectedItem] = useState<typeof shopItems[0] | null>(null);
   const [isOpeningBox, setIsOpeningBox] = useState(false);

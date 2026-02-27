@@ -6,7 +6,7 @@ Arrow Puzzle - Game API
 
 import time
 from datetime import datetime
-from typing import List
+from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,6 +60,50 @@ def calculate_energy_recovery(user: User) -> tuple[int, int]:
         seconds_to_next = int(settings.ENERGY_RECOVERY_MINUTES * 60 - remainder)
     
     return current, seconds_to_next
+
+
+def normalize_difficulty_tier(value: Any) -> str:
+    """Normalizes backend level difficulty into a stable tier key."""
+    if isinstance(value, str):
+        text = " ".join(value.strip().lower().replace("ё", "е").split())
+        if text in {"легкий", "easy"}:
+            return "easy"
+        if text in {"нормальный", "normal", "medium", "mid"}:
+            return "normal"
+        if text in {"сложный", "hard"}:
+            return "hard"
+        if text in {"экстремальный", "extreme"}:
+            return "extreme"
+        if text in {"невозможный", "impossible"}:
+            return "impossible"
+        return "normal"
+
+    if isinstance(value, (int, float)):
+        difficulty = float(value)
+        if difficulty <= 3:
+            return "easy"
+        if difficulty <= 6:
+            return "normal"
+        if difficulty <= 8:
+            return "hard"
+        if difficulty <= 10:
+            return "extreme"
+        return "impossible"
+
+    return "normal"
+
+
+def coins_by_difficulty(value: Any) -> int:
+    tier = normalize_difficulty_tier(value)
+    if tier == "easy":
+        return settings.COINS_REWARD_EASY
+    if tier == "hard":
+        return settings.COINS_REWARD_HARD
+    if tier == "extreme":
+        return settings.COINS_REWARD_EXTREME
+    if tier == "impossible":
+        return settings.COINS_REWARD_IMPOSSIBLE
+    return settings.COINS_REWARD_NORMAL
 
 
 async def update_energy(user: User, db: AsyncSession) -> int:
@@ -277,9 +321,7 @@ async def complete_level(
     else:
         stars = 1
     
-    base_coins = settings.COINS_PER_LEVEL
-    star_bonus = stars * settings.COINS_PER_STAR
-    coins_earned = base_coins + star_bonus
+    coins_earned = coins_by_difficulty(level_data["meta"].get("difficulty"))
     
     # 🔥 СОХРАНЕНИЕ ПРОГРЕССА (БУХГАЛТЕР)
     new_level = False
