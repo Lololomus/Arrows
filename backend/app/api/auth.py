@@ -5,16 +5,18 @@ Arrow Puzzle - Authentication API
 """
 
 import time
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 import jwt
 
 from ..config import settings
-from ..database import get_db
-from ..models import User, UserStats
+from ..database import get_db, get_redis
+from ..models import User, UserStats, Referral
 from ..schemas import TelegramAuthRequest, AuthResponse, UserResponse
 from ..middleware.security import validate_telegram_init_data, limiter
 
@@ -149,6 +151,74 @@ async def get_current_user(
 
 
 # ============================================
+# REFERRAL: Redis Fallback (EC-16)
+# ============================================
+
+async def apply_redis_referral(user: User, db: AsyncSession):
+    """
+    Проверяет Redis на сохранённый реферальный код (EC-16).
+    
+    Когда пользователь кликает ссылку t.me/bot?start=ref_CODE, но НЕ открывает
+    Mini App сразу, бот-вебхук сохраняет код в Redis. При последующей авторизации
+    в Mini App (даже без start_param) этот код подхватывается и применяется.
+    """
+    if user.referred_by_id is not None:
+        return  # уже есть реферер
+    
+    try:
+        redis = await get_redis()
+        key = f"ref_pending:{user.telegram_id}"
+        code = await redis.get(key)
+        
+        if not code:
+            return
+        
+        if isinstance(code, bytes):
+            code = code.decode("utf-8")
+        
+        # Grace period
+        account_age = datetime.utcnow() - user.created_at
+        if account_age > timedelta(hours=settings.REFERRAL_GRACE_PERIOD_HOURS):
+            await redis.delete(key)
+            return
+        
+        # Ищем инвайтера
+        result = await db.execute(
+            select(User).where(User.referral_code == code.upper())
+        )
+        referrer = result.scalar_one_or_none()
+        
+        if not referrer or referrer.id == user.id:
+            await redis.delete(key)
+            return
+        
+        # Создаём реферал
+        try:
+            referral = Referral(
+                inviter_id=referrer.id,
+                invitee_id=user.id,
+                status="pending",
+                invitee_bonus_paid=True,
+            )
+            db.add(referral)
+            
+            user.referred_by_id = referrer.id
+            user.coins += settings.REFERRAL_REWARD_INVITEE  # +100 СРАЗУ
+            referrer.referrals_pending += 1
+            
+            await db.commit()
+            print(f"✅ [Auth] Redis referral applied: {user.id} → inviter {referrer.id}")
+        except IntegrityError:
+            await db.rollback()
+        
+        await redis.delete(key)
+        
+    except Exception as e:
+        # Redis недоступен — не критично
+        print(f"⚠️ [Auth] Redis referral check failed: {e}")
+
+
+# ============================================
 # ENDPOINTS
 # ============================================
 
@@ -226,6 +296,10 @@ async def auth_telegram(
             await db.commit()
             print(f"🔄 [Auth] User {user.id} data updated")
     
+    # EC-16: Проверяем Redis на сохранённый реферальный код
+    # (если пользователь кликнул ссылку бота, но Mini App открыл позже без start_param)
+    await apply_redis_referral(user, db)
+    
     # Создаём JWT токен
     token = create_jwt_token(user.id)
     
@@ -244,6 +318,8 @@ async def auth_telegram(
             "is_premium": user.is_premium,
             "active_arrow_skin": user.active_arrow_skin,
             "active_theme": user.active_theme,
+            "referrals_count": user.referrals_count,
+            "referrals_pending": user.referrals_pending,
         }
     )
 
@@ -278,5 +354,7 @@ async def refresh_token(user: User = Depends(get_current_user)):
             "is_premium": user.is_premium,
             "active_arrow_skin": user.active_arrow_skin,
             "active_theme": user.active_theme,
+            "referrals_count": user.referrals_count,
+            "referrals_pending": user.referrals_pending,
         }
     )

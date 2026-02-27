@@ -16,6 +16,10 @@ import type {
   LeaderboardResponse,
   RewardChannel,
   User,
+  ReferralApplyResponse,
+  ReferralStatsResponse,
+  ReferralListResponse,
+  ReferralLeaderboardResponse,
 } from '../game/types';
 
 interface RawCompleteResponse {
@@ -24,6 +28,7 @@ interface RawCompleteResponse {
   coins_earned?: number;
   new_level_unlocked?: boolean;
   error?: string;
+  referral_confirmed?: boolean;
 }
 
 interface RawUserResponse {
@@ -48,6 +53,8 @@ interface RawUserResponse {
   activeTheme?: string;
   is_premium?: boolean;
   isPremium?: boolean;
+  referrals_count?: number;
+  referrals_pending?: number;
 }
 
 function normalizeUserResponse(raw: RawUserResponse): User {
@@ -65,6 +72,8 @@ function normalizeUserResponse(raw: RawUserResponse): User {
     activeArrowSkin: raw.activeArrowSkin ?? raw.active_arrow_skin ?? 'default',
     activeTheme: raw.activeTheme ?? raw.active_theme ?? 'light',
     isPremium: raw.isPremium ?? raw.is_premium ?? false,
+    referrals_count: raw.referrals_count ?? 0,
+    referrals_pending: raw.referrals_pending ?? 0,
   };
 }
 
@@ -201,6 +210,7 @@ export const gameApi = {
     const normalized = raw as RawCompleteResponse & Partial<CompleteResponse>;
     const coinsEarned = normalized.coinsEarned ?? normalized.coins_earned ?? 0;
     const newLevelUnlocked = normalized.newLevelUnlocked ?? normalized.new_level_unlocked ?? false;
+    const referralConfirmed = normalized.referralConfirmed ?? normalized.referral_confirmed ?? false;
 
     return {
       valid: Boolean(normalized.valid),
@@ -208,6 +218,7 @@ export const gameApi = {
       coinsEarned,
       newLevelUnlocked,
       error: normalized.error,
+      referralConfirmed,
     };
   },
   
@@ -314,13 +325,41 @@ export const socialApi = {
     request<{ code: string; link: string }>(API_ENDPOINTS.social.referralCode),
   
   /**
-   * Применить реферальный код
+   * Применить реферальный код.
+   * Invitee получает +100 монет СРАЗУ.
+   * reason: 'already_referred' | 'self_referral' | 'invalid_code' | 'account_too_old'
    */
-  applyReferral: (code: string): Promise<{ success: boolean; bonus: number }> =>
-    request<{ success: boolean; bonus: number }>(API_ENDPOINTS.social.applyReferral, {
+  applyReferral: (code: string): Promise<ReferralApplyResponse> =>
+    request<ReferralApplyResponse>(API_ENDPOINTS.social.applyReferral, {
       method: 'POST',
       body: JSON.stringify({ code }),
     }),
+  
+  /**
+   * Статистика рефералов текущего пользователя
+   */
+  getReferralStats: (): Promise<ReferralStatsResponse> =>
+    request<ReferralStatsResponse>(API_ENDPOINTS.social.referralStats),
+  
+  /**
+   * Список приглашённых рефералов (для вкладки «Мои друзья»)
+   */
+  getMyReferrals: (): Promise<ReferralListResponse> =>
+    request<ReferralListResponse>(API_ENDPOINTS.social.referralList),
+  
+  /**
+   * Глобальный лидерборд рефоводов
+   */
+  getReferralLeaderboard: (limit = 100): Promise<ReferralLeaderboardResponse> =>
+    request<ReferralLeaderboardResponse>(
+      `${API_ENDPOINTS.social.referralLeaderboard}?limit=${limit}`
+    ),
+  
+  /**
+   * Лидерборд среди друзей (приглашённых)
+   */
+  getFriendsLeaderboard: (): Promise<LeaderboardResponse> =>
+    request<LeaderboardResponse>(API_ENDPOINTS.social.friendsLeaderboard),
   
   /**
    * Получить лидерборд

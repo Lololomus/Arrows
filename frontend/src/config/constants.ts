@@ -235,7 +235,11 @@ export const API_ENDPOINTS = {
   social: {
     referralCode: '/social/referral/code',
     applyReferral: '/social/referral/apply',
+    referralStats: '/social/referral/stats',
+    referralList: '/social/referral/list',
+    referralLeaderboard: '/social/referral/leaderboard',
     leaderboard: (type: string) => `/social/leaderboard/${type}`,
+    friendsLeaderboard: '/social/friends/leaderboard',
     channels: '/social/channels',
     claimChannel: '/social/channels/claim',
   },
@@ -246,3 +250,4 @@ export const API_ENDPOINTS = {
 // ============================================
 
 export const ADSGRAM_BLOCK_ID = import.meta.env.VITE_ADSGRAM_BLOCK_ID || '';
+

@@ -1,5 +1,5 @@
 // ===== 📄 ФАЙЛ: frontend/src/screens/FriendsLeaderboardScreen.tsx =====
-import { useState, useMemo, useRef, useEffect, useCallback, memo, type CSSProperties } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Trophy, Info, UserPlus, Gift } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -7,6 +7,8 @@ import { useAppStore } from '../stores/store';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { StarParticles } from '../components/ui/StarParticles';
 import { useParticleRuntimeProfile } from '../components/ui/particleRuntimeProfile';
+import { useReferral } from '../hooks/hooks';
+import type { ReferralLeaderboardEntry } from '../game/types';
 
 // --- ХЕЛПЕРЫ ДЛЯ TELEGRAM ---
 const triggerHaptic = (style: 'light' | 'medium' | 'heavy' | 'selection') => {
@@ -27,6 +29,7 @@ interface ReferralPlayer {
   username: string | null;
   referrals: number;
   avatarSeed: number;
+  photoUrl?: string | null;
 }
 
 const CYAN_RANK_STYLES: Record<number, { bg: string; border: string; rankClass: string; icon: string; particleColor?: string }> = {
@@ -59,22 +62,20 @@ const formatUsernameForUi = (username: string | null): string | null => {
   return `@${username}`;
 };
 
-const generateReferralLeaderboard = (count: number): ReferralPlayer[] => {
-  return Array.from({ length: count }).map((_, i) => {
-    const baseName = `RefPlayer_${9900 - i}`;
-    const normalizedUsername = normalizeUsername(
-      i % 9 === 0 ? null : (i % 13 === 0 ? `@${baseName.toLowerCase()}` : baseName.toLowerCase())
-    );
-
+/** Маппинг API данных → ReferralPlayer для UI */
+function mapApiToPlayers(entries: ReferralLeaderboardEntry[]): ReferralPlayer[] {
+  return entries.map((entry) => {
+    const normalizedUsername = normalizeUsername(entry.username);
     return {
-      rank: i + 1,
-      displayName: normalizeDisplayName(baseName, normalizedUsername, DEFAULT_PLAYER_NAME),
+      rank: entry.rank,
+      displayName: normalizeDisplayName(entry.first_name, entry.username, DEFAULT_PLAYER_NAME),
       username: normalizedUsername,
-      referrals: Math.max(1, 150 - i * 2 - Math.floor(Math.random() * 5)),
-      avatarSeed: i + 100,
+      referrals: entry.score,
+      avatarSeed: entry.user_id,
+      photoUrl: entry.photo_url,
     };
   });
-};
+}
 
 const INITIAL_VISIBLE_COUNT = 15;
 const SKELETON_MIN_VISIBLE_MS = 240;
@@ -123,7 +124,11 @@ function preloadImage(src: string, timeoutMs = AVATAR_PRELOAD_TIMEOUT_MS): Promi
 
 async function prepareLeaderboardForDisplay(players: ReferralPlayer[]): Promise<void> {
   const visiblePlayers = players.slice(0, INITIAL_VISIBLE_COUNT);
-  await Promise.allSettled(visiblePlayers.map((player) => preloadImage(getAvatarUrl(player.avatarSeed))));
+  await Promise.allSettled(
+    visiblePlayers.map((player) =>
+      preloadImage(player.photoUrl || getAvatarUrl(player.avatarSeed))
+    )
+  );
   await waitFrame();
   await waitFrame();
 }
@@ -207,7 +212,7 @@ const ReferralInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose:
 ReferralInfoModal.displayName = 'ReferralInfoModal';
 
 // --- КОМПОНЕНТ: ASYNC AVATAR ---
-const AsyncAvatar = memo(({ seed, rank, photoUrl }: { seed: number, rank?: number, photoUrl?: string }) => {
+const AsyncAvatar = memo(({ seed, rank, photoUrl }: { seed: number, rank?: number, photoUrl?: string | null }) => {
   const [loaded, setLoaded] = useState(false);
 
   return (
@@ -287,7 +292,7 @@ const TopReferralItem = memo(({ player, index, animateEntry }: { player: Referra
         <span className="text-xl drop-shadow-md">{styles.icon}</span>
       </div>
       <div className="relative z-20 mr-3">
-        <AsyncAvatar seed={player.avatarSeed} rank={player.rank} />
+        <AsyncAvatar seed={player.avatarSeed} rank={player.rank} photoUrl={player.photoUrl} />
       </div>
       <div className="flex-1 min-w-0 relative z-20 py-1">
         <PlayerIdentityText displayName={player.displayName} username={player.username} />
@@ -309,7 +314,7 @@ const RegularReferralItem = memo(({ player }: { player: ReferralPlayer }) => {
         <span className={`font-bold text-lg ${styles.rankClass}`}>{player.rank}</span>
       </div>
       <div className="relative z-10 mr-3">
-        <AsyncAvatar seed={player.avatarSeed} rank={player.rank} />
+        <AsyncAvatar seed={player.avatarSeed} rank={player.rank} photoUrl={player.photoUrl} />
       </div>
       <div className="flex-1 min-w-0 relative z-10 py-0.5">
         <PlayerIdentityText
@@ -368,20 +373,26 @@ LeaderboardSkeleton.displayName = 'LeaderboardSkeleton';
 const CARD_GAP_PX = 12;
 const BOTTOM_NAV_SELECTOR = '[data-bottom-nav]';
 
-const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger }: { user: any, isDocked: boolean, pulseTrigger?: number }) => {
+const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger, myPosition, myScore }: {
+  user: any;
+  isDocked: boolean;
+  pulseTrigger?: number;
+  myPosition: number | null;
+  myScore: number;
+}) => {
   const currentUserRank = useMemo(() => {
     const normalizedUsername = normalizeUsername(user?.username);
     const displayName = normalizeDisplayName(user?.firstName ?? user?.first_name, normalizedUsername, DEFAULT_PLAYER_NAME);
 
     return {
-      rank: 101,
+      rank: myPosition ?? 0,
       displayName,
       username: normalizedUsername,
-      referrals: 15,
+      referrals: myScore,
       avatarSeed: user?.id || 999,
       photoUrl: user?.photo_url || user?.photoUrl,
     };
-  }, [user]);
+  }, [user, myPosition, myScore]);
   const [isPulseActive, setIsPulseActive] = useState(false);
 
   useEffect(() => {
@@ -412,6 +423,10 @@ const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger }: { user: any, i
     scale: [1.02, 1.015, 1],
   };
 
+  const rankDisplay = currentUserRank.rank > 0
+    ? `#${currentUserRank.rank.toLocaleString()}`
+    : '—';
+
   return (
     <motion.div
       animate={isDocked ? (isPulseActive ? pulseDocked : baseDocked) : floating}
@@ -427,7 +442,7 @@ const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger }: { user: any, i
       <div className="flex flex-col items-center justify-center w-8 mr-2 leading-none relative z-10 shrink-0">
          <span className="text-white/40 font-bold text-[10px] uppercase mb-1">Место</span>
          <span className={`font-black tracking-tighter transition-colors ${isDocked ? 'text-blue-200 text-sm' : 'text-cyan-300 text-sm drop-shadow-md'}`}>
-           #{currentUserRank.rank.toLocaleString()}
+           {rankDisplay}
          </span>
       </div>
 
@@ -466,9 +481,42 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
   const currentUserRowRef = useRef<HTMLDivElement>(null);
   const visibleCountRef = useRef(INITIAL_VISIBLE_COUNT);
 
-  const leaderboard = useMemo(() => generateReferralLeaderboard(100), []);
+  const {
+    referralLeaders: apiLeaders,
+    myReferralPosition,
+    myReferralScore,
+    fetchReferralLeaderboard,
+  } = useReferral();
+
+  // Маппим API данные → UI формат
+  const leaderboard = useMemo(() => mapApiToPlayers(apiLeaders), [apiLeaders]);
+
   const stickyBottomPx = bottomNavHeight + CARD_GAP_PX;
   const shouldAnimateListEnter = listRenderVersion > 0;
+
+  // Загрузка данных
+  useEffect(() => {
+    const startedAt = performance.now();
+    void (async () => {
+      await fetchReferralLeaderboard(100);
+    })();
+  }, [fetchReferralLeaderboard]);
+
+  // Подготовка аватаров и отображение
+  useEffect(() => {
+    if (apiLeaders.length === 0 && isLoading) return;
+
+    const startedAt = performance.now();
+    void (async () => {
+      await prepareLeaderboardForDisplay(leaderboard);
+      const elapsed = performance.now() - startedAt;
+      if (elapsed < SKELETON_MIN_VISIBLE_MS) {
+        await waitMs(SKELETON_MIN_VISIBLE_MS - elapsed);
+      }
+      setIsLoading(false);
+      setListRenderVersion(1);
+    })();
+  }, [leaderboard, apiLeaders.length]);
 
   useEffect(() => {
     const nav = document.querySelector(BOTTOM_NAV_SELECTOR) as HTMLElement | null;
@@ -520,20 +568,6 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
       prevDocked.current = isDocked;
     }
   }, [isDocked]);
-
-  // Эмуляция загрузки как в аркадном лидерборде
-  useEffect(() => {
-    const startedAt = performance.now();
-    void (async () => {
-      await prepareLeaderboardForDisplay(leaderboard);
-      const elapsed = performance.now() - startedAt;
-      if (elapsed < SKELETON_MIN_VISIBLE_MS) {
-        await waitMs(SKELETON_MIN_VISIBLE_MS - elapsed);
-      }
-      setIsLoading(false);
-      setListRenderVersion(1);
-    })();
-  }, [leaderboard]);
 
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
@@ -591,7 +625,7 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
         <h2 className="text-3xl font-black text-white uppercase tracking-wide drop-shadow-md relative z-10">Топ рефоводов</h2>
         <div className="inline-flex items-center gap-2 mt-2 bg-black/30 px-3 py-1 rounded-full border border-white/10 relative z-10">
           <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></div>
-          <p className="text-cyan-200/80 text-xs font-mono">14д 08ч 15м</p>
+          <p className="text-cyan-200/80 text-xs font-mono">Сезон 1</p>
         </div>
       </div>
 
@@ -605,6 +639,12 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
         >
           {isLoading ? (
             <LeaderboardSkeleton />
+          ) : leaderboard.length === 0 ? (
+            <div className="text-center py-16">
+              <div className="text-5xl mb-4">🏆</div>
+              <p className="text-white/50 text-sm">Пока нет участников</p>
+              <p className="text-white/30 text-xs mt-1">Приглашай друзей и стань первым!</p>
+            </div>
           ) : (
             <motion.div
               key={`friends-list-${listRenderVersion}`}
@@ -631,16 +671,27 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
                   className={isDocked ? 'visible' : 'invisible pointer-events-none'}
                   aria-hidden={!isDocked}
                 >
-                  <CurrentUserFooter user={user} isDocked pulseTrigger={dockPulseKey} />
+                  <CurrentUserFooter
+                    user={user}
+                    isDocked
+                    pulseTrigger={dockPulseKey}
+                    myPosition={myReferralPosition}
+                    myScore={myReferralScore}
+                  />
                 </div>
               )}
             </motion.div>
           )}
         </div>
 
-        {!isLoading && !isDocked && (
+        {!isLoading && !isDocked && leaderboard.length > 0 && (
           <div className="absolute left-1 right-1 z-50 pointer-events-none" style={{ bottom: stickyBottomPx }}>
-            <CurrentUserFooter user={user} isDocked={false} />
+            <CurrentUserFooter
+              user={user}
+              isDocked={false}
+              myPosition={myReferralPosition}
+              myScore={myReferralScore}
+            />
           </div>
         )}
       </div>

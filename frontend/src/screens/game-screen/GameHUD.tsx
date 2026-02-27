@@ -3,8 +3,9 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Heart, Lightbulb } from 'lucide-react';
+import { useGameStore } from '../../stores/store';
 import {
   getDifficultyConfig,
   type DifficultyValue,
@@ -28,20 +29,39 @@ interface GameHUDProps {
 // LIVES DISPLAY
 // ============================================
 
-function LivesDisplay({ lives, difficulty }: { lives: number; difficulty: DifficultyValue }) {
+function LivesDisplay({
+  lives,
+  currentLevel,
+  lifeHitTick,
+}: {
+  lives: number;
+  currentLevel: number;
+  lifeHitTick: number;
+}) {
   const prevLivesRef = useRef(lives);
+  const prevLevelRef = useRef(currentLevel);
+  const prevLifeHitTickRef = useRef(lifeHitTick);
   const [isHit, setIsHit] = useState(false);
 
   useEffect(() => {
-    if (lives < prevLivesRef.current) {
+    if (currentLevel !== prevLevelRef.current) {
+      prevLevelRef.current = currentLevel;
+      prevLivesRef.current = lives;
+      prevLifeHitTickRef.current = lifeHitTick;
+      setIsHit(false);
+      return;
+    }
+
+    if (lifeHitTick !== prevLifeHitTickRef.current) {
+      prevLifeHitTickRef.current = lifeHitTick;
       setIsHit(true);
-      window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('medium');
       const timer = setTimeout(() => setIsHit(false), 600);
       prevLivesRef.current = lives;
       return () => clearTimeout(timer);
     }
+
     prevLivesRef.current = lives;
-  }, [lives]);
+  }, [currentLevel, lifeHitTick, lives]);
 
   const isCritical = lives <= 1;
 
@@ -54,19 +74,16 @@ function LivesDisplay({ lives, difficulty }: { lives: number; difficulty: Diffic
   return (
     <div className="flex items-center gap-1.5">
       <motion.div
+        initial={false}
         animate={
           isHit
             ? { x: [0, -3, 3, -2, 2, 0], scale: [1, 1.3, 0.9, 1.1, 1] }
-            : isCritical
-              ? { scale: [1, 1.15, 1] }
-              : {}
+            : { x: 0, scale: 1 }
         }
         transition={
           isHit
             ? { duration: 0.5, ease: 'easeOut' }
-            : isCritical
-              ? { duration: 1.5, repeat: Infinity, ease: 'easeInOut' }
-              : {}
+            : { duration: 0.15 }
         }
         className="flex items-center"
       >
@@ -78,17 +95,14 @@ function LivesDisplay({ lives, difficulty }: { lives: number; difficulty: Diffic
         />
       </motion.div>
 
-      <AnimatePresence mode="popLayout">
-        <motion.span
-          key={lives}
-          initial={{ scale: 1.4, opacity: 0.5 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.4, ease: 'easeOut' }}
-          className={`text-sm font-bold tabular-nums leading-none ${numberColor}`}
-        >
-          ×{lives}
-        </motion.span>
-      </AnimatePresence>
+      <motion.span
+        initial={false}
+        animate={isHit ? { scale: [1, 1.18, 1] } : { scale: 1 }}
+        transition={isHit ? { duration: 0.35, ease: 'easeOut' } : { duration: 0.15 }}
+        className={`text-sm font-bold tabular-nums leading-none ${numberColor}`}
+      >
+        ×{lives}
+      </motion.span>
     </div>
   );
 }
@@ -101,10 +115,12 @@ function TopBar({
   currentLevel,
   lives,
   difficulty,
+  lifeHitTick,
 }: {
   currentLevel: number;
   lives: number;
   difficulty: DifficultyValue;
+  lifeHitTick: number;
 }) {
   const cfg = getDifficultyConfig(difficulty);
 
@@ -151,7 +167,7 @@ function TopBar({
 
           {/* Lives */}
           <div className="pl-3 pr-4 py-2.5">
-            <LivesDisplay lives={lives} difficulty={difficulty} />
+            <LivesDisplay lives={lives} currentLevel={currentLevel} lifeHitTick={lifeHitTick} />
           </div>
         </motion.div>
       </div>
@@ -246,12 +262,14 @@ export function GameHUD({
   onMenuClick,
   children,
 }: GameHUDProps) {
+  const lifeHitTick = useGameStore(s => s.lifeHitTick);
   return (
     <div className="relative z-10 flex flex-col h-full mx-auto pointer-events-none overflow-hidden">
       <TopBar
         currentLevel={currentLevel}
         lives={lives}
         difficulty={difficulty}
+        lifeHitTick={lifeHitTick}
       />
 
       <div className="flex-1 relative min-h-0 pointer-events-auto">

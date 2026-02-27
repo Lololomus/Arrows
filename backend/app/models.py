@@ -45,6 +45,9 @@ class User(Base):
     # Рефералы
     referral_code = Column(String(16), unique=True, nullable=True, index=True)
     referred_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    referrals_count = Column(Integer, default=0)       # подтверждённых (invitee достиг уровня подтверждения)
+    referrals_pending = Column(Integer, default=0)     # ожидающих подтверждения
+    referrals_earnings = Column(Integer, default=0)    # всего монет заработано с рефералов
     
     # Активные скины
     active_arrow_skin = Column(String(64), default="default")
@@ -65,6 +68,8 @@ class User(Base):
     stats = relationship("UserStats", back_populates="user", uselist=False)
     inventory = relationship("Inventory", back_populates="user")
     transactions = relationship("Transaction", back_populates="user")
+    referrals_sent = relationship("Referral", foreign_keys="Referral.inviter_id", back_populates="inviter")
+    referral_received = relationship("Referral", foreign_keys="Referral.invitee_id", back_populates="invitee", uselist=False)
     
     def to_dict(self):
         return {
@@ -80,6 +85,8 @@ class User(Base):
             "is_premium": self.is_premium,
             "active_arrow_skin": self.active_arrow_skin,
             "active_theme": self.active_theme,
+            "referrals_count": self.referrals_count,
+            "referrals_pending": self.referrals_pending,
         }
 
 
@@ -216,6 +223,40 @@ class Leaderboard(Base):
     season = Column(Integer, default=1)
     
     updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ============================================
+# REFERRAL
+# ============================================
+
+class Referral(Base):
+    """
+    Реферальная связь между пригласившим (inviter) и приглашённым (invitee).
+    
+    Жизненный цикл:
+      pending   — invitee зарегистрировался по ссылке, получил +100 монет
+      confirmed — invitee достиг уровня подтверждения, inviter получил +200 монет
+    """
+    
+    __tablename__ = "referrals"
+    
+    id = Column(Integer, primary_key=True)
+    inviter_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    invitee_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, unique=True)
+    
+    # Статус
+    status = Column(String(16), default="pending", nullable=False, index=True)  # 'pending' | 'confirmed'
+    confirmed_at = Column(DateTime, nullable=True)
+    
+    # Выплаты
+    inviter_bonus_paid = Column(Boolean, default=False)
+    invitee_bonus_paid = Column(Boolean, default=False)  # True сразу при создании (invitee получает +100)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    inviter = relationship("User", foreign_keys=[inviter_id], back_populates="referrals_sent")
+    invitee = relationship("User", foreign_keys=[invitee_id], back_populates="referral_received")
 
 
 # ============================================

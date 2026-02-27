@@ -116,6 +116,8 @@ class CompleteResponse(BaseModel):
     coins_earned: int = 0
     new_level_unlocked: bool = False
     error: Optional[str] = None
+    # Реферал: true если на этом уровне подтвердился реферал invitee
+    referral_confirmed: bool = False
 
 
 class EnergyResponse(BaseModel):
@@ -181,7 +183,7 @@ class TonPaymentInfo(BaseModel):
 
 
 # ============================================
-# SOCIAL
+# SOCIAL - REFERRALS
 # ============================================
 
 class ReferralCodeResponse(BaseModel):
@@ -196,16 +198,65 @@ class ReferralApplyRequest(BaseModel):
 
 
 class ReferralApplyResponse(BaseModel):
-    """Ответ применения реферала."""
+    """
+    Ответ применения реферала.
+    reason присутствует только при success=False.
+    """
     success: bool
     bonus: int = 0
+    reason: Optional[str] = None  # 'already_referred' | 'self_referral' | 'invalid_code' | 'account_too_old'
 
 
 class ReferralStatsResponse(BaseModel):
-    """Статистика рефералов."""
+    """Статистика рефералов текущего пользователя."""
     referrals_count: int
+    referrals_pending: int
     total_earned: int
+    referral_code: Optional[str]
+    referral_link: Optional[str]
+    referral_confirm_level: int
 
+
+class ReferralInfo(BaseModel):
+    """Один реферал в списке приглашённых."""
+    id: int
+    username: Optional[str]
+    first_name: Optional[str]
+    photo_url: Optional[str]
+    current_level: int
+    status: str  # 'pending' | 'confirmed'
+    confirmed_at: Optional[datetime]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ReferralListResponse(BaseModel):
+    """Список приглашённых рефералов."""
+    referrals: List[ReferralInfo]
+
+
+class ReferralLeaderboardEntry(BaseModel):
+    """Запись в лидерборде рефоводов."""
+    rank: int
+    user_id: int
+    username: Optional[str]
+    first_name: Optional[str]
+    photo_url: Optional[str]
+    score: int  # кол-во подтверждённых рефералов
+
+
+class ReferralLeaderboardResponse(BaseModel):
+    """Ответ лидерборда рефоводов."""
+    leaders: List[ReferralLeaderboardEntry]
+    my_position: Optional[int]
+    my_score: int = 0
+
+
+# ============================================
+# SOCIAL - LEADERBOARD
+# ============================================
 
 class LeaderboardEntry(BaseModel):
     """Запись в лидерборде."""
@@ -221,6 +272,10 @@ class LeaderboardResponse(BaseModel):
     leaders: List[LeaderboardEntry]
     my_position: Optional[int]
 
+
+# ============================================
+# SOCIAL - CHANNELS
+# ============================================
 
 class RewardChannel(BaseModel):
     """Канал для подписки."""

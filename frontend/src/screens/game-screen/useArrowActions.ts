@@ -13,6 +13,7 @@ interface UseArrowActionsParams {
   baseCellSize: number;
   cameraScale: MotionValue<number>;
   focusHintArrow: (arrowId: string, force?: boolean) => boolean;
+  triggerLifeHit: () => void;
   setShakingArrow: (arrowId: string | null) => void;
   blockArrow: (arrowId: string) => void;
   unblockArrows: (arrowIds: string[]) => void;
@@ -27,6 +28,7 @@ export function useArrowActions({
   baseCellSize,
   cameraScale,
   focusHintArrow,
+  triggerLifeHit,
   setShakingArrow,
   blockArrow,
   unblockArrows,
@@ -54,6 +56,7 @@ export function useArrowActions({
     // if (result.defrosted) return;
 
     if (result.collision) {
+      triggerLifeHit();
       setShakingArrow(arrowId);
       blockArrow(arrowId);
       window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('error');
@@ -102,6 +105,7 @@ export function useArrowActions({
     }
   }, [
     setShakingArrow,
+    triggerLifeHit,
     blockArrow,
     unblockArrows,
     failMove,

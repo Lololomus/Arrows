@@ -156,6 +156,10 @@ export interface User {
   
   // Статус
   isPremium: boolean;
+  
+  // Рефералы
+  referrals_count?: number;
+  referrals_pending?: number;
 }
 
 /** Статистика пользователя */
@@ -231,6 +235,57 @@ export interface RewardChannel {
   claimed: boolean;
 }
 
+/** Ответ применения реферала */
+export interface ReferralApplyResponse {
+  success: boolean;
+  bonus: number;
+  reason?: 'already_referred' | 'self_referral' | 'invalid_code' | 'account_too_old';
+}
+
+/** Статистика рефералов */
+export interface ReferralStatsResponse {
+  referrals_count: number;
+  referrals_pending: number;
+  total_earned: number;
+  referral_code: string | null;
+  referral_link: string | null;
+  referral_confirm_level: number;
+}
+
+/** Реферал в списке приглашённых */
+export interface ReferralInfo {
+  id: number;
+  username: string | null;
+  first_name: string | null;
+  photo_url: string | null;
+  current_level: number;
+  status: 'pending' | 'confirmed';
+  confirmed_at: string | null;
+  created_at: string;
+}
+
+/** Список рефералов */
+export interface ReferralListResponse {
+  referrals: ReferralInfo[];
+}
+
+/** Запись лидерборда рефоводов */
+export interface ReferralLeaderboardEntry {
+  rank: number;
+  user_id: number;
+  username: string | null;
+  first_name: string | null;
+  photo_url: string | null;
+  score: number;
+}
+
+/** Ответ лидерборда рефоводов */
+export interface ReferralLeaderboardResponse {
+  leaders: ReferralLeaderboardEntry[];
+  my_position: number | null;
+  my_score: number;
+}
+
 // ============================================
 // API RESPONSES
 // ============================================
@@ -265,6 +320,8 @@ export interface CompleteResponse {
   coinsEarned: number;
   newLevelUnlocked: boolean;
   error?: string;
+  /** true если на этом уровне подтвердился реферал (invitee достиг уровня подтверждения) */
+  referralConfirmed?: boolean;
 }
 
 /** Ответ энергии */

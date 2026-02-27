@@ -5,17 +5,21 @@ Arrow Puzzle - Social API
 """
 
 import secrets
+from datetime import datetime, timedelta
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
+from sqlalchemy.exc import IntegrityError
 
 from ..config import settings
 from ..database import get_db, get_redis
-from ..models import User, Leaderboard, ChannelSubscription
+from ..models import User, Referral, Leaderboard, ChannelSubscription
 from ..schemas import (
     ReferralCodeResponse, ReferralApplyRequest, ReferralApplyResponse,
-    ReferralStatsResponse, LeaderboardEntry, LeaderboardResponse,
+    ReferralStatsResponse, ReferralInfo, ReferralListResponse,
+    ReferralLeaderboardEntry, ReferralLeaderboardResponse,
+    LeaderboardEntry, LeaderboardResponse,
     RewardChannel, ClaimChannelRequest
 )
 from .auth import get_current_user
@@ -34,12 +38,10 @@ async def get_referral_code(
     db: AsyncSession = Depends(get_db)
 ):
     """Получить реферальный код и ссылку."""
-    # Генерируем код если нет
     if not user.referral_code:
         user.referral_code = secrets.token_urlsafe(6).upper()[:8]
         await db.commit()
     
-    # Формируем ссылку
     link = f"https://t.me/{settings.TELEGRAM_BOT_USERNAME}?start=ref_{user.referral_code}"
     
     return ReferralCodeResponse(code=user.referral_code, link=link)
@@ -51,44 +53,170 @@ async def apply_referral(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Применить реферальный код (для нового пользователя)."""
-    # Проверяем что пользователь ещё не применял код
-    if user.referred_by_id:
-        return ReferralApplyResponse(success=False, bonus=0)
+    """
+    Применить реферальный код.
     
-    # Ищем владельца кода
+    Invitee получает +100 монет СРАЗУ.
+    Inviter получит +200 монет, когда invitee достигнет уровня подтверждения.
+    
+    Edge cases:
+      - already_referred: уже есть реферер
+      - account_too_old: аккаунту > 72 часов
+      - invalid_code: код не найден
+      - self_referral: свой собственный код
+    """
+    # EC-3: Уже есть реферер
+    if user.referred_by_id is not None:
+        return ReferralApplyResponse(success=False, reason="already_referred")
+    
+    # EC-18: Grace period для существующих аккаунтов
+    account_age = datetime.utcnow() - user.created_at
+    if account_age > timedelta(hours=settings.REFERRAL_GRACE_PERIOD_HOURS):
+        return ReferralApplyResponse(success=False, reason="account_too_old")
+    
+    # EC-5: Ищем владельца кода
     result = await db.execute(
         select(User).where(User.referral_code == request.code.upper())
     )
     referrer = result.scalar_one_or_none()
     
     if not referrer:
-        return ReferralApplyResponse(success=False, bonus=0)
+        return ReferralApplyResponse(success=False, reason="invalid_code")
     
-    # Нельзя реферить самого себя
+    # EC-4: Самореферал
     if referrer.id == user.id:
-        return ReferralApplyResponse(success=False, bonus=0)
+        return ReferralApplyResponse(success=False, reason="self_referral")
     
-    # Применяем реферал
-    user.referred_by_id = referrer.id
-    user.coins += settings.REFERRAL_BONUS_COINS
+    # EC-11: Создаём Referral (UNIQUE на invitee_id защитит от race condition)
+    try:
+        referral = Referral(
+            inviter_id=referrer.id,
+            invitee_id=user.id,
+            status="pending",
+            invitee_bonus_paid=True,  # invitee получает бонус прямо сейчас
+        )
+        db.add(referral)
+        
+        user.referred_by_id = referrer.id
+        user.coins += settings.REFERRAL_REWARD_INVITEE  # +100 монет СРАЗУ invitee
+        
+        referrer.referrals_pending += 1
+        # inviter НЕ получает бонус сейчас — только когда invitee достигнет уровня подтверждения
+        
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        return ReferralApplyResponse(success=False, reason="already_referred")
     
-    # Награждаем владельца кода
-    referrer.referrals_count += 1
-    referrer.referrals_earnings += settings.REFERRAL_OWNER_BONUS
-    referrer.coins += settings.REFERRAL_OWNER_BONUS
-    
-    await db.commit()
-    
-    return ReferralApplyResponse(success=True, bonus=settings.REFERRAL_BONUS_COINS)
+    return ReferralApplyResponse(success=True, bonus=settings.REFERRAL_REWARD_INVITEE)
 
 
 @router.get("/referral/stats", response_model=ReferralStatsResponse)
-async def get_referral_stats(user: User = Depends(get_current_user)):
+async def get_referral_stats(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
     """Получить статистику рефералов."""
+    # Генерируем код если нет (чтобы всегда возвращать ссылку)
+    if not user.referral_code:
+        user.referral_code = secrets.token_urlsafe(6).upper()[:8]
+        await db.commit()
+    
+    link = f"https://t.me/{settings.TELEGRAM_BOT_USERNAME}?start=ref_{user.referral_code}"
+    
     return ReferralStatsResponse(
         referrals_count=user.referrals_count,
-        total_earned=user.referrals_earnings
+        referrals_pending=user.referrals_pending,
+        total_earned=user.referrals_earnings,
+        referral_code=user.referral_code,
+        referral_link=link,
+        referral_confirm_level=settings.REFERRAL_CONFIRM_LEVEL,
+    )
+
+
+@router.get("/referral/list", response_model=ReferralListResponse)
+async def get_referral_list(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Список приглашённых рефералов (для вкладки «Мои друзья»).
+    Сортировка: confirmed сверху, затем по уровню убывание.
+    """
+    result = await db.execute(
+        select(Referral, User)
+        .join(User, Referral.invitee_id == User.id)
+        .where(Referral.inviter_id == user.id)
+        .order_by(
+            # confirmed сверху
+            desc(Referral.status == "confirmed"),
+            desc(User.current_level),
+        )
+    )
+    rows = result.all()
+    
+    referrals = [
+        ReferralInfo(
+            id=invitee.id,
+            username=invitee.username,
+            first_name=invitee.first_name,
+            photo_url=invitee.photo_url,
+            current_level=invitee.current_level,
+            status=ref.status,
+            confirmed_at=ref.confirmed_at,
+            created_at=ref.created_at,
+        )
+        for ref, invitee in rows
+    ]
+    
+    return ReferralListResponse(referrals=referrals)
+
+
+@router.get("/referral/leaderboard", response_model=ReferralLeaderboardResponse)
+async def get_referral_leaderboard(
+    limit: int = 100,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Глобальный лидерборд рефоводов.
+    Ранжирование по кол-ву подтверждённых рефералов (referrals_count).
+    """
+    # Топ рефоводов
+    result = await db.execute(
+        select(User)
+        .where(User.referrals_count > 0)
+        .order_by(desc(User.referrals_count), desc(User.referrals_earnings))
+        .limit(limit)
+    )
+    users = result.scalars().all()
+    
+    leaders = [
+        ReferralLeaderboardEntry(
+            rank=i + 1,
+            user_id=u.id,
+            username=u.username,
+            first_name=u.first_name,
+            photo_url=u.photo_url,
+            score=u.referrals_count,
+        )
+        for i, u in enumerate(users)
+    ]
+    
+    # Позиция текущего пользователя
+    my_position = None
+    if user.referrals_count > 0:
+        rank_result = await db.execute(
+            select(func.count())
+            .select_from(User)
+            .where(User.referrals_count > user.referrals_count)
+        )
+        my_position = rank_result.scalar() + 1
+    
+    return ReferralLeaderboardResponse(
+        leaders=leaders,
+        my_position=my_position,
+        my_score=user.referrals_count,
     )
 
 
@@ -142,7 +270,7 @@ async def get_leaderboard(
         result = await db.execute(
             select(Leaderboard, User)
             .join(User, Leaderboard.user_id == User.id)
-            .where(Leaderboard.period == "weekly")
+            .where(Leaderboard.board_type == "weekly")
             .order_by(desc(Leaderboard.score))
             .limit(limit)
         )
@@ -162,7 +290,7 @@ async def get_leaderboard(
         # Позиция текущего пользователя
         my_lb = await db.execute(
             select(Leaderboard)
-            .where(Leaderboard.user_id == user.id, Leaderboard.period == "weekly")
+            .where(Leaderboard.user_id == user.id, Leaderboard.board_type == "weekly")
         )
         my_entry = my_lb.scalar_one_or_none()
         
@@ -171,7 +299,7 @@ async def get_leaderboard(
                 select(func.count())
                 .select_from(Leaderboard)
                 .where(
-                    Leaderboard.period == "weekly",
+                    Leaderboard.board_type == "weekly",
                     Leaderboard.score > my_entry.score
                 )
             )
@@ -183,7 +311,7 @@ async def get_leaderboard(
         result = await db.execute(
             select(Leaderboard, User)
             .join(User, Leaderboard.user_id == User.id)
-            .where(Leaderboard.period == "arcade")
+            .where(Leaderboard.board_type == "arcade")
             .order_by(desc(Leaderboard.score))
             .limit(limit)
         )
@@ -292,19 +420,19 @@ async def get_friends_leaderboard(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Лидерборд среди друзей.
-    В Telegram Mini Apps можно получить список друзей через CloudStorage или share.
-    Здесь упрощённая версия - те, кого пригласил пользователь.
+    Лидерборд среди друзей (приглашённых рефералов + сам пользователь).
+    Ранжирование по current_level.
     """
-    # Получаем рефералов пользователя
+    # Получаем подтверждённых и pending рефералов
     result = await db.execute(
         select(User)
-        .where(User.referred_by_id == user.id)
+        .join(Referral, Referral.invitee_id == User.id)
+        .where(Referral.inviter_id == user.id)
         .order_by(desc(User.current_level))
     )
     referrals = result.scalars().all()
     
-    # Добавляем самого пользователя
+    # Добавляем самого пользователя и сортируем
     all_users = [user] + list(referrals)
     all_users.sort(key=lambda u: (u.current_level, u.total_stars), reverse=True)
     
@@ -314,7 +442,7 @@ async def get_friends_leaderboard(
             user_id=u.id,
             username=u.username,
             first_name=u.first_name,
-            score=u.current_level
+            score=u.current_level,
         )
         for i, u in enumerate(all_users)
     ]

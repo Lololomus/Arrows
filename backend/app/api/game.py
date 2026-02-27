@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from ..config import settings
 from ..database import get_db, get_redis
-from ..models import User, UserStats, LevelAttempt
+from ..models import User, UserStats, LevelAttempt, Referral
 from ..schemas import (
     LevelResponse, CompleteRequest, CompleteResponse,
     EnergyResponse, HintRequest, HintResponse,
@@ -129,6 +129,63 @@ async def spend_energy(user: User, db: AsyncSession) -> bool:
     user.energy_updated_at = datetime.utcnow()
     await db.commit()
     
+    return True
+
+
+async def check_referral_confirmation(user: User, db: AsyncSession) -> bool:
+    """
+    Проверяет и подтверждает реферал при достижении REFERRAL_CONFIRM_LEVEL.
+    
+    Вызывается из complete_level ПОСЛЕ повышения user.current_level.
+    User row уже под FOR UPDATE — атомарность гарантирована.
+    
+    Логика:
+      - invitee (user) уже получил +100 при регистрации
+      - inviter получает +200 сейчас (если не забанен)
+    
+    Returns: True если реферал был подтверждён.
+    """
+    if user.current_level < settings.REFERRAL_CONFIRM_LEVEL:
+        return False
+    
+    # Ищем pending реферал где текущий пользователь — invitee
+    # with_for_update не нужен: user row уже залочен, а Referral.invitee_id UNIQUE
+    result = await db.execute(
+        select(Referral).where(
+            Referral.invitee_id == user.id,
+            Referral.status == "pending",
+        )
+    )
+    referral = result.scalar_one_or_none()
+    
+    if not referral:
+        return False
+    
+    # EC-7: Идемпотентность — если уже confirmed, пропускаем
+    # (не должно произойти из-за WHERE status="pending", но на всякий случай)
+    
+    # Подтверждаем реферал
+    referral.status = "confirmed"
+    referral.confirmed_at = datetime.utcnow()
+    
+    # Бонус инвайтеру: +200 монет
+    if referral.inviter_id:
+        inviter = await db.get(User, referral.inviter_id)
+        if inviter and not inviter.is_banned:
+            inviter.coins += settings.REFERRAL_REWARD_INVITER
+            inviter.referrals_earnings += settings.REFERRAL_REWARD_INVITER
+            inviter.referrals_count += 1
+            inviter.referrals_pending = max(0, inviter.referrals_pending - 1)
+            referral.inviter_bonus_paid = True
+        elif inviter:
+            # EC-9: Забанен — счётчики обновляем, бонус откладываем
+            inviter.referrals_count += 1
+            inviter.referrals_pending = max(0, inviter.referrals_pending - 1)
+            referral.inviter_bonus_paid = False
+    
+    # Invitee НЕ получает доп. бонус (уже получил +100 при регистрации)
+    
+    print(f"✅ [Referral] Confirmed: invitee={user.id}, inviter={referral.inviter_id}")
     return True
 
 
@@ -360,13 +417,17 @@ async def complete_level(
     )
     db.add(attempt)
     
+    # Проверяем подтверждение реферала (invitee достиг уровня подтверждения)
+    referral_confirmed = await check_referral_confirmation(user, db)
+    
     await db.commit()
     
     return CompleteResponse(
         valid=True,
         stars=stars,
         coins_earned=coins_earned,
-        new_level_unlocked=new_level
+        new_level_unlocked=new_level,
+        referral_confirmed=referral_confirmed,
     )
 
 

@@ -154,6 +154,7 @@ export function GameScreen() {
   const failMove = useGameStore(s => s.failMove);
   const showHint = useGameStore(s => s.showHint);
   const setStatus = useGameStore(s => s.setStatus);
+  const triggerLifeHit = useGameStore(s => s.triggerLifeHit);
   const setShakingArrow = useGameStore(s => s.setShakingArrow);
   const blockArrow = useGameStore(s => s.blockArrow);
   const unblockArrows = useGameStore(s => s.unblockArrows);
@@ -729,6 +730,7 @@ export function GameScreen() {
     baseCellSize,
     cameraScale,
     focusHintArrow,
+    triggerLifeHit,
     setShakingArrow,
     blockArrow,
     unblockArrows,

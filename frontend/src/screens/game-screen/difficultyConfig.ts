@@ -7,8 +7,7 @@
  * - string from JSON levels: "Легкий" | "Нормальный" | "Сложный" | "Экстремальный"
  * - numeric legacy value from older generated levels
  *
- * LIVES LOGIC (inverted): harder levels give MORE lives
- * because complex puzzles need more room for error.
+ * Lives are fixed across all difficulty tiers.
  */
 
 import { Trophy, Crown, Medal, Flame, HeartCrack, type LucideIcon } from 'lucide-react';
@@ -27,7 +26,7 @@ export interface DifficultyVisualConfig {
   hudBadgeColor: string;
   /** Tailwind dot/accent color for HUD */
   hudDotColor: string;
-  /** Lives granted for this difficulty tier (harder = more) */
+  /** Lives granted for this difficulty tier */
   lives: number;
   victoryTitle: string;
   victoryIcon: LucideIcon;
@@ -84,7 +83,7 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     headerColor: 'text-yellow-400',
     hudBadgeColor: 'text-yellow-400',
     hudDotColor: 'bg-yellow-400',
-    lives: 5,
+    lives: 3,
     victoryTitle: 'ПОБЕДА!',
     victoryIcon: Trophy,
     victoryIconColor: 'text-yellow-400',
@@ -104,7 +103,7 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     headerColor: 'text-rose-400',
     hudBadgeColor: 'text-rose-400',
     hudDotColor: 'bg-rose-400',
-    lives: 7,
+    lives: 3,
     victoryTitle: 'ПРЕВОСХОДНО!',
     victoryIcon: Crown,
     victoryIconColor: 'text-amber-100',
@@ -124,7 +123,7 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     headerColor: 'text-purple-400',
     hudBadgeColor: 'text-purple-400',
     hudDotColor: 'bg-purple-400',
-    lives: 10,
+    lives: 3,
     victoryTitle: 'ЛЕГЕНДА!',
     victoryIcon: Flame,
     victoryIconColor: 'text-purple-200',
@@ -144,7 +143,7 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     headerColor: 'text-purple-400',
     hudBadgeColor: 'text-purple-400',
     hudDotColor: 'bg-purple-400',
-    lives: 10,
+    lives: 3,
     victoryTitle: 'Р›Р•Р“Р•РќР”Рђ!',
     victoryIcon: Flame,
     victoryIconColor: 'text-purple-200',

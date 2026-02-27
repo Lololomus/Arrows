@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from ..config import settings
-from ..database import get_db
+from ..database import get_db, get_redis
 from ..models import User, Inventory, Transaction
 from ..schemas import TelegramPaymentWebhook, TonPaymentWebhook, AdsgramRewardWebhook
 from ..api.shop import get_item_by_id, apply_boost
@@ -279,7 +279,11 @@ async def handle_bot_update(
 ):
     """
     Вебхук для обновлений Telegram бота.
-    Обрабатывает команды /start с реферальным кодом.
+    
+    При /start ref_{CODE}:
+      - Создаёт пользователя если новый
+      - НЕ привязывает реферал напрямую (это делает /referral/apply из Mini App)
+      - Сохраняет ref_code в Redis как fallback (EC-16: если Mini App откроется без start_param)
     """
     body = await request.json()
     
@@ -288,48 +292,45 @@ async def handle_bot_update(
     
     message = body["message"]
     
-    # Обработка /start с параметром
-    if message.get("text", "").startswith("/start"):
-        text = message["text"]
-        user_data = message["from"]
-        
-        # Ищем или создаём пользователя
-        result = await db.execute(
-            select(User).where(User.telegram_id == user_data["id"])
+    if not message.get("text", "").startswith("/start"):
+        return {"ok": True}
+    
+    text = message["text"]
+    user_data = message["from"]
+    telegram_id = user_data["id"]
+    
+    # Ищем или создаём пользователя
+    result = await db.execute(
+        select(User).where(User.telegram_id == telegram_id)
+    )
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        user = User(
+            telegram_id=telegram_id,
+            username=user_data.get("username"),
+            first_name=user_data.get("first_name"),
+            coins=settings.INITIAL_COINS,
+            energy=settings.MAX_ENERGY,
         )
-        user = result.scalar_one_or_none()
-        
-        if not user:
-            user = User(
-                telegram_id=user_data["id"],
-                username=user_data.get("username"),
-                first_name=user_data.get("first_name"),
-                coins=settings.INITIAL_COINS,
-                energy=settings.MAX_ENERGY,
-            )
-            db.add(user)
-            await db.commit()
-            await db.refresh(user)
-        
-        # Обрабатываем реферальный код
-        if " ref_" in text:
-            ref_code = text.split("ref_")[1].strip()
-            
-            # Применяем если пользователь новый
-            if not user.referred_by_id:
-                result = await db.execute(
-                    select(User).where(User.referral_code == ref_code.upper())
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+    
+    # Сохраняем реферальный код в Redis (fallback для EC-16)
+    if " ref_" in text:
+        ref_code = text.split("ref_")[1].strip()
+        if ref_code:
+            try:
+                redis = await get_redis()
+                await redis.set(
+                    f"ref_pending:{telegram_id}",
+                    ref_code.upper(),
+                    ex=settings.REFERRAL_GRACE_PERIOD_HOURS * 3600,  # TTL = grace period
                 )
-                referrer = result.scalar_one_or_none()
-                
-                if referrer and referrer.id != user.id:
-                    user.referred_by_id = referrer.id
-                    user.coins += settings.REFERRAL_BONUS_COINS
-                    
-                    referrer.referrals_count += 1
-                    referrer.referrals_earnings += settings.REFERRAL_OWNER_BONUS
-                    referrer.coins += settings.REFERRAL_OWNER_BONUS
-                    
-                    await db.commit()
+                print(f"📌 [Webhook] Saved ref_code {ref_code} for telegram_id {telegram_id} in Redis")
+            except Exception as e:
+                # Redis недоступен — не критично, Mini App start_param сработает
+                print(f"⚠️ [Webhook] Redis save failed: {e}")
     
     return {"ok": True}

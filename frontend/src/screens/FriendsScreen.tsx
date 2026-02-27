@@ -1,26 +1,12 @@
-import { useState } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Users, Share2, Copy, Trophy } from 'lucide-react';
-import { useAppStore } from '../stores/store';
+import { Users, Share2, Copy, Trophy, CheckCircle, UserPlus } from 'lucide-react';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { FriendsLeaderboardScreen } from './FriendsLeaderboardScreen';
+import { useReferral } from '../hooks/hooks';
+import type { ReferralInfo } from '../game/types';
 
 type FriendsTab = 'friends' | 'leaderboard';
-
-interface Friend {
-  id: number;
-  name: string;
-  status: 'online' | 'offline';
-  avatar: string;
-}
-
-const friends: Friend[] = [
-  { id: 1, name: 'Alexey_K', status: 'online', avatar: '👨‍💻' },
-  { id: 2, name: 'CryptoLord', status: 'offline', avatar: '🦸' },
-  { id: 3, name: 'Masha_Win', status: 'offline', avatar: '👩‍🎨' },
-  { id: 4, name: 'Dmitry_Pro', status: 'online', avatar: '🧑‍🚀' },
-  { id: 5, name: 'Anna_Top', status: 'offline', avatar: '👩‍🔬' },
-];
 
 const itemVariant = {
   hidden: { opacity: 0, x: -20 },
@@ -37,12 +23,133 @@ const itemVariant = {
   }),
 };
 
+// --- КОМПОНЕНТ: ПРОГРЕСС-БАР РЕФЕРАЛА ---
+function ReferralProgressBar({
+  currentLevel,
+  confirmLevel,
+}: {
+  currentLevel: number;
+  confirmLevel: number | null;
+}) {
+  if (!confirmLevel || confirmLevel <= 0) {
+    return null;
+  }
+
+  const progress = Math.min(100, Math.round((currentLevel / confirmLevel) * 100));
+  const remaining = Math.max(0, confirmLevel - currentLevel);
+
+  return (
+    <div className="mt-1.5">
+      <div className="flex items-center justify-between text-[10px] mb-1">
+        <span className="text-yellow-300/70">⏳ Ещё {remaining} ур. до бонуса</span>
+        <span className="text-white/40">{progress}%</span>
+      </div>
+      <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${progress}%` }}
+          transition={{ duration: 0.6, ease: 'easeOut' }}
+          className="h-full bg-gradient-to-r from-yellow-500 to-orange-400 rounded-full"
+        />
+      </div>
+    </div>
+  );
+}
+
+// --- КОМПОНЕНТ: КАРТОЧКА РЕФЕРАЛА ---
+function ReferralCard({
+  referral,
+  index,
+  confirmLevel,
+}: {
+  referral: ReferralInfo;
+  index: number;
+  confirmLevel: number | null;
+}) {
+  const isConfirmed = referral.status === 'confirmed';
+  const displayName = referral.first_name || referral.username || 'Игрок';
+
+  return (
+    <motion.div
+      custom={index}
+      variants={itemVariant}
+      initial="hidden"
+      animate="visible"
+      className="flex items-center justify-between bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/5"
+    >
+      <div className="flex items-center gap-3 flex-1 min-w-0">
+        <div className="text-white/30 font-bold text-lg w-6 text-center shrink-0">{index + 1}</div>
+        <div className="w-11 h-11 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-xl shrink-0 overflow-hidden">
+          {referral.photo_url ? (
+            <img src={referral.photo_url} alt="" className="w-full h-full rounded-full object-cover" />
+          ) : (
+            isConfirmed ? '✅' : '⏳'
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-white font-medium text-sm truncate">{displayName}</div>
+          {referral.username && (
+            <div className="text-white/40 text-[11px] truncate">@{referral.username}</div>
+          )}
+          {!isConfirmed && (
+            <ReferralProgressBar
+              currentLevel={referral.current_level}
+              confirmLevel={confirmLevel}
+            />
+          )}
+        </div>
+      </div>
+
+      <div className="shrink-0 ml-3">
+        {isConfirmed ? (
+          <div className="flex items-center gap-1.5 bg-green-500/15 text-green-300 text-xs px-3 py-1.5 rounded-xl font-medium">
+            <CheckCircle size={14} /> Активен
+          </div>
+        ) : (
+          <div className="text-center">
+            <div className="text-white/60 text-xs font-bold">Ур. {referral.current_level}</div>
+            <div className="text-white/30 text-[10px]">/ {confirmLevel ?? '...'}</div>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+// --- КОМПОНЕНТ: ПУСТОЙ СПИСОК ---
+function EmptyReferralList({ onShare }: { onShare: () => void }) {
+  return (
+    <div className="text-center py-10">
+      <div className="text-5xl mb-4">👥</div>
+      <p className="text-white/60 text-sm mb-1">Пока никого нет</p>
+      <p className="text-white/40 text-xs mb-5">Пригласи друга и получи 200 монет!</p>
+      <button
+        onClick={onShare}
+        className="bg-gradient-to-r from-blue-600 to-purple-600 text-white font-bold py-3 px-6 rounded-2xl text-sm"
+      >
+        <UserPlus size={16} className="inline mr-1.5 mb-0.5" /> Пригласить
+      </button>
+    </div>
+  );
+}
+
+// --- ОСНОВНОЙ КОНТЕНТ ВКЛАДКИ «МОИ ДРУЗЬЯ» ---
 function FriendsListContent({
-  referralCode,
+  code,
+  link,
+  stats,
+  confirmLevel,
+  referrals,
+  loading,
   onCopyReferral,
   onShare,
 }: {
-  referralCode: string | number;
+  code: string;
+  link: string;
+  stats: { count: number; pending: number; earned: number };
+  confirmLevel: number | null;
+  referrals: ReferralInfo[];
+  loading: boolean;
   onCopyReferral: () => void;
   onShare: () => void;
 }) {
@@ -52,8 +159,9 @@ function FriendsListContent({
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.3 }}
-        className="space-y-6"
+        className="space-y-5"
       >
+        {/* Блоки наград */}
         <div className="grid grid-cols-2 gap-3">
           <div className="relative rounded-2xl overflow-hidden">
             <AdaptiveParticles
@@ -85,11 +193,33 @@ function FriendsListContent({
           </div>
         </div>
 
+        {/* Статистика */}
+        <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="text-center">
+                <div className="text-white font-black text-xl">{stats.count}</div>
+                <div className="text-white/40 text-[10px]">подтв.</div>
+              </div>
+              <div className="w-px h-8 bg-white/10" />
+              <div className="text-center">
+                <div className="text-yellow-300 font-black text-xl">{stats.pending}</div>
+                <div className="text-white/40 text-[10px]">ожидают</div>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-green-400 font-bold text-lg">+{stats.earned}</div>
+              <div className="text-white/40 text-[10px]">заработано</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Реферальная ссылка */}
         <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
           <div className="text-white/70 text-xs mb-2 font-medium">Твоя реферальная ссылка:</div>
           <div className="flex gap-2">
             <div className="flex-1 bg-black/30 rounded-xl px-3 py-2 text-white/50 text-xs font-mono truncate">
-              t.me/arrowpuzzle_bot?start={referralCode}
+              {link || `t.me/arrowpuzzle_bot?start=ref_${code || '...'}`}
             </div>
             <button onClick={onCopyReferral} className="bg-white/10 hover:bg-white/20 px-3 rounded-xl transition-colors">
               <Copy size={16} className="text-white" />
@@ -97,6 +227,7 @@ function FriendsListContent({
           </div>
         </div>
 
+        {/* Кнопка «Пригласить друга» */}
         <button
           onClick={onShare}
           className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-blue-500/20 relative overflow-hidden"
@@ -114,71 +245,66 @@ function FriendsListContent({
         </button>
       </motion.div>
 
+      {/* Список приглашённых */}
       <div>
         <div className="p-4 border-b border-white/5 mb-2">
-          <h3 className="text-white text-lg font-bold text-center">Список друзей</h3>
-          <p className="text-white/50 text-xs text-center mt-1">Всего: {friends.length}</p>
+          <h3 className="text-white text-lg font-bold text-center">Приглашённые друзья</h3>
+          <p className="text-white/50 text-xs text-center mt-1">
+            {referrals.length > 0 ? `Всего: ${referrals.length}` : 'Пока пусто'}
+          </p>
         </div>
 
-        <div className="relative">
-          <AdaptiveParticles
-            variant="accent"
-            tone="blue"
-            baseCount={16}
-            baseSpeed={0.15}
-            className="z-0 opacity-45"
-          />
-          <div className="relative z-10 space-y-3 pb-4">
-            {friends.map((friend, i) => (
-              <motion.div
-                key={friend.id}
-                custom={i}
-                variants={itemVariant}
-                initial="hidden"
-                animate="visible"
-                className="flex items-center justify-between bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/5"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="text-white/30 font-bold text-lg w-6 text-center">{i + 1}</div>
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-2xl">
-                    {friend.avatar}
-                  </div>
-                  <div className="text-white font-medium text-sm">{friend.name}</div>
-                </div>
-                <div
-                  className={`text-xs px-3 py-1.5 rounded-lg font-medium ${
-                    friend.status === 'online'
-                      ? 'bg-green-500/20 text-green-300'
-                      : 'bg-gray-500/20 text-gray-400'
-                  }`}
-                >
-                  {friend.status === 'online' ? '🟢 Онлайн' : '⚫ Оффлайн'}
-                </div>
-              </motion.div>
-            ))}
+        {loading ? (
+          <div className="flex justify-center py-10">
+            <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin" />
           </div>
-        </div>
+        ) : referrals.length === 0 ? (
+          <EmptyReferralList onShare={onShare} />
+        ) : (
+          <div className="relative">
+            <AdaptiveParticles
+              variant="accent"
+              tone="blue"
+              baseCount={16}
+              baseSpeed={0.15}
+              className="z-0 opacity-45"
+            />
+            <div className="relative z-10 space-y-3 pb-4">
+              {referrals.map((ref, i) => (
+                <ReferralCard
+                  key={ref.id}
+                  referral={ref}
+                  index={i}
+                  confirmLevel={confirmLevel}
+                />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
+// --- ГЛАВНЫЙ ЭКРАН ---
 export function FriendsScreen() {
-  const { user } = useAppStore();
   const [activeTab, setActiveTab] = useState<FriendsTab>('friends');
-  const referralCode = user?.id || '123';
+  const {
+    code, link, stats, confirmLevel, referrals, loading,
+    fetchReferralCode, fetchReferralStats, fetchMyReferrals, shareReferral,
+  } = useReferral();
+
+  useEffect(() => {
+    fetchReferralCode();
+    fetchReferralStats();
+    fetchMyReferrals();
+  }, [fetchReferralCode, fetchReferralStats, fetchMyReferrals]);
 
   const handleCopyReferral = () => {
-    const referralLink = `https://t.me/arrowpuzzle_bot?start=${referralCode}`;
+    const referralLink = link || `https://t.me/arrowpuzzle_bot?start=ref_${code}`;
     navigator.clipboard.writeText(referralLink);
-  };
-
-  const handleShare = () => {
     const tg = (window as any).Telegram?.WebApp;
-    const referralLink = `https://t.me/arrowpuzzle_bot?start=${referralCode}`;
-    tg?.openTelegramLink(
-      `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent('Сыграй со мной в Arrow Puzzle!')}`
-    );
+    tg?.HapticFeedback?.notificationOccurred?.('success');
   };
 
   return (
@@ -227,9 +353,14 @@ export function FriendsScreen() {
               className="h-full overflow-y-auto custom-scrollbar"
             >
               <FriendsListContent
-                referralCode={referralCode}
+                code={code}
+                link={link}
+                stats={stats}
+                confirmLevel={confirmLevel}
+                referrals={referrals}
+                loading={loading}
                 onCopyReferral={handleCopyReferral}
-                onShare={handleShare}
+                onShare={shareReferral}
               />
             </motion.div>
           ) : (

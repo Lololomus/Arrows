@@ -113,6 +113,7 @@ interface GameStore {
 
   hintsRemaining: number;
   hintedArrowId: string | null;
+  lifeHitTick: number;
 
   shakingArrowId: string | null;
   flyingArrowId: string | null;
@@ -136,6 +137,7 @@ interface GameStore {
   clearHint: () => void;
   setStatus: (status: GameStatus) => void;
   reset: () => void;
+  triggerLifeHit: () => void;
 
   setShakingArrow: (arrowId: string | null) => void;
   setFlyingArrow: (arrowId: string | null) => void;
@@ -149,7 +151,7 @@ interface GameStore {
   purchaseSkin: (skinId: string) => void;
 }
 
-const initialGameState: Omit<GameStore, 'initLevel' | 'removeArrow' | 'removeArrows' | 'failMove' | 'undo' | 'showHint' | 'clearHint' | 'setStatus' | 'reset' | 'setShakingArrow' | 'setFlyingArrow' | 'blockArrow' | 'unblockArrows' | 'setSkin' | 'purchaseSkin'> = {
+const initialGameState: Omit<GameStore, 'initLevel' | 'removeArrow' | 'removeArrows' | 'failMove' | 'undo' | 'showHint' | 'clearHint' | 'setStatus' | 'reset' | 'triggerLifeHit' | 'setShakingArrow' | 'setFlyingArrow' | 'blockArrow' | 'unblockArrows' | 'setSkin' | 'purchaseSkin'> = {
   level: 1,
   seed: 0,
   gridSize: { width: 4, height: 4 },
@@ -163,6 +165,7 @@ const initialGameState: Omit<GameStore, 'initLevel' | 'removeArrow' | 'removeArr
   history: [],
   hintsRemaining: HINTS_PER_LEVEL,
   hintedArrowId: null,
+  lifeHitTick: 0,
   shakingArrowId: null,
   flyingArrowId: null,
   blockedArrowIds: [],
@@ -232,6 +235,7 @@ export const useGameStore = create<GameStore>()(
         history: [],
         hintsRemaining: HINTS_PER_LEVEL,
         hintedArrowId: null,
+        lifeHitTick: 0,
         shakingArrowId: null,
         flyingArrowId: null,
         blockedArrowIds: [],
@@ -388,6 +392,7 @@ export const useGameStore = create<GameStore>()(
 
     clearHint: () => set({ hintedArrowId: null }),
     setStatus: (status) => set({ status }),
+    triggerLifeHit: () => set((state) => ({ lifeHitTick: state.lifeHitTick + 1 })),
 
     reset: () => {
       set({
@@ -400,6 +405,7 @@ export const useGameStore = create<GameStore>()(
         lives: INITIAL_LIVES,
         hintsRemaining: HINTS_PER_LEVEL,
         hintedArrowId: null,
+        lifeHitTick: 0,
         blockedArrowIds: [],
       });
     },
