@@ -3,7 +3,7 @@
  *
  * Полноэкранный оверлей победы с:
  * - Difficulty-based FX (easy/normal/hard)
- * - Иконка с glow + float-анимацией
+ * - Иконка с glow + float-анимацией (ОПТИМИЗИРОВАНО: радиальные градиенты без blur)
  * - Плашка уровня + difficulty badge
  * - Анимированный счётчик монет с shimmer
  * - Время прохождения
@@ -68,11 +68,19 @@ export function VictoryScreen({
           }}
           className="relative w-32 h-32 flex items-center justify-center mb-8"
         >
+          {/* Big outer glow (ОПТИМИЗИРОВАНО: радиальный градиент вместо blur) */}
           <div
-            className={`absolute inset-[-20%] ${cfg.victoryGlow} blur-[60px] opacity-40 rounded-full`}
+            className="absolute w-[250px] h-[250px] opacity-40 pointer-events-none"
+            style={{
+              background: `radial-gradient(circle, ${cfg.primary} 0%, transparent 60%)`,
+            }}
           />
+          {/* Intense inner glow (ОПТИМИЗИРОВАНО) */}
           <div
-            className={`absolute inset-[10%] ${cfg.victoryGlow} blur-[30px] opacity-70 rounded-full`}
+            className="absolute w-[150px] h-[150px] opacity-70 pointer-events-none"
+            style={{
+              background: `radial-gradient(circle, ${cfg.secondary} 0%, transparent 60%)`,
+            }}
           />
           <motion.div
             animate={{ y: [-4, 4, -4] }}

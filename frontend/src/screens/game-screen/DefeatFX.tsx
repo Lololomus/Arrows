@@ -1,7 +1,7 @@
 /**
  * Arrow Puzzle — Defeat Visual Effects
  *
- * Тяжёлое медленное красное дыхание + vignette + падающий пепел.
+ * Тяжёлое медленное красное дыхание + vignette + падающий пепел. (ОПТИМИЗИРОВАНО)
  */
 
 import { useMemo } from 'react';
@@ -40,11 +40,11 @@ export function DefeatFX({ primary }: DefeatFXProps) {
       {/* Мрачная vignette */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_30%,rgba(0,0,0,0.8)_100%)]" />
 
-      {/* Падающий пепел */}
+      {/* Падающий пепел (ОПТИМИЗИРОВАНО: убран blur-[1px]) */}
       {ashes.map((ash, i) => (
         <motion.div
           key={`ash-${i}`}
-          className="absolute rounded-full blur-[1px]"
+          className="absolute rounded-full"
           style={{
             backgroundColor: ash.isGray ? '#9ca3af' : primary,
             width: ash.size,

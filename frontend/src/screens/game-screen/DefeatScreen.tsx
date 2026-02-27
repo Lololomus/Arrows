@@ -3,7 +3,7 @@
  *
  * Полноэкранный оверлей поражения с:
  * - DefeatFX (красное дыхание + пепел + vignette)
- * - HeartCrack иконка с glow
+ * - HeartCrack иконка с glow (ОПТИМИЗИРОВАНО: радиальный градиент вместо blur)
  * - Плашка «Уровень N — ПРОВАЛЕН»
  * - CTA «Повторить» (с RefreshCcw) + ghost «В меню»
  */
@@ -43,8 +43,12 @@ export function DefeatScreen({ level, onRetry, onMenu }: DefeatScreenProps) {
           transition={{ type: 'spring', bounce: 0.3, duration: 0.8 }}
           className="relative w-32 h-32 flex items-center justify-center mb-8"
         >
+          {/* Glow (ОПТИМИЗИРОВАНО: радиальный градиент вместо blur) */}
           <div
-            className={`absolute inset-[-20%] ${cfg.glow} blur-[60px] opacity-30 rounded-full`}
+            className="absolute w-[250px] h-[250px] opacity-30 pointer-events-none"
+            style={{
+              background: `radial-gradient(circle, ${cfg.primary} 0%, transparent 60%)`,
+            }}
           />
           <motion.div
             animate={{ y: [-3, 3, -3] }}

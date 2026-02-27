@@ -4,7 +4,7 @@
  * Три уровня абстрактных эффектов для экрана победы:
  * - EasyFX:   мягкое radial дыхание + поднимающиеся пылинки
  * - NormalFX: вращающийся conic-gradient + искры-взрыв
- * - HardFX:   шоквейв-кольцо, гиперлучи, plasma morph-блобы
+ * - HardFX:   шоквейв-кольцо, гиперлучи, plasma morph-блобы (ОПТИМИЗИРОВАНО)
  */
 
 import { useMemo } from 'react';
@@ -38,14 +38,15 @@ function EasyFX({ primary, secondary }: FXProps) {
       {Array.from({ length: 10 }).map((_, i) => (
         <motion.div
           key={`dust-${i}`}
-          className="absolute rounded-full blur-[1px]"
+          className="absolute rounded-full" // Убран blur-[1px]
           style={{
             backgroundColor: secondary,
             width: Math.random() * 4 + 2,
             height: Math.random() * 4 + 2,
+            opacity: 0.8, // Добавлено для компенсации прозрачности без блюра
           }}
           initial={{ y: 50, x: (Math.random() - 0.5) * 200, opacity: 0 }}
-          animate={{ y: -150, opacity: [0, 0.8, 0] }}
+          animate={{ y: -150, opacity: [0, 0.6, 0] }}
           transition={{
             duration: 3 + Math.random() * 2,
             repeat: Infinity,
@@ -90,7 +91,7 @@ function MediumFX({ primary, secondary }: FXProps) {
       <motion.div
         animate={{ rotate: -360 }}
         transition={{ duration: 15, repeat: Infinity, ease: 'linear' }}
-        className="absolute w-[250px] h-[250px] rounded-full blur-md"
+        className="absolute w-[250px] h-[250px] rounded-full" // Убран blur-md
         style={{
           background: `repeating-conic-gradient(from 10deg, transparent 0deg 20deg, ${secondary}60 20deg 40deg)`,
           WebkitMaskImage:
@@ -127,7 +128,7 @@ function MediumFX({ primary, secondary }: FXProps) {
 }
 
 // ============================================
-// HARD — шоквейв + лучи + plasma blobs
+// HARD — шоквейв + лучи + plasma blobs (ОПТИМИЗИРОВАНО)
 // ============================================
 
 function HardFX({ primary, secondary }: FXProps) {
@@ -191,11 +192,11 @@ function HardFX({ primary, secondary }: FXProps) {
         </div>
       ))}
 
-      {/* Outer glow pulse */}
+      {/* Outer glow pulse (переведен на radial-gradient) */}
       <motion.div
-        className="absolute w-[500px] h-[500px] rounded-full mix-blend-screen"
+        className="absolute w-[600px] h-[600px] rounded-full mix-blend-screen"
         style={{
-          background: `radial-gradient(circle, ${primary}50 0%, transparent 65%)`,
+          background: `radial-gradient(circle, ${primary}40 0%, transparent 60%)`,
         }}
         initial={{ opacity: 0, scale: 0.5 }}
         animate={{
@@ -213,49 +214,50 @@ function HardFX({ primary, secondary }: FXProps) {
         }}
       />
 
-      {/* Primary plasma blob */}
+      {/* Primary plasma blob 
+          ПОЛНОСТЬЮ ПЕРЕПИСАНО: вместо backgroundColor + blur + borderRadius
+          используется radial-gradient + scale + will-change
+      */}
       <motion.div
-        className="absolute w-[350px] h-[350px] blur-[50px] mix-blend-screen"
-        style={{ backgroundColor: primary, opacity: 0.7 }}
+        className="absolute w-[500px] h-[500px] mix-blend-screen will-change-transform"
+        style={{
+          background: `radial-gradient(ellipse at center, ${primary}80 0%, transparent 50%)`,
+        }}
         initial={{ opacity: 0 }}
         animate={{
           opacity: 0.7,
           rotate: [0, 360],
-          borderRadius: [
-            '40% 60% 70% 30% / 40% 50% 60% 50%',
-            '60% 40% 30% 70% / 50% 60% 40% 50%',
-            '40% 60% 70% 30% / 40% 50% 60% 50%',
-          ],
-          scale: [1, 1.1, 1],
+          scaleX: [0.8, 1.2, 0.8],
+          scaleY: [1.2, 0.8, 1.2],
         }}
         transition={{
           opacity: { duration: 1 },
           rotate: { duration: 20, repeat: Infinity, ease: 'linear' },
-          borderRadius: { duration: 12, repeat: Infinity, ease: 'easeInOut' },
-          scale: { duration: 7, repeat: Infinity, ease: 'easeInOut' },
+          scaleX: { duration: 7, repeat: Infinity, ease: 'easeInOut' },
+          scaleY: { duration: 8, repeat: Infinity, ease: 'easeInOut' },
         }}
       />
 
-      {/* Secondary plasma blob */}
+      {/* Secondary plasma blob 
+          ПОЛНОСТЬЮ ПЕРЕПИСАНО: встречное вращение градиента
+      */}
       <motion.div
-        className="absolute w-[280px] h-[280px] blur-[40px] mix-blend-screen"
-        style={{ backgroundColor: secondary, opacity: 0.6 }}
+        className="absolute w-[400px] h-[400px] mix-blend-screen will-change-transform"
+        style={{
+          background: `radial-gradient(ellipse at center, ${secondary}80 0%, transparent 50%)`,
+        }}
         initial={{ opacity: 0 }}
         animate={{
           opacity: 0.6,
           rotate: [360, 0],
-          borderRadius: [
-            '50% 50% 60% 40% / 60% 40% 50% 50%',
-            '40% 60% 50% 50% / 40% 60% 50% 50%',
-            '50% 50% 60% 40% / 60% 40% 50% 50%',
-          ],
-          scale: [1.1, 0.9, 1.1],
+          scaleX: [1.3, 0.9, 1.3],
+          scaleY: [0.9, 1.2, 0.9],
         }}
         transition={{
           opacity: { duration: 1.5 },
           rotate: { duration: 15, repeat: Infinity, ease: 'linear' },
-          borderRadius: { duration: 9, repeat: Infinity, ease: 'easeInOut' },
-          scale: { duration: 5, repeat: Infinity, ease: 'easeInOut' },
+          scaleX: { duration: 9, repeat: Infinity, ease: 'easeInOut' },
+          scaleY: { duration: 6, repeat: Infinity, ease: 'easeInOut' },
         }}
       />
     </div>
