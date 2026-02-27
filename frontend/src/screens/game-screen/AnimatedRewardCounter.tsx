@@ -3,23 +3,33 @@
  *
  * Анимированный счётчик монет на экране победы.
  * rAF-based, easeOut(t⁴), с финальным pulse через framer-motion.
+ * (ДОБАВЛЕНО: onDone callback для синхронизации с итоговым балансом)
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 
 interface AnimatedRewardCounterProps {
   reward: number;
   /** Задержка перед началом счёта (секунды) */
   delaySec?: number;
+  /** Коллбэк, вызываемый по завершении анимации накрутки */
+  onDone?: () => void;
 }
 
 export function AnimatedRewardCounter({
   reward,
   delaySec = 0.6,
+  onDone,
 }: AnimatedRewardCounterProps) {
   const [count, setCount] = useState(0);
   const [isDone, setIsDone] = useState(false);
+  const onDoneRef = useRef(onDone);
+
+  // Обновляем реф без перезапуска эффекта
+  useEffect(() => {
+    onDoneRef.current = onDone;
+  }, [onDone]);
 
   useEffect(() => {
     let start: number | null = null;
@@ -44,6 +54,8 @@ export function AnimatedRewardCounter({
         frameId = requestAnimationFrame(animate);
       } else {
         setIsDone(true);
+        // Сигнализируем об окончании счета
+        onDoneRef.current?.();
       }
     };
 

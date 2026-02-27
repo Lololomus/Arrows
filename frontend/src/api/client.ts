@@ -26,6 +26,48 @@ interface RawCompleteResponse {
   error?: string;
 }
 
+interface RawUserResponse {
+  id: number;
+  telegram_id?: number;
+  telegramId?: number;
+  username: string | null;
+  first_name?: string | null;
+  firstName?: string | null;
+  photo_url?: string | null;
+  current_level?: number;
+  currentLevel?: number;
+  total_stars?: number;
+  totalStars?: number;
+  coins?: number;
+  energy?: number;
+  energy_updated_at?: string;
+  energyUpdatedAt?: string;
+  active_arrow_skin?: string;
+  activeArrowSkin?: string;
+  active_theme?: string;
+  activeTheme?: string;
+  is_premium?: boolean;
+  isPremium?: boolean;
+}
+
+function normalizeUserResponse(raw: RawUserResponse): User {
+  return {
+    id: raw.id,
+    telegramId: raw.telegramId ?? raw.telegram_id ?? 0,
+    username: raw.username ?? null,
+    firstName: raw.firstName ?? raw.first_name ?? null,
+    photo_url: raw.photo_url ?? null,
+    currentLevel: raw.currentLevel ?? raw.current_level ?? 1,
+    totalStars: raw.totalStars ?? raw.total_stars ?? 0,
+    coins: raw.coins ?? 0,
+    energy: raw.energy ?? 0,
+    energyUpdatedAt: raw.energyUpdatedAt ?? raw.energy_updated_at ?? '',
+    activeArrowSkin: raw.activeArrowSkin ?? raw.active_arrow_skin ?? 'default',
+    activeTheme: raw.activeTheme ?? raw.active_theme ?? 'light',
+    isPremium: raw.isPremium ?? raw.is_premium ?? false,
+  };
+}
+
 // Определяем, запущены ли мы в режиме разработки
 const IS_DEV = import.meta.env.DEV;
 const DEV_AUTH_ENABLED = ['1', 'true', 'yes', 'on'].includes(
@@ -113,17 +155,22 @@ export const authApi = {
   /**
    * Авторизация через Telegram
    */
-  telegram: (initData: string): Promise<AuthResponse> =>
-    request<AuthResponse>(API_ENDPOINTS.auth.telegram, {
+  telegram: async (initData: string): Promise<AuthResponse> => {
+    const raw = await request<{ token: string; user: RawUserResponse }>(API_ENDPOINTS.auth.telegram, {
       method: 'POST',
       body: JSON.stringify({ init_data: initData }),
-    }),
+    });
+    return {
+      token: raw.token,
+      user: normalizeUserResponse(raw.user),
+    };
+  },
 
   /**
    * Получить текущего пользователя (работает и для dev bypass)
    */
-  getMe: (): Promise<User> =>
-    request<User>(API_ENDPOINTS.auth.me),
+  getMe: async (): Promise<User> =>
+    normalizeUserResponse(await request<RawUserResponse>(API_ENDPOINTS.auth.me)),
 };
 
 // ============================================

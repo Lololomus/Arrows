@@ -245,7 +245,7 @@ export function TasksScreen() {
             </motion.div>
           ) : (
             <motion.div key="fragments" {...tabTransition} className="h-full flex items-center justify-center px-2">
-              <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 backdrop-blur-lg p-6 text-center relative overflow-hidden">
+              <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 text-center relative overflow-hidden">
                 <AdaptiveParticles
                   variant="accent"
                   tone="neutral"

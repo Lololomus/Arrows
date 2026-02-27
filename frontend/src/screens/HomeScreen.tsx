@@ -30,6 +30,9 @@ export function HomeScreen() {
   const { setScreen, user } = useAppStore();
   const displayTitleFont = { fontFamily: '"Bungee Inline", cursive' } as const;
   const coinBalance = user?.coins ?? 0;
+  const displayedLevel = (user as (typeof user & { current_level?: number }) | null)?.currentLevel
+    ?? (user as (typeof user & { current_level?: number }) | null)?.current_level
+    ?? 1;
 
   const handlePlayArcade = () => {
     setScreen('game');
@@ -40,7 +43,7 @@ export function HomeScreen() {
       <AdaptiveParticles
         variant="bg"
         tone="neutral"
-        baseCount={84}
+        baseCount={101}
         baseSpeed={0.12}
         sizeProfile={HOME_BG_STAR_SIZE_PROFILE}
         className="z-0 opacity-60"
@@ -50,7 +53,7 @@ export function HomeScreen() {
 
         {/* Title — абсолютно позиционирован, не влияет на поток */}
         <motion.div
-          className="absolute top-[14%] left-6 right-6 text-center z-10"
+          className="absolute top-[10%] sm:top-[14%] left-6 right-6 text-center z-10"
           variants={titleContainer}
           initial="hidden"
           animate="visible"
@@ -107,7 +110,7 @@ export function HomeScreen() {
                 Arcade
               </h2>
               <p className="relative z-10 text-purple-100/80 text-sm font-medium">
-                Уровень {user?.currentLevel || 1}
+                Уровень {displayedLevel}
               </p>
             </motion.div>
           </motion.button>

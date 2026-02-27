@@ -437,7 +437,11 @@ export const useGameStore = create<GameStore>()(
 // ============================================
 
 export const useIsAuthenticated = () => useAppStore(s => !!s.token && !!s.user);
-export const useCurrentUserLevel = () => useAppStore(s => s.user?.currentLevel ?? 1);
+export const useCurrentUserLevel = () =>
+  useAppStore((s) => {
+    const user = s.user as (typeof s.user & { current_level?: number }) | null;
+    return user?.currentLevel ?? user?.current_level ?? 1;
+  });
 export const useUserCoins = () => useAppStore(s => s.user?.coins ?? 0);
 export const useUserEnergy = () => useAppStore(s => s.user?.energy ?? 0);
 

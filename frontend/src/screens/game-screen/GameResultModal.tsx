@@ -25,6 +25,7 @@ interface GameResultModalProps {
   currentLevel: number;
   timeSeconds: number;
   coinsEarned?: number;
+  totalCoins?: number;
   noMoreLevels: boolean;
   onNextLevel: () => void;
   onRetry: () => void;
@@ -37,6 +38,7 @@ export function GameResultModal({
   currentLevel,
   timeSeconds,
   coinsEarned,
+  totalCoins,
   noMoreLevels,
   onNextLevel,
   onRetry,
@@ -53,6 +55,7 @@ export function GameResultModal({
           difficulty={difficulty}
           timeSeconds={timeSeconds}
           coinsEarned={coinsEarned}
+          totalCoins={totalCoins}
           onNextLevel={onNextLevel}
           onMenu={onMenu}
         />

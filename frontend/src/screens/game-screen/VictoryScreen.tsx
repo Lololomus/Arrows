@@ -5,12 +5,13 @@
  * - Difficulty-based FX (easy/normal/hard)
  * - Иконка с glow + float-анимацией (ОПТИМИЗИРОВАНО: радиальные градиенты без blur)
  * - Плашка уровня + difficulty badge
- * - Анимированный счётчик монет с shimmer
+ * - Анимированный счётчик монет с раскрывающимся Итоговым Балансом (UX Upgrade)
  * - Время прохождения
  * - CTA «Следующий» + ghost «В меню»
  */
 
-import { motion } from 'framer-motion';
+import { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Zap, Coins, Timer } from 'lucide-react';
 
 import { VictoryFX } from './VictoryFX';
@@ -28,6 +29,8 @@ interface VictoryScreenProps {
   difficulty: DifficultyValue;
   timeSeconds: number;
   coinsEarned?: number;
+  /** Общее количество монет игрока (для отображения баланса) */
+  totalCoins?: number;
   onNextLevel: () => void;
   onMenu: () => void;
 }
@@ -37,9 +40,12 @@ export function VictoryScreen({
   difficulty,
   timeSeconds,
   coinsEarned,
+  totalCoins,
   onNextLevel,
   onMenu,
 }: VictoryScreenProps) {
+  const [showTotal, setShowTotal] = useState(false);
+  
   const tier: DifficultyTier = getDifficultyTier(difficulty);
   const cfg = DIFFICULTY_CONFIG[tier];
   const reward = coinsEarned ?? cfg.reward;
@@ -139,7 +145,7 @@ export function VictoryScreen({
         >
           {/* Shimmer */}
           <motion.div
-            className="absolute inset-0 w-1/2 h-full bg-gradient-to-r from-transparent via-yellow-100/10 to-transparent skew-x-12"
+            className="absolute inset-0 w-1/2 h-full bg-gradient-to-r from-transparent via-yellow-100/10 to-transparent skew-x-12 pointer-events-none"
             initial={{ left: '-100%' }}
             animate={{ left: '200%' }}
             transition={{
@@ -150,20 +156,48 @@ export function VictoryScreen({
               repeatDelay: 3,
             }}
           />
-          <div className="w-10 h-10 bg-gradient-to-br from-yellow-500/20 to-amber-600/20 border border-yellow-500/30 rounded-xl flex items-center justify-center relative z-10 shadow-inner">
+          <div className="w-10 h-10 shrink-0 bg-gradient-to-br from-yellow-500/20 to-amber-600/20 border border-yellow-500/30 rounded-xl flex items-center justify-center relative z-10 shadow-inner">
             <Coins
               size={22}
               className="text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.8)]"
             />
           </div>
-          <div className="flex flex-col relative z-10">
-            <span className="text-[10px] font-bold text-white/50 uppercase tracking-widest leading-none mb-1.5">
-              Получено монет
-            </span>
-            <span className="text-2xl font-black text-yellow-300 leading-none drop-shadow-[0_0_10px_rgba(250,204,21,0.4)] flex items-end">
-              <span className="text-yellow-500 text-xl mr-0.5">+</span>
-              <AnimatedRewardCounter reward={reward} delaySec={0.6} />
-            </span>
+          
+          <div className="flex flex-col relative z-10 min-w-[110px]">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold text-white/50 uppercase tracking-widest leading-none mb-1.5">
+                Получено монет
+              </span>
+              <span className="text-2xl font-black text-yellow-300 leading-none drop-shadow-[0_0_10px_rgba(250,204,21,0.4)] flex items-end">
+                <span className="text-yellow-500 text-xl mr-0.5">+</span>
+                <AnimatedRewardCounter 
+                  reward={reward} 
+                  delaySec={0.6} 
+                  onDone={() => setShowTotal(true)}
+                />
+              </span>
+            </div>
+
+            {/* Итоговый баланс (Раскрывается плавно после счета) */}
+            <AnimatePresence>
+              {showTotal && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  transition={{ duration: 0.4, type: 'spring', bounce: 0.3 }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-2 pt-2 border-t border-yellow-500/20 flex flex-col gap-1">
+                    <span className="text-[9px] font-bold text-white/40 uppercase tracking-widest leading-none">
+                      Текущий баланс
+                    </span>
+                    <span className="text-sm font-black text-yellow-500 flex items-center gap-1.5 leading-none">
+                      {totalCoins?.toLocaleString('ru-RU') ?? '---'} <Coins size={12} className="opacity-80" />
+                    </span>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </motion.div>
 
