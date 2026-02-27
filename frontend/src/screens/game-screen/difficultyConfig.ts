@@ -144,7 +144,7 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     hudBadgeColor: 'text-purple-400',
     hudDotColor: 'bg-purple-400',
     lives: 3,
-    victoryTitle: 'Р›Р•Р“Р•РќР”Рђ!',
+    victoryTitle: 'ЛЕГЕНДА!',
     victoryIcon: Flame,
     victoryIconColor: 'text-purple-200',
     victoryGlow: 'bg-purple-600',

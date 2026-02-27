@@ -172,6 +172,8 @@ async def apply_redis_referral(user: User, db: AsyncSession):
         
         if not code:
             return
+
+        print(f"📥 [Auth] Found pending referral for telegram_id={user.telegram_id}")
         
         if isinstance(code, bytes):
             code = code.decode("utf-8")
@@ -210,6 +212,7 @@ async def apply_redis_referral(user: User, db: AsyncSession):
             print(f"✅ [Auth] Redis referral applied: {user.id} → inviter {referrer.id}")
         except IntegrityError:
             await db.rollback()
+            print(f"ℹ️ [Auth] Redis referral already applied for user={user.id}")
         
         await redis.delete(key)
         

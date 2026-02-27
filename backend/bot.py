@@ -15,6 +15,8 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from app.config import settings
+from app.database import close_redis
+from app.services.referrals import extract_referral_code, store_pending_referral_code
 
 
 # ============================================
@@ -53,6 +55,16 @@ async def cmd_start(message: types.Message):
     if len(args) > 1 and args[1].startswith("ref_"):
         start_param = args[1]
         logger.info(f"User {message.from_user.id} has referral: {start_param}")
+        referral_code = extract_referral_code(start_param)
+        if referral_code:
+            try:
+                await store_pending_referral_code(
+                    message.from_user.id,
+                    referral_code,
+                    source="polling-bot",
+                )
+            except Exception as e:
+                logger.warning(f"Referral fallback save failed for {message.from_user.id}: {e}")
     
     # Формируем Web App URL
     webapp_url = settings.WEBAPP_URL
@@ -220,7 +232,10 @@ async def main():
     
     # Запускаем polling
     logger.info("✅ Bot is running!")
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await close_redis()
 
 
 if __name__ == "__main__":

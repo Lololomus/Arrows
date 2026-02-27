@@ -2,13 +2,14 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import '@fontsource/bungee-inline';
 import { useAppStore } from './stores/store';
-import { authApi } from './api/client';
+import { authApi, socialApi } from './api/client';
 import { UI_ANIMATIONS } from './config/constants';
 import { SmartLoader } from './components/ui/SmartLoader';
 import { BottomNav, type TabId } from './components/BottomNav';
 import { HomeScreen } from './screens/HomeScreen';
 import { GameScreen } from './screens/GameScreen';
 import nonGameBackgroundUrl from './assets/background.webp?url';
+import { extractReferralCode } from './utils/referralLaunch';
 
 const ShopScreen = lazy(() =>
   import('./screens/ShopScreen').then((module) => ({ default: module.ShopScreen }))
@@ -36,6 +37,34 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
 
+    const applyReferralIfPresent = async (context: string) => {
+      const referralCode = extractReferralCode();
+      if (!referralCode) {
+        return;
+      }
+
+      console.info(`[Referral] Extracted code in ${context}: ${referralCode}`);
+
+      try {
+        console.info(`[Referral] Applying code in ${context}`);
+        const result = await socialApi.applyReferral(referralCode);
+        console.info(
+          `[Referral] Apply result in ${context}: success=${result.success}`
+          + (result.reason ? ` reason=${result.reason}` : '')
+        );
+
+        if (!result.success && result.reason !== 'already_referred') {
+          return;
+        }
+
+        const syncedUser = await authApi.getMe();
+        if (cancelled) return;
+        setUser(syncedUser);
+      } catch (error) {
+        console.error('[Referral] Auto-apply failed:', error);
+      }
+    };
+
     const authenticate = async () => {
       setError(null);
       try {
@@ -48,6 +77,7 @@ export default function App() {
             if (cancelled) return;
             setToken(null);
             setUser(devUser);
+            await applyReferralIfPresent('dev-auth');
             return;
           }
 
@@ -63,6 +93,7 @@ export default function App() {
 
         setToken(response.token);
         setUser(response.user);
+        await applyReferralIfPresent('telegram-auth');
 
         console.log('Authenticated:', response.user.id);
       } catch (error) {

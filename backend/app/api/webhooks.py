@@ -11,10 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from ..config import settings
-from ..database import get_db, get_redis
+from ..database import get_db
 from ..models import User, Inventory, Transaction
 from ..schemas import TelegramPaymentWebhook, TonPaymentWebhook, AdsgramRewardWebhook
 from ..api.shop import get_item_by_id, apply_boost
+from ..services.referrals import extract_referral_code_from_start_text, store_pending_referral_code
 
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -318,19 +319,16 @@ async def handle_bot_update(
         await db.refresh(user)
     
     # Сохраняем реферальный код в Redis (fallback для EC-16)
-    if " ref_" in text:
-        ref_code = text.split("ref_")[1].strip()
-        if ref_code:
-            try:
-                redis = await get_redis()
-                await redis.set(
-                    f"ref_pending:{telegram_id}",
-                    ref_code.upper(),
-                    ex=settings.REFERRAL_GRACE_PERIOD_HOURS * 3600,  # TTL = grace period
-                )
-                print(f"📌 [Webhook] Saved ref_code {ref_code} for telegram_id {telegram_id} in Redis")
-            except Exception as e:
-                # Redis недоступен — не критично, Mini App start_param сработает
-                print(f"⚠️ [Webhook] Redis save failed: {e}")
+    ref_code = extract_referral_code_from_start_text(text)
+    if ref_code:
+        try:
+            await store_pending_referral_code(
+                telegram_id,
+                ref_code,
+                source="webhook-bot",
+            )
+        except Exception as e:
+            # Redis недоступен — не критично, Mini App start_param сработает
+            print(f"⚠️ [Webhook] Redis save failed: {e}")
     
     return {"ok": True}

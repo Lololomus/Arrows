@@ -76,11 +76,11 @@ export function useReferral() {
   const shareReferral = useCallback(() => {
     if (!link) return;
 
-    const text = `рџЋЇ РРіСЂР°Р№ РІ Arrow Puzzle Рё РїРѕР»СѓС‡Рё Р±РѕРЅСѓСЃ!\n${link}`;
+    const text = `Играй в Arrow Puzzle и получи бонус!\n${link}`;
     const tg = (window as TelegramWindow).Telegram?.WebApp;
 
     if (tg) {
-      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('рџЋЇ РРіСЂР°Р№ РІ Arrow Puzzle!')}`;
+      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('Играй в Arrow Puzzle!')}`;
       tg.openTelegramLink(shareUrl);
     } else {
       void navigator.clipboard.writeText(text);

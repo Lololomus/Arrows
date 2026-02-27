@@ -67,11 +67,13 @@ async def apply_referral(
     """
     # EC-3: Уже есть реферер
     if user.referred_by_id is not None:
+        print(f"ℹ️ [Referral] User {user.id} already has referrer")
         return ReferralApplyResponse(success=False, reason="already_referred")
     
     # EC-18: Grace period для существующих аккаунтов
     account_age = datetime.utcnow() - user.created_at
     if account_age > timedelta(hours=settings.REFERRAL_GRACE_PERIOD_HOURS):
+        print(f"ℹ️ [Referral] User {user.id} is too old for referral apply")
         return ReferralApplyResponse(success=False, reason="account_too_old")
     
     # EC-5: Ищем владельца кода
@@ -81,10 +83,12 @@ async def apply_referral(
     referrer = result.scalar_one_or_none()
     
     if not referrer:
+        print(f"ℹ️ [Referral] Invalid code used by user {user.id}")
         return ReferralApplyResponse(success=False, reason="invalid_code")
     
     # EC-4: Самореферал
     if referrer.id == user.id:
+        print(f"ℹ️ [Referral] Self-referral blocked for user {user.id}")
         return ReferralApplyResponse(success=False, reason="self_referral")
     
     # EC-11: Создаём Referral (UNIQUE на invitee_id защитит от race condition)
@@ -104,8 +108,10 @@ async def apply_referral(
         # inviter НЕ получает бонус сейчас — только когда invitee достигнет уровня подтверждения
         
         await db.commit()
+        print(f"✅ [Referral] Pending created: invitee={user.id}, inviter={referrer.id}")
     except IntegrityError:
         await db.rollback()
+        print(f"ℹ️ [Referral] Duplicate apply ignored for user {user.id}")
         return ReferralApplyResponse(success=False, reason="already_referred")
     
     return ReferralApplyResponse(success=True, bonus=settings.REFERRAL_REWARD_INVITEE)

@@ -132,11 +132,11 @@ async def spend_energy(user: User, db: AsyncSession) -> bool:
     return True
 
 
-async def check_referral_confirmation(user: User, db: AsyncSession) -> bool:
+async def check_referral_confirmation(user: User, completed_level: int, db: AsyncSession) -> bool:
     """
     Проверяет и подтверждает реферал при достижении REFERRAL_CONFIRM_LEVEL.
     
-    Вызывается из complete_level ПОСЛЕ повышения user.current_level.
+    Вызывается из complete_level после успешного завершения completed_level.
     User row уже под FOR UPDATE — атомарность гарантирована.
     
     Логика:
@@ -145,7 +145,7 @@ async def check_referral_confirmation(user: User, db: AsyncSession) -> bool:
     
     Returns: True если реферал был подтверждён.
     """
-    if user.current_level < settings.REFERRAL_CONFIRM_LEVEL:
+    if completed_level < settings.REFERRAL_CONFIRM_LEVEL:
         return False
     
     # Ищем pending реферал где текущий пользователь — invitee
@@ -185,7 +185,10 @@ async def check_referral_confirmation(user: User, db: AsyncSession) -> bool:
     
     # Invitee НЕ получает доп. бонус (уже получил +100 при регистрации)
     
-    print(f"✅ [Referral] Confirmed: invitee={user.id}, inviter={referral.inviter_id}")
+    print(
+        f"✅ [Referral] Confirmed after level {completed_level}: "
+        f"invitee={user.id}, inviter={referral.inviter_id}"
+    )
     return True
 
 
@@ -417,8 +420,8 @@ async def complete_level(
     )
     db.add(attempt)
     
-    # Проверяем подтверждение реферала (invitee достиг уровня подтверждения)
-    referral_confirmed = await check_referral_confirmation(user, db)
+    # Проверяем подтверждение реферала после фактического завершения нужного уровня.
+    referral_confirmed = await check_referral_confirmation(user, level_num, db)
     
     await db.commit()
     
