@@ -26,9 +26,46 @@ interface RawCompleteResponse {
   valid: boolean;
   stars?: number;
   coins_earned?: number;
+  total_coins?: number;
   new_level_unlocked?: boolean;
   error?: string;
   referral_confirmed?: boolean;
+}
+
+// --- Raw leaderboard types (snake_case from backend) ---
+
+interface RawLeaderboardEntry {
+  rank: number;
+  user_id: number;
+  username: string | null;
+  first_name: string | null;
+  photo_url?: string | null;
+  score: number;
+}
+
+interface RawLeaderboardResponse {
+  leaders: RawLeaderboardEntry[];
+  my_position: number | null;
+  my_score?: number | null;
+  my_in_top?: boolean;
+  total_participants?: number;
+}
+
+function normalizeLeaderboardResponse(raw: RawLeaderboardResponse): LeaderboardResponse {
+  return {
+    leaders: raw.leaders.map(e => ({
+      rank: e.rank,
+      userId: e.user_id,
+      username: e.username,
+      firstName: e.first_name,
+      score: e.score,
+      photoUrl: e.photo_url ?? null,
+    })),
+    myPosition: raw.my_position,
+    myScore: raw.my_score ?? null,
+    myInTop: raw.my_in_top ?? false,
+    totalParticipants: raw.total_participants ?? 0,
+  };
 }
 
 interface RawUserResponse {
@@ -209,6 +246,7 @@ export const gameApi = {
 
     const normalized = raw as RawCompleteResponse & Partial<CompleteResponse>;
     const coinsEarned = normalized.coinsEarned ?? normalized.coins_earned ?? 0;
+    const totalCoins = normalized.totalCoins ?? normalized.total_coins;
     const newLevelUnlocked = normalized.newLevelUnlocked ?? normalized.new_level_unlocked ?? false;
     const referralConfirmed = normalized.referralConfirmed ?? normalized.referral_confirmed ?? false;
 
@@ -216,6 +254,7 @@ export const gameApi = {
       valid: Boolean(normalized.valid),
       stars: normalized.stars ?? 0,
       coinsEarned,
+      totalCoins,
       newLevelUnlocked,
       error: normalized.error,
       referralConfirmed,
@@ -356,19 +395,27 @@ export const socialApi = {
     ),
   
   /**
-   * Лидерборд среди друзей (приглашённых)
-   */
-  getFriendsLeaderboard: (): Promise<LeaderboardResponse> =>
-    request<LeaderboardResponse>(API_ENDPOINTS.social.friendsLeaderboard),
-  
-  /**
    * Получить лидерборд
    */
-  getLeaderboard: (
+  getLeaderboard: async (
     type: 'global' | 'weekly' | 'arcade',
     limit = 100
-  ): Promise<LeaderboardResponse> =>
-    request<LeaderboardResponse>(`${API_ENDPOINTS.social.leaderboard(type)}?limit=${limit}`),
+  ): Promise<LeaderboardResponse> => {
+    const raw = await request<RawLeaderboardResponse>(
+      `${API_ENDPOINTS.social.leaderboard(type)}?limit=${limit}`
+    );
+    return normalizeLeaderboardResponse(raw);
+  },
+
+  /**
+   * Лидерборд среди друзей (приглашённых)
+   */
+  getFriendsLeaderboard: async (): Promise<LeaderboardResponse> => {
+    const raw = await request<RawLeaderboardResponse>(
+      API_ENDPOINTS.social.friendsLeaderboard
+    );
+    return normalizeLeaderboardResponse(raw);
+  },
   
   /**
    * Получить каналы для подписки

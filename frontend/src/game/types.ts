@@ -218,6 +218,7 @@ export interface LeaderboardEntry {
   firstName: string | null;
   score: number;
   avatarUrl?: string;
+  photoUrl?: string | null;
 }
 
 /** Ответ лидерборда */
@@ -225,6 +226,8 @@ export interface LeaderboardResponse {
   leaders: LeaderboardEntry[];
   myPosition: number | null;
   myScore: number | null;
+  myInTop: boolean;
+  totalParticipants: number;
 }
 
 /** Канал для подписки */
@@ -284,6 +287,8 @@ export interface ReferralLeaderboardResponse {
   leaders: ReferralLeaderboardEntry[];
   my_position: number | null;
   my_score: number;
+  my_in_top: boolean;
+  total_participants: number;
 }
 
 // ============================================
@@ -318,6 +323,7 @@ export interface CompleteResponse {
   valid: boolean;
   stars: number;
   coinsEarned: number;
+  totalCoins?: number;
   newLevelUnlocked: boolean;
   error?: string;
   /** true если на этом уровне подтвердился реферал (invitee достиг уровня подтверждения) */

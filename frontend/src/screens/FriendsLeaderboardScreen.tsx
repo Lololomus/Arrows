@@ -30,6 +30,7 @@ interface ReferralPlayer {
   referrals: number;
   avatarSeed: number;
   photoUrl?: string | null;
+  userId?: number;
 }
 
 const CYAN_RANK_STYLES: Record<number, { bg: string; border: string; rankClass: string; icon: string; particleColor?: string }> = {
@@ -73,6 +74,7 @@ function mapApiToPlayers(entries: ReferralLeaderboardEntry[]): ReferralPlayer[] 
       referrals: entry.score,
       avatarSeed: entry.user_id,
       photoUrl: entry.photo_url,
+      userId: entry.user_id,
     };
   });
 }
@@ -306,12 +308,12 @@ const TopReferralItem = memo(({ player, index, animateEntry }: { player: Referra
 TopReferralItem.displayName = 'TopReferralItem';
 
 // --- КОМПОНЕНТ: ОБЫЧНЫЙ ЭЛЕМЕНТ ТОП-4+ ---
-const RegularReferralItem = memo(({ player }: { player: ReferralPlayer }) => {
+const RegularReferralItem = memo(({ player, isCurrentUser }: { player: ReferralPlayer; isCurrentUser?: boolean }) => {
   const styles = DEFAULT_RANK_STYLE;
   return (
-    <div className={`flex items-center px-3 py-2 rounded-2xl border relative overflow-hidden h-[72px] mb-3 ${styles.bg} ${styles.border}`}>
+    <div className={`flex items-center px-3 py-2 rounded-2xl border relative overflow-hidden h-[72px] mb-3 ${isCurrentUser ? 'bg-blue-500/8 border-blue-500/40 shadow-[0_0_10px_rgba(59,130,246,0.15)]' : `${styles.bg} ${styles.border}`}`}>
       <div className="flex items-center justify-center w-8 mr-2 relative z-10 shrink-0">
-        <span className={`font-bold text-lg ${styles.rankClass}`}>{player.rank}</span>
+        <span className={`font-bold text-lg ${isCurrentUser ? 'text-blue-300' : styles.rankClass}`}>{player.rank}</span>
       </div>
       <div className="relative z-10 mr-3">
         <AsyncAvatar seed={player.avatarSeed} rank={player.rank} photoUrl={player.photoUrl} />
@@ -485,6 +487,8 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
     referralLeaders: apiLeaders,
     myReferralPosition,
     myReferralScore,
+    myReferralInTop,
+    referralTotalParticipants,
     fetchReferralLeaderboard,
   } = useReferral();
 
@@ -539,6 +543,11 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
   }, []);
 
   useEffect(() => {
+    if (myReferralInTop) {
+      setIsDocked(false);
+      return;
+    }
+
     if (visibleCount < leaderboard.length) {
       setIsDocked(false);
       return;
@@ -555,7 +564,7 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
 
     observer.observe(target);
     return () => observer.disconnect();
-  }, [visibleCount, leaderboard.length]);
+  }, [visibleCount, leaderboard.length, myReferralInTop]);
 
   const prevDocked = useRef(isDocked);
   useEffect(() => {
@@ -653,10 +662,15 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
               transition={shouldAnimateListEnter ? { duration: 0.28, ease: 'easeOut' } : { duration: 0 }}
             >
               {leaderboard.slice(0, visibleCount).map((player, i) => {
+                const isMe = player.userId === user?.id;
                 if (player.rank <= 3) {
-                  return <TopReferralItem key={`top-ref-${player.rank}`} player={player} index={i} animateEntry={true} />;
+                  return (
+                    <div key={`top-ref-${player.rank}`} className={isMe ? 'rounded-2xl ring-2 ring-blue-500/40 shadow-[0_0_12px_rgba(59,130,246,0.15)]' : ''}>
+                      <TopReferralItem player={player} index={i} animateEntry={true} />
+                    </div>
+                  );
                 }
-                return <RegularReferralItem key={`reg-ref-${player.rank}`} player={player} />;
+                return <RegularReferralItem key={`reg-ref-${player.rank}`} player={player} isCurrentUser={isMe} />;
               })}
 
               {visibleCount < leaderboard.length && (
@@ -666,25 +680,41 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
               )}
 
               {visibleCount >= leaderboard.length && (
-                <div
-                  ref={currentUserRowRef}
-                  className={isDocked ? 'visible' : 'invisible pointer-events-none'}
-                  aria-hidden={!isDocked}
-                >
-                  <CurrentUserFooter
-                    user={user}
-                    isDocked
-                    pulseTrigger={dockPulseKey}
-                    myPosition={myReferralPosition}
-                    myScore={myReferralScore}
-                  />
-                </div>
+                <>
+                  {/* End-of-list indicator */}
+                  <div className="flex flex-col items-center py-6 opacity-50">
+                    <div className="w-12 h-[1px] bg-white/20 mb-3" />
+                    <p className="text-white/30 text-xs font-medium">
+                      {referralTotalParticipants > leaderboard.length
+                        ? `Топ-${leaderboard.length} из ${referralTotalParticipants}`
+                        : `${leaderboard.length} ${leaderboard.length === 1 ? 'участник' : leaderboard.length < 5 ? 'участника' : 'участников'}`
+                      }
+                    </p>
+                  </div>
+
+                  {/* Docked current user footer (only when NOT in top) */}
+                  {!myReferralInTop && (
+                    <div
+                      ref={currentUserRowRef}
+                      className={isDocked ? 'visible' : 'invisible pointer-events-none'}
+                      aria-hidden={!isDocked}
+                    >
+                      <CurrentUserFooter
+                        user={user}
+                        isDocked
+                        pulseTrigger={dockPulseKey}
+                        myPosition={myReferralPosition}
+                        myScore={myReferralScore}
+                      />
+                    </div>
+                  )}
+                </>
               )}
             </motion.div>
           )}
         </div>
 
-        {!isLoading && !isDocked && leaderboard.length > 0 && (
+        {!isLoading && !isDocked && !myReferralInTop && leaderboard.length > 0 && (
           <div className="absolute left-1 right-1 z-50 pointer-events-none" style={{ bottom: stickyBottomPx }}>
             <CurrentUserFooter
               user={user}

@@ -48,6 +48,7 @@ class User(Base):
     referrals_count = Column(Integer, default=0)       # подтверждённых (invitee достиг уровня подтверждения)
     referrals_pending = Column(Integer, default=0)     # ожидающих подтверждения
     referrals_earnings = Column(Integer, default=0)    # всего монет заработано с рефералов
+    last_referral_confirmed_at = Column(DateTime, nullable=True)  # дата подтверждения последнего реферала (tiebreaker)
     
     # Активные скины
     active_arrow_skin = Column(String(64), default="default")

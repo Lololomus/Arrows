@@ -114,6 +114,7 @@ class CompleteResponse(BaseModel):
     valid: bool
     stars: int = 0
     coins_earned: int = 0
+    total_coins: Optional[int] = None
     new_level_unlocked: bool = False
     error: Optional[str] = None
     # Реферал: true если на этом уровне подтвердился реферал invitee
@@ -252,6 +253,8 @@ class ReferralLeaderboardResponse(BaseModel):
     leaders: List[ReferralLeaderboardEntry]
     my_position: Optional[int]
     my_score: int = 0
+    my_in_top: bool = False
+    total_participants: int = 0
 
 
 # ============================================
@@ -264,6 +267,7 @@ class LeaderboardEntry(BaseModel):
     user_id: int
     username: Optional[str]
     first_name: Optional[str]
+    photo_url: Optional[str] = None
     score: int
 
 
@@ -271,6 +275,9 @@ class LeaderboardResponse(BaseModel):
     """Ответ лидерборда."""
     leaders: List[LeaderboardEntry]
     my_position: Optional[int]
+    my_score: Optional[int] = None
+    my_in_top: bool = False
+    total_participants: int = 0
 
 
 # ============================================

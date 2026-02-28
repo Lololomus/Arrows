@@ -74,17 +74,17 @@ class Settings(BaseSettings):
     HINTS_PER_LEVEL: int = 3
     COINS_PER_LEVEL: int = 10
     COINS_PER_STAR: int = 5
-    COINS_REWARD_EASY: int = 5
-    COINS_REWARD_NORMAL: int = 10
-    COINS_REWARD_HARD: int = 30
-    COINS_REWARD_EXTREME: int = 50
-    COINS_REWARD_IMPOSSIBLE: int = 100
+    COINS_REWARD_EASY: int = 1
+    COINS_REWARD_NORMAL: int = 3
+    COINS_REWARD_HARD: int = 5
+    COINS_REWARD_EXTREME: int = 25
+    COINS_REWARD_IMPOSSIBLE: int = 50
     
     # Rewards
     BASE_COINS_PER_LEVEL: int = 10
     REFERRAL_REWARD_INVITER: int = 200    # inviter получает, когда invitee достигнет уровня подтверждения
     REFERRAL_REWARD_INVITEE: int = 100    # invitee получает СРАЗУ при переходе по ссылке
-    REFERRAL_CONFIRM_LEVEL: int = 5      # уровень для подтверждения реферала. ВЕРНУТЬ НА 50 НА ПРОДЕ
+    REFERRAL_CONFIRM_LEVEL: int = 50      # уровень для подтверждения реферала. ВЕРНУТЬ НА 50 НА ПРОДЕ
     REFERRAL_GRACE_PERIOD_HOURS: int = 72 # окно привязки для существующих аккаунтов
     REFERRAL_BONUS_COINS: int = 100
     REFERRAL_OWNER_BONUS: int = 200

@@ -176,11 +176,13 @@ async def check_referral_confirmation(user: User, completed_level: int, db: Asyn
             inviter.referrals_earnings += settings.REFERRAL_REWARD_INVITER
             inviter.referrals_count += 1
             inviter.referrals_pending = max(0, inviter.referrals_pending - 1)
+            inviter.last_referral_confirmed_at = referral.confirmed_at
             referral.inviter_bonus_paid = True
         elif inviter:
             # EC-9: Забанен — счётчики обновляем, бонус откладываем
             inviter.referrals_count += 1
             inviter.referrals_pending = max(0, inviter.referrals_pending - 1)
+            inviter.last_referral_confirmed_at = referral.confirmed_at
             referral.inviter_bonus_paid = False
     
     # Invitee НЕ получает доп. бонус (уже получил +100 при регистрации)
@@ -339,6 +341,7 @@ async def complete_level(
             valid=True,
             stars=0,
             coins_earned=0,
+            total_coins=user.coins,
             new_level_unlocked=False,
             error="ALREADY_REWARDED"
         )
@@ -438,6 +441,7 @@ async def complete_level(
         valid=True,
         stars=stars,
         coins_earned=coins_earned,
+        total_coins=user.coins,
         new_level_unlocked=new_level,
         referral_confirmed=referral_confirmed,
     )

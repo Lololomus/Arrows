@@ -1,9 +1,10 @@
-// ===== 📄 ФАЙЛ: frontend/src/screens/LeaderboardScreen.tsx =====
+﻿// ===== 📄 ФАЙЛ: frontend/src/screens/LeaderboardScreen.tsx =====
 import { useState, useMemo, useRef, useEffect, useCallback, memo, type CSSProperties } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Trophy, Gift, Info } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { useAppStore } from '../stores/store';
+import { socialApi } from '../api/client';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { StarParticles } from '../components/ui/StarParticles';
 import { useParticleRuntimeProfile } from '../components/ui/particleRuntimeProfile';
@@ -28,6 +29,8 @@ interface Player {
   score: number;
   prize?: string;
   avatarSeed: number;
+  photoUrl?: string | null;
+  userId?: number;
 }
 
 type LeaderboardTab = 'arcade' | 'campaign';
@@ -70,22 +73,21 @@ const formatUsernameForUi = (username: string | null): string | null => {
   return `@${username}`;
 };
 
-const generateLeaderboard = (count: number): Player[] => {
-  return Array.from({ length: count }).map((_, i) => {
-    const baseName = `Player_${9900 - i}`;
-    const normalizedUsername = normalizeUsername(
-      i % 9 === 0 ? null : (i % 13 === 0 ? `@${baseName.toLowerCase()}` : baseName.toLowerCase())
-    );
-
+/** Маппинг API данных → Player для UI */
+function mapApiToPlayers(entries: { rank: number; userId: number; username: string | null; firstName: string | null; score: number; photoUrl?: string | null }[]): Player[] {
+  return entries.map((entry) => {
+    const normalizedUsername = normalizeUsername(entry.username);
     return {
-      rank: i + 1,
-      displayName: normalizeDisplayName(baseName, normalizedUsername, DEFAULT_PLAYER_NAME),
+      rank: entry.rank,
+      displayName: normalizeDisplayName(entry.firstName, entry.username, DEFAULT_PLAYER_NAME),
       username: normalizedUsername,
-      score: Math.max(1000, 10000 - i * 50 - Math.floor(Math.random() * 30)),
-      avatarSeed: i + 1,
+      score: entry.score,
+      avatarSeed: entry.userId,
+      photoUrl: entry.photoUrl,
+      userId: entry.userId,
     };
   });
-};
+}
 
 const INITIAL_VISIBLE_COUNT = 15;
 const SKELETON_MIN_VISIBLE_MS = 240;
@@ -138,7 +140,7 @@ function preloadImage(src: string, timeoutMs = AVATAR_PRELOAD_TIMEOUT_MS): Promi
 
 async function prepareLeaderboardForDisplay(players: Player[]): Promise<void> {
   const visiblePlayers = players.slice(0, INITIAL_VISIBLE_COUNT);
-  await Promise.allSettled(visiblePlayers.map((player) => preloadImage(getAvatarUrl(player.avatarSeed))));
+  await Promise.allSettled(visiblePlayers.map((player) => preloadImage(player.photoUrl || getAvatarUrl(player.avatarSeed))));
   await waitFrame();
   await waitFrame();
 }
@@ -298,7 +300,7 @@ const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Play
         <span className="text-xl drop-shadow-md">{styles.icon}</span>
       </div>
       <div className="relative z-20 mr-3">
-        <AsyncAvatar seed={player.avatarSeed} rank={player.rank} />
+        <AsyncAvatar seed={player.avatarSeed} rank={player.rank} photoUrl={player.photoUrl || undefined} />
       </div>
       <div className="flex-1 min-w-0 relative z-20 py-1">
         <PlayerIdentityText displayName={player.displayName} username={player.username} />
@@ -312,15 +314,15 @@ const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Play
 TopLeaderboardItem.displayName = 'TopLeaderboardItem';
 
 // --- КОМПОНЕНТ: ОБЫЧНЫЙ ЭЛЕМЕНТ ТОП-4+ ---
-const RegularLeaderboardItem = memo(({ player }: { player: Player }) => {
+const RegularLeaderboardItem = memo(({ player, isCurrentUser }: { player: Player; isCurrentUser?: boolean }) => {
   const styles = DEFAULT_RANK_STYLE;
   return (
-    <div className={`flex items-center px-3 py-2 rounded-2xl border relative overflow-hidden h-[72px] mb-3 ${styles.bg} ${styles.border}`}>
+    <div className={`flex items-center px-3 py-2 rounded-2xl border relative overflow-hidden h-[72px] mb-3 ${isCurrentUser ? 'bg-blue-500/8 border-blue-500/40 shadow-[0_0_10px_rgba(59,130,246,0.15)]' : `${styles.bg} ${styles.border}`}`}>
       <div className="flex items-center justify-center w-8 mr-2 relative z-10 shrink-0">
-        <span className={`font-bold text-lg ${styles.rankClass}`}>{player.rank}</span>
+        <span className={`font-bold text-lg ${isCurrentUser ? 'text-blue-300' : styles.rankClass}`}>{player.rank}</span>
       </div>
       <div className="relative z-10 mr-3">
-        <AsyncAvatar seed={player.avatarSeed} rank={player.rank} />
+        <AsyncAvatar seed={player.avatarSeed} rank={player.rank} photoUrl={player.photoUrl || undefined} />
       </div>
       <div className="flex-1 min-w-0 relative z-10 py-0.5">
         <PlayerIdentityText
@@ -379,20 +381,20 @@ LeaderboardSkeleton.displayName = 'LeaderboardSkeleton';
 const CARD_GAP_PX = 12;
 const BOTTOM_NAV_SELECTOR = '[data-bottom-nav]';
 
-const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger }: { user: any, isDocked: boolean, pulseTrigger?: number }) => {
+const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger, myPosition, myScore }: { user: any, isDocked: boolean, pulseTrigger?: number, myPosition: number | null, myScore: number | null }) => {
   const currentUserRank = useMemo(() => {
     const normalizedUsername = normalizeUsername(user?.username);
     const displayName = normalizeDisplayName(user?.firstName ?? user?.first_name, normalizedUsername, DEFAULT_PLAYER_NAME);
 
     return {
-      rank: 101,
+      rank: myPosition ?? 0,
       displayName,
       username: normalizedUsername,
-      score: 150,
+      score: myScore ?? 0,
       avatarSeed: user?.id || 999,
       photoUrl: user?.photo_url || user?.photoUrl,
     };
-  }, [user]);
+  }, [user, myPosition, myScore]);
   const [isPulseActive, setIsPulseActive] = useState(false);
 
   useEffect(() => {
@@ -438,7 +440,7 @@ const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger }: { user: any, i
       <div className="flex flex-col items-center justify-center w-8 mr-2 leading-none relative z-10 shrink-0">
          <span className="text-white/40 font-bold text-[10px] uppercase mb-1">Место</span>
          <span className={`font-black tracking-tighter transition-colors ${isDocked ? 'text-blue-200 text-sm' : 'text-cyan-300 text-sm drop-shadow-md'}`}>
-           #{currentUserRank.rank.toLocaleString()}
+           {currentUserRank.rank > 0 ? `#${currentUserRank.rank.toLocaleString()}` : '—'}
          </span>
       </div>
 
@@ -469,21 +471,69 @@ export function LeaderboardScreen() {
   const [dockPulseKey, setDockPulseKey] = useState(0);
   const [bottomNavHeight, setBottomNavHeight] = useState(96);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // API data
+  const [leaderboard, setLeaderboard] = useState<Player[]>([]);
+  const [myPosition, setMyPosition] = useState<number | null>(null);
+  const [myScore, setMyScore] = useState<number | null>(null);
+  const [myInTop, setMyInTop] = useState(false);
+  const [totalParticipants, setTotalParticipants] = useState(0);
   
-  const { user } = useAppStore();
+  const { user, screen } = useAppStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentUserRowRef = useRef<HTMLDivElement>(null);
   const visibleCountRef = useRef(INITIAL_VISIBLE_COUNT);
   const switchRequestIdRef = useRef(0);
 
-  const leaderboards = useMemo<Record<LeaderboardTab, Player[]>>(() => ({
-    arcade: generateLeaderboard(100),
-    campaign: generateLeaderboard(100),
-  }), []);
-  const leaderboard = leaderboards[displayTab];
   const isAdventureComingSoon = displayTab === 'campaign';
   const stickyBottomPx = bottomNavHeight + CARD_GAP_PX;
   const shouldAnimateListEnter = listRenderVersion > 0;
+
+  // --- API FETCHING ---
+  const fetchLeaderboardData = useCallback(async (tab: LeaderboardTab): Promise<Player[]> => {
+    if (tab === 'campaign') return [];
+    try {
+      const boardType = tab === 'arcade' ? 'arcade' as const : 'global' as const;
+      const data = await socialApi.getLeaderboard(boardType, 100);
+      setMyPosition(data.myPosition);
+      setMyScore(data.myScore);
+      setMyInTop(data.myInTop);
+      setTotalParticipants(data.totalParticipants);
+      return mapApiToPlayers(data.leaders);
+    } catch (error) {
+      console.error('Leaderboard fetch error:', error);
+      return [];
+    }
+  }, []);
+
+  // Initial load
+  const initialLoadDone = useRef(false);
+  useEffect(() => {
+    void (async () => {
+      const players = await fetchLeaderboardData('arcade');
+      setLeaderboard(players);
+      if (players.length > 0) {
+        await prepareLeaderboardForDisplay(players);
+      }
+      setIsLoading(false);
+      setListRenderVersion(1);
+      initialLoadDone.current = true;
+    })();
+  }, [fetchLeaderboardData]);
+
+  // Refresh when navigating back to leaderboard screen
+  useEffect(() => {
+    if (screen !== 'leaderboard') return;
+    if (!initialLoadDone.current) return;
+
+    void (async () => {
+      const players = await fetchLeaderboardData(displayTab);
+      if (players.length > 0 || displayTab !== 'campaign') {
+        setLeaderboard(players);
+      }
+    })();
+  }, [screen, displayTab, fetchLeaderboardData]);
 
   useEffect(() => {
     const nav = document.querySelector(BOTTOM_NAV_SELECTOR) as HTMLElement | null;
@@ -506,7 +556,7 @@ export function LeaderboardScreen() {
   }, []);
 
   useEffect(() => {
-    if (isAdventureComingSoon) {
+    if (isAdventureComingSoon || myInTop) {
       setIsDocked(false);
       return;
     }
@@ -527,7 +577,7 @@ export function LeaderboardScreen() {
 
     observer.observe(target);
     return () => observer.disconnect();
-  }, [visibleCount, leaderboard.length, displayTab, isAdventureComingSoon]);
+  }, [visibleCount, leaderboard.length, displayTab, isAdventureComingSoon, myInTop]);
 
   const prevDocked = useRef(isDocked);
   useEffect(() => {
@@ -560,17 +610,22 @@ export function LeaderboardScreen() {
 
     if (tab === 'campaign') {
       setDisplayTab(tab);
+      setLeaderboard([]);
       setListRenderVersion((prev) => prev + 1);
       setIsSwitchingTab(false);
       return;
     }
 
     const startedAt = performance.now();
-    const targetLeaderboard = leaderboards[tab];
 
     void (async () => {
       try {
-        await prepareLeaderboardForDisplay(targetLeaderboard);
+        const players = await fetchLeaderboardData(tab);
+        
+        if (players.length > 0) {
+          await prepareLeaderboardForDisplay(players);
+        }
+        
         const elapsed = performance.now() - startedAt;
         if (elapsed < SKELETON_MIN_VISIBLE_MS) {
           await waitMs(SKELETON_MIN_VISIBLE_MS - elapsed);
@@ -578,6 +633,7 @@ export function LeaderboardScreen() {
 
         if (switchRequestIdRef.current !== requestId) return;
 
+        setLeaderboard(players);
         setDisplayTab(tab);
         setListRenderVersion((prev) => prev + 1);
       } finally {
@@ -586,7 +642,7 @@ export function LeaderboardScreen() {
         }
       }
     })();
-  }, [activeTab, isSwitchingTab, leaderboards]);
+  }, [activeTab, isSwitchingTab, fetchLeaderboardData]);
 
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
@@ -672,11 +728,11 @@ export function LeaderboardScreen() {
       <div className="flex-1 overflow-hidden relative rounded-t-2xl">
         <div 
           ref={scrollRef} 
-          onScroll={isSwitchingTab || isAdventureComingSoon ? undefined : handleScroll}
+          onScroll={isSwitchingTab || isAdventureComingSoon || isLoading ? undefined : handleScroll}
           style={{ paddingBottom: stickyBottomPx }}
           className="h-full overflow-y-auto overflow-x-hidden custom-scrollbar px-1"
         >
-          {isSwitchingTab ? (
+          {isSwitchingTab || isLoading ? (
             <LeaderboardSkeleton />
           ) : isAdventureComingSoon ? (
             <motion.div
@@ -699,6 +755,20 @@ export function LeaderboardScreen() {
                 <p className="text-white/60 text-sm relative z-10">Скоро</p>
               </div>
             </motion.div>
+          ) : leaderboard.length === 0 ? (
+            <motion.div
+              key="empty-state"
+              initial={shouldAnimateListEnter ? { opacity: 0, y: 10, filter: 'blur(4px)' } : false}
+              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              transition={shouldAnimateListEnter ? { duration: 0.28, ease: 'easeOut' } : { duration: 0 }}
+              className="h-full flex items-center justify-center px-2"
+            >
+              <div className="text-center py-16">
+                <div className="text-5xl mb-4">🏆</div>
+                <p className="text-white/60 text-base font-medium">Лидерборд пока пуст</p>
+                <p className="text-white/35 text-sm mt-2">Играй и попади в топ!</p>
+              </div>
+            </motion.div>
           ) : (
             <motion.div
               key={`${displayTab}-${listRenderVersion}`}
@@ -707,10 +777,15 @@ export function LeaderboardScreen() {
               transition={shouldAnimateListEnter ? { duration: 0.28, ease: 'easeOut' } : { duration: 0 }}
             >
               {leaderboard.slice(0, visibleCount).map((player, i) => {
+                const isMe = player.userId === user?.id;
                 if (player.rank <= 3) {
-                  return <TopLeaderboardItem key={`top-${displayTab}-${player.rank}`} player={player} index={i} animateEntry={true} />;
+                  return (
+                    <div key={`top-${displayTab}-${player.rank}`} className={isMe ? 'rounded-2xl ring-2 ring-blue-500/40 shadow-[0_0_12px_rgba(59,130,246,0.15)]' : ''}>
+                      <TopLeaderboardItem player={player} index={i} animateEntry={true} />
+                    </div>
+                  );
                 }
-                return <RegularLeaderboardItem key={`reg-${displayTab}-${player.rank}`} player={player} />;
+                return <RegularLeaderboardItem key={`reg-${displayTab}-${player.rank}`} player={player} isCurrentUser={isMe} />;
               })}
 
               {visibleCount < leaderboard.length && (
@@ -720,21 +795,37 @@ export function LeaderboardScreen() {
               )}
 
               {visibleCount >= leaderboard.length && (
-                <div
-                  ref={currentUserRowRef}
-                  className={isDocked ? 'visible' : 'invisible pointer-events-none'}
-                  aria-hidden={!isDocked}
-                >
-                  <CurrentUserFooter user={user} isDocked pulseTrigger={dockPulseKey} />
-                </div>
+                <>
+                  {/* End-of-list indicator */}
+                  <div className="flex flex-col items-center py-6 opacity-50">
+                    <div className="w-12 h-[1px] bg-white/20 mb-3" />
+                    <p className="text-white/30 text-xs font-medium">
+                      {totalParticipants > leaderboard.length
+                        ? `Топ-${leaderboard.length} из ${totalParticipants}`
+                        : `${leaderboard.length} ${leaderboard.length === 1 ? 'участник' : leaderboard.length < 5 ? 'участника' : 'участников'}`
+                      }
+                    </p>
+                  </div>
+
+                  {/* Docked current user footer (only when NOT in top) */}
+                  {!myInTop && (
+                    <div
+                      ref={currentUserRowRef}
+                      className={isDocked ? 'visible' : 'invisible pointer-events-none'}
+                      aria-hidden={!isDocked}
+                    >
+                      <CurrentUserFooter user={user} isDocked pulseTrigger={dockPulseKey} myPosition={myPosition} myScore={myScore} />
+                    </div>
+                  )}
+                </>
               )}
             </motion.div>
           )}
         </div>
 
-        {!isSwitchingTab && !isDocked && !isAdventureComingSoon && (
+        {!isSwitchingTab && !isLoading && !isDocked && !isAdventureComingSoon && !myInTop && leaderboard.length > 0 && (
           <div className="absolute left-1 right-1 z-50 pointer-events-none" style={{ bottom: stickyBottomPx }}>
-            <CurrentUserFooter user={user} isDocked={false} />
+            <CurrentUserFooter user={user} isDocked={false} myPosition={myPosition} myScore={myScore} />
           </div>
         )}
       </div>

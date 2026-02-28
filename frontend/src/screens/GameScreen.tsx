@@ -623,7 +623,7 @@ export function GameScreen() {
         completedLevelsSentRef.current.add(completedLevel);
         pendingLevelCompletionRef.current.delete(completedLevel);
         setVictoryCoinsEarned(response.coinsEarned);
-        const nextCoinsTotal = (user?.coins ?? 0) + response.coinsEarned;
+        const nextCoinsTotal = response.totalCoins ?? ((user?.coins ?? 0) + response.coinsEarned);
         setVictoryTotalCoins(nextCoinsTotal);
 
         if (user) {

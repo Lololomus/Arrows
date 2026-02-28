@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc
+from sqlalchemy import select, func, desc, asc, and_, or_
 from sqlalchemy.exc import IntegrityError
 
 from ..config import settings
@@ -186,17 +186,34 @@ async def get_referral_leaderboard(
 ):
     """
     Глобальный лидерборд рефоводов.
-    Ранжирование по кол-ву подтверждённых рефералов (referrals_count).
+    Ранжирование: referrals_count DESC, last_referral_confirmed_at ASC, id ASC.
+    Tiebreaker: кто набрал N рефералов раньше — тот выше.
+    NULL last_referral_confirmed_at трактуется как «бесконечно далёкое будущее» (внизу группы).
     """
-    # Топ рефоводов
+    # Sentinel для COALESCE: NULL → далёкое будущее → внизу при ASC
+    _FAR_FUTURE = datetime(9999, 1, 1)
+
+    base_filter = [
+        User.referrals_count > 0,
+        User.is_banned == False,
+    ]
+
+    # NULL-safe выражение для сортировки
+    confirmed_at_safe = func.coalesce(User.last_referral_confirmed_at, _FAR_FUTURE)
+
+    # Топ рефоводов (детерминированная сортировка)
     result = await db.execute(
         select(User)
-        .where(User.referrals_count > 0)
-        .order_by(desc(User.referrals_count), desc(User.referrals_earnings))
+        .where(*base_filter)
+        .order_by(
+            desc(User.referrals_count),
+            asc(confirmed_at_safe),
+            asc(User.id),
+        )
         .limit(limit)
     )
     users = result.scalars().all()
-    
+
     leaders = [
         ReferralLeaderboardEntry(
             rank=i + 1,
@@ -208,21 +225,49 @@ async def get_referral_leaderboard(
         )
         for i, u in enumerate(users)
     ]
-    
-    # Позиция текущего пользователя
+
+    # Общее кол-во участников
+    total_result = await db.execute(
+        select(func.count()).select_from(User).where(*base_filter)
+    )
+    total_participants = total_result.scalar()
+
+    # Позиция текущего пользователя (той же сортировкой, NULL-safe)
     my_position = None
-    if user.referrals_count > 0:
-        rank_result = await db.execute(
+    my_in_top = False
+    my_score = user.referrals_count
+
+    if my_score > 0 and not user.is_banned:
+        my_confirmed = user.last_referral_confirmed_at or _FAR_FUTURE
+
+        count_above = await db.execute(
             select(func.count())
             .select_from(User)
-            .where(User.referrals_count > user.referrals_count)
+            .where(
+                *base_filter,
+                or_(
+                    User.referrals_count > user.referrals_count,
+                    and_(
+                        User.referrals_count == user.referrals_count,
+                        confirmed_at_safe < my_confirmed,
+                    ),
+                    and_(
+                        User.referrals_count == user.referrals_count,
+                        confirmed_at_safe == my_confirmed,
+                        User.id < user.id,
+                    ),
+                )
+            )
         )
-        my_position = rank_result.scalar() + 1
-    
+        my_position = count_above.scalar() + 1
+        my_in_top = any(l.user_id == user.id for l in leaders)
+
     return ReferralLeaderboardResponse(
         leaders=leaders,
         my_position=my_position,
-        my_score=user.referrals_count,
+        my_score=my_score,
+        my_in_top=my_in_top,
+        total_participants=total_participants,
     )
 
 
@@ -240,102 +285,229 @@ async def get_leaderboard(
     """
     Получить лидерборд.
     board_type: 'global' | 'weekly' | 'arcade'
+    Score для global = current_level - 1 (кол-во пройдённых уровней).
+    Только юзеры с score > 0 попадают в борд.
     """
     if board_type not in ["global", "weekly", "arcade"]:
         raise HTTPException(status_code=400, detail="Invalid leaderboard type")
-    
+
     if board_type == "global":
-        # По уровню
+        # Фильтр: хотя бы 1 пройденный уровень, не забанен
+        base_filter = [
+            User.current_level > 1,
+            User.is_banned == False,
+        ]
+
+        # Сортировка: уровень DESC, звёзды DESC, id ASC (tiebreaker)
         result = await db.execute(
             select(User)
-            .order_by(desc(User.current_level), desc(User.total_stars))
+            .where(*base_filter)
+            .order_by(desc(User.current_level), desc(User.total_stars), asc(User.id))
             .limit(limit)
         )
         users = result.scalars().all()
-        
+
         leaders = [
             LeaderboardEntry(
                 rank=i + 1,
                 user_id=u.id,
                 username=u.username,
                 first_name=u.first_name,
-                score=u.current_level
+                photo_url=u.photo_url,
+                score=u.current_level - 1,  # пройдённые уровни
             )
             for i, u in enumerate(users)
         ]
-        
-        # Позиция текущего пользователя
-        my_rank = await db.execute(
-            select(func.count())
-            .where(User.current_level > user.current_level)
+
+        # Общее кол-во участников
+        total_result = await db.execute(
+            select(func.count()).select_from(User).where(*base_filter)
         )
-        my_position = my_rank.scalar() + 1
-        
+        total_participants = total_result.scalar()
+
+        # Позиция текущего пользователя
+        my_position = None
+        my_in_top = False
+        my_score = max(0, user.current_level - 1)
+
+        if my_score > 0 and not user.is_banned:
+            count_above = await db.execute(
+                select(func.count())
+                .select_from(User)
+                .where(
+                    *base_filter,
+                    or_(
+                        User.current_level > user.current_level,
+                        and_(
+                            User.current_level == user.current_level,
+                            User.total_stars > user.total_stars,
+                        ),
+                        and_(
+                            User.current_level == user.current_level,
+                            User.total_stars == user.total_stars,
+                            User.id < user.id,
+                        ),
+                    )
+                )
+            )
+            my_position = count_above.scalar() + 1
+            my_in_top = any(l.user_id == user.id for l in leaders)
+
     elif board_type == "weekly":
-        # По очкам за неделю из таблицы Leaderboard
         result = await db.execute(
             select(Leaderboard, User)
             .join(User, Leaderboard.user_id == User.id)
-            .where(Leaderboard.board_type == "weekly")
-            .order_by(desc(Leaderboard.score))
+            .where(
+                Leaderboard.board_type == "weekly",
+                Leaderboard.score > 0,
+                User.is_banned == False,
+            )
+            .order_by(desc(Leaderboard.score), asc(Leaderboard.updated_at), asc(User.id))
             .limit(limit)
         )
         rows = result.all()
-        
+
         leaders = [
             LeaderboardEntry(
                 rank=i + 1,
                 user_id=lb.user_id,
                 username=u.username,
                 first_name=u.first_name,
-                score=lb.score
+                photo_url=u.photo_url,
+                score=lb.score,
             )
             for i, (lb, u) in enumerate(rows)
         ]
-        
-        # Позиция текущего пользователя
+
+        total_result = await db.execute(
+            select(func.count())
+            .select_from(Leaderboard)
+            .join(User, Leaderboard.user_id == User.id)
+            .where(
+                Leaderboard.board_type == "weekly",
+                Leaderboard.score > 0,
+                User.is_banned == False,
+            )
+        )
+        total_participants = total_result.scalar()
+
         my_lb = await db.execute(
             select(Leaderboard)
             .where(Leaderboard.user_id == user.id, Leaderboard.board_type == "weekly")
         )
         my_entry = my_lb.scalar_one_or_none()
-        
-        if my_entry:
-            rank_query = await db.execute(
+
+        my_position = None
+        my_in_top = False
+        my_score = my_entry.score if my_entry else 0
+
+        if my_entry and my_entry.score > 0 and not user.is_banned:
+            count_above = await db.execute(
                 select(func.count())
                 .select_from(Leaderboard)
+                .join(User, Leaderboard.user_id == User.id)
                 .where(
                     Leaderboard.board_type == "weekly",
-                    Leaderboard.score > my_entry.score
+                    Leaderboard.score > 0,
+                    User.is_banned == False,
+                    or_(
+                        Leaderboard.score > my_entry.score,
+                        and_(
+                            Leaderboard.score == my_entry.score,
+                            Leaderboard.updated_at < my_entry.updated_at,
+                        ),
+                        and_(
+                            Leaderboard.score == my_entry.score,
+                            Leaderboard.updated_at == my_entry.updated_at,
+                            User.id < user.id,
+                        ),
+                    )
                 )
             )
-            my_position = rank_query.scalar() + 1
-        else:
-            my_position = None
-            
+            my_position = count_above.scalar() + 1
+            my_in_top = any(l.user_id == user.id for l in leaders)
+
     else:  # arcade
         result = await db.execute(
             select(Leaderboard, User)
             .join(User, Leaderboard.user_id == User.id)
-            .where(Leaderboard.board_type == "arcade")
-            .order_by(desc(Leaderboard.score))
+            .where(
+                Leaderboard.board_type == "arcade",
+                Leaderboard.score > 0,
+                User.is_banned == False,
+            )
+            .order_by(desc(Leaderboard.score), asc(Leaderboard.updated_at), asc(User.id))
             .limit(limit)
         )
         rows = result.all()
-        
+
         leaders = [
             LeaderboardEntry(
                 rank=i + 1,
                 user_id=lb.user_id,
                 username=u.username,
                 first_name=u.first_name,
-                score=lb.score
+                photo_url=u.photo_url,
+                score=lb.score,
             )
             for i, (lb, u) in enumerate(rows)
         ]
+
+        total_result = await db.execute(
+            select(func.count())
+            .select_from(Leaderboard)
+            .join(User, Leaderboard.user_id == User.id)
+            .where(
+                Leaderboard.board_type == "arcade",
+                Leaderboard.score > 0,
+                User.is_banned == False,
+            )
+        )
+        total_participants = total_result.scalar()
+
+        my_lb = await db.execute(
+            select(Leaderboard)
+            .where(Leaderboard.user_id == user.id, Leaderboard.board_type == "arcade")
+        )
+        my_entry = my_lb.scalar_one_or_none()
+
         my_position = None
-    
-    return LeaderboardResponse(leaders=leaders, my_position=my_position)
+        my_in_top = False
+        my_score = my_entry.score if my_entry else 0
+
+        if my_entry and my_entry.score > 0 and not user.is_banned:
+            count_above = await db.execute(
+                select(func.count())
+                .select_from(Leaderboard)
+                .join(User, Leaderboard.user_id == User.id)
+                .where(
+                    Leaderboard.board_type == "arcade",
+                    Leaderboard.score > 0,
+                    User.is_banned == False,
+                    or_(
+                        Leaderboard.score > my_entry.score,
+                        and_(
+                            Leaderboard.score == my_entry.score,
+                            Leaderboard.updated_at < my_entry.updated_at,
+                        ),
+                        and_(
+                            Leaderboard.score == my_entry.score,
+                            Leaderboard.updated_at == my_entry.updated_at,
+                            User.id < user.id,
+                        ),
+                    )
+                )
+            )
+            my_position = count_above.scalar() + 1
+            my_in_top = any(l.user_id == user.id for l in leaders)
+
+    return LeaderboardResponse(
+        leaders=leaders,
+        my_position=my_position,
+        my_score=my_score,
+        my_in_top=my_in_top,
+        total_participants=total_participants,
+    )
 
 
 # ============================================
@@ -427,35 +599,44 @@ async def get_friends_leaderboard(
 ):
     """
     Лидерборд среди друзей (приглашённых рефералов + сам пользователь).
-    Ранжирование по current_level.
+    Ранжирование по current_level (пройдённые уровни).
+    Только юзеры с current_level > 1 (прошли хотя бы 1 уровень).
     """
-    # Получаем подтверждённых и pending рефералов
+    # Получаем рефералов
     result = await db.execute(
         select(User)
         .join(Referral, Referral.invitee_id == User.id)
         .where(Referral.inviter_id == user.id)
-        .order_by(desc(User.current_level))
     )
     referrals = result.scalars().all()
-    
-    # Добавляем самого пользователя и сортируем
-    all_users = [user] + list(referrals)
-    all_users.sort(key=lambda u: (u.current_level, u.total_stars), reverse=True)
-    
+
+    # Все юзеры (пользователь + рефералы), фильтруем тех кто прошёл ≥1 уровень
+    all_users = [u for u in [user] + list(referrals) if u.current_level > 1]
+    all_users.sort(key=lambda u: (u.current_level, u.total_stars, -u.id), reverse=True)
+
     leaders = [
         LeaderboardEntry(
             rank=i + 1,
             user_id=u.id,
             username=u.username,
             first_name=u.first_name,
-            score=u.current_level,
+            photo_url=u.photo_url,
+            score=u.current_level - 1,
         )
         for i, u in enumerate(all_users)
     ]
-    
+
     my_position = next(
         (i + 1 for i, u in enumerate(all_users) if u.id == user.id),
         None
     )
-    
-    return LeaderboardResponse(leaders=leaders, my_position=my_position)
+    my_score = max(0, user.current_level - 1)
+    my_in_top = my_position is not None
+
+    return LeaderboardResponse(
+        leaders=leaders,
+        my_position=my_position,
+        my_score=my_score,
+        my_in_top=my_in_top,
+        total_participants=len(all_users),
+    )

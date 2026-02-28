@@ -21,6 +21,8 @@ export function useReferral() {
   const [referralLeaders, setReferralLeaders] = useState<ReferralLeaderboardEntry[]>([]);
   const [myReferralPosition, setMyReferralPosition] = useState<number | null>(null);
   const [myReferralScore, setMyReferralScore] = useState(0);
+  const [myReferralInTop, setMyReferralInTop] = useState(false);
+  const [referralTotalParticipants, setReferralTotalParticipants] = useState(0);
   const [loading, setLoading] = useState(false);
 
   const fetchReferralCode = useCallback(async () => {
@@ -67,6 +69,8 @@ export function useReferral() {
       setReferralLeaders(data.leaders);
       setMyReferralPosition(data.my_position);
       setMyReferralScore(data.my_score);
+      setMyReferralInTop(data.my_in_top ?? false);
+      setReferralTotalParticipants(data.total_participants ?? 0);
     } catch (error) {
       console.error('Fetch referral leaderboard error:', error);
     }
@@ -96,6 +100,8 @@ export function useReferral() {
     referralLeaders,
     myReferralPosition,
     myReferralScore,
+    myReferralInTop,
+    referralTotalParticipants,
     loading,
     fetchReferralCode,
     fetchReferralStats,
