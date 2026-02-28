@@ -1,18 +1,16 @@
 /**
- * Arrow Puzzle — Victory Screen
+ * Arrow Puzzle — Victory Screen (OPTIMIZED)
  *
- * Полноэкранный оверлей победы с:
- * - Difficulty-based FX (easy/normal/hard)
- * - Иконка с glow + float-анимацией (ОПТИМИЗИРОВАНО: радиальные градиенты без blur)
- * - Плашка уровня + difficulty badge
- * - Анимированный счётчик монет с раскрывающимся Итоговым Балансом (UX Upgrade)
- * - Время прохождения
- * - CTA «Следующий» + ghost «В меню»
+ * Изменения:
+ * 1. Кнопка «Следующий» имеет 4 состояния: idle / saving / loading / error
+ * 2. При ошибке — inline retry, victory-экран НЕ пропадает
+ * 3. Loader с задержкой 150ms (не мелькает на быстрых ответах)
+ * 4. Подпись «Проверяем решение...» после 1 сек ожидания
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Zap, Coins, Timer } from 'lucide-react';
+import { Zap, Coins, Timer, Loader2, AlertCircle, RotateCcw } from 'lucide-react';
 
 import { VictoryFX } from './VictoryFX';
 import { AnimatedRewardCounter } from './AnimatedRewardCounter';
@@ -24,15 +22,44 @@ import {
   type DifficultyValue,
 } from './difficultyConfig';
 
+export type NextButtonState = 'idle' | 'saving' | 'loading' | 'error';
+export type PendingVictoryAction = 'next' | 'menu' | null;
+
 interface VictoryScreenProps {
   level: number;
   difficulty: DifficultyValue;
   timeSeconds: number;
   coinsEarned?: number;
-  /** Общее количество монет игрока (для отображения баланса) */
   totalCoins?: number;
+  /** Состояние кнопки «Следующий» (управляется из GameScreen) */
+  nextButtonState?: NextButtonState;
+  pendingAction?: PendingVictoryAction;
+  /** Текст ошибки (если nextButtonState === 'error') */
+  nextButtonError?: string | null;
   onNextLevel: () => void;
+  onRetry?: () => void;
   onMenu: () => void;
+}
+
+/** Текст кнопки по состоянию */
+function getButtonLabel(state: NextButtonState, elapsed: number): string {
+  switch (state) {
+    case 'saving':
+      return elapsed > 1000 ? 'Проверяем решение...' : 'Сохраняем...';
+    case 'loading':
+      return 'Открываем уровень...';
+    case 'error':
+      return 'Повторить';
+    default:
+      return 'Следующий';
+  }
+}
+
+function getHelperText(state: NextButtonState, pendingAction: PendingVictoryAction): string | null {
+  if (state === 'saving' && pendingAction === 'next') return 'Откроем следующий уровень после сохранения';
+  if (state === 'saving' && pendingAction === 'menu') return 'Вернёмся в меню после сохранения';
+  if (state === 'saving') return 'Сохраняем прогресс...';
+  return null;
 }
 
 export function VictoryScreen({
@@ -41,15 +68,55 @@ export function VictoryScreen({
   timeSeconds,
   coinsEarned,
   totalCoins,
+  nextButtonState = 'idle',
+  pendingAction = null,
+  nextButtonError = null,
   onNextLevel,
+  onRetry,
   onMenu,
 }: VictoryScreenProps) {
   const [showTotal, setShowTotal] = useState(false);
-  
+  const [showSpinner, setShowSpinner] = useState(false);
+  const [stateElapsed, setStateElapsed] = useState(0);
+  const stateStartRef = useRef(Date.now());
+
   const tier: DifficultyTier = getDifficultyTier(difficulty);
   const cfg = DIFFICULTY_CONFIG[tier];
   const reward = coinsEarned ?? cfg.reward;
   const IconComponent = cfg.victoryIcon;
+
+  const isBusy = nextButtonState === 'saving' || nextButtonState === 'loading';
+  const isError = nextButtonState === 'error';
+  const helperText = getHelperText(nextButtonState, pendingAction);
+
+  // Задержка спиннера 150ms — не мелькает на быстрых ответах
+  useEffect(() => {
+    if (!isBusy) {
+      setShowSpinner(false);
+      setStateElapsed(0);
+      return;
+    }
+    stateStartRef.current = Date.now();
+
+    const spinnerTimer = setTimeout(() => setShowSpinner(true), 150);
+    const elapsed_interval = setInterval(() => {
+      setStateElapsed(Date.now() - stateStartRef.current);
+    }, 300);
+
+    return () => {
+      clearTimeout(spinnerTimer);
+      clearInterval(elapsed_interval);
+    };
+  }, [isBusy]);
+
+  const handleClick = () => {
+    if (isBusy) return; // prevent double-tap
+    if (isError && onRetry) {
+      onRetry();
+    } else {
+      onNextLevel();
+    }
+  };
 
   return (
     <motion.div
@@ -67,34 +134,20 @@ export function VictoryScreen({
         <motion.div
           initial={{ scale: 0, y: 50 }}
           animate={{ scale: cfg.scale, y: 0 }}
-          transition={{
-            type: 'spring',
-            bounce: cfg.bounce,
-            duration: 0.8,
-          }}
+          transition={{ type: 'spring', bounce: cfg.bounce, duration: 0.8 }}
           className="relative w-32 h-32 flex items-center justify-center mb-8"
         >
-          {/* Big outer glow (ОПТИМИЗИРОВАНО: радиальный градиент вместо blur) */}
           <div
             className="absolute w-[250px] h-[250px] opacity-40 pointer-events-none"
-            style={{
-              background: `radial-gradient(circle, ${cfg.primary} 0%, transparent 60%)`,
-            }}
+            style={{ background: `radial-gradient(circle, ${cfg.primary} 0%, transparent 60%)` }}
           />
-          {/* Intense inner glow (ОПТИМИЗИРОВАНО) */}
           <div
             className="absolute w-[150px] h-[150px] opacity-70 pointer-events-none"
-            style={{
-              background: `radial-gradient(circle, ${cfg.secondary} 0%, transparent 60%)`,
-            }}
+            style={{ background: `radial-gradient(circle, ${cfg.secondary} 0%, transparent 60%)` }}
           />
           <motion.div
             animate={{ y: [-4, 4, -4] }}
-            transition={{
-              duration: 4,
-              repeat: Infinity,
-              ease: 'easeInOut',
-            }}
+            transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
             className="relative z-10"
           >
             <IconComponent
@@ -148,21 +201,11 @@ export function VictoryScreen({
             className="absolute inset-0 w-1/2 h-full bg-gradient-to-r from-transparent via-yellow-100/10 to-transparent skew-x-12 pointer-events-none"
             initial={{ left: '-100%' }}
             animate={{ left: '200%' }}
-            transition={{
-              duration: 1.5,
-              ease: 'easeInOut',
-              delay: 1.5,
-              repeat: Infinity,
-              repeatDelay: 3,
-            }}
+            transition={{ duration: 1.5, ease: 'easeInOut', delay: 1.5, repeat: Infinity, repeatDelay: 3 }}
           />
           <div className="w-10 h-10 shrink-0 bg-gradient-to-br from-yellow-500/20 to-amber-600/20 border border-yellow-500/30 rounded-xl flex items-center justify-center relative z-10 shadow-inner">
-            <Coins
-              size={22}
-              className="text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.8)]"
-            />
+            <Coins size={22} className="text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.8)]" />
           </div>
-          
           <div className="flex flex-col relative z-10 min-w-[110px]">
             <div className="flex flex-col">
               <span className="text-[10px] font-bold text-white/50 uppercase tracking-widest leading-none mb-1.5">
@@ -170,15 +213,9 @@ export function VictoryScreen({
               </span>
               <span className="text-2xl font-black text-yellow-300 leading-none drop-shadow-[0_0_10px_rgba(250,204,21,0.4)] flex items-end">
                 <span className="text-yellow-500 text-xl mr-0.5">+</span>
-                <AnimatedRewardCounter 
-                  reward={reward} 
-                  delaySec={0.6} 
-                  onDone={() => setShowTotal(true)}
-                />
+                <AnimatedRewardCounter reward={reward} delaySec={0.6} onDone={() => setShowTotal(true)} />
               </span>
             </div>
-
-            {/* Итоговый баланс (Раскрывается плавно после счета) */}
             <AnimatePresence>
               {showTotal && (
                 <motion.div
@@ -224,12 +261,72 @@ export function VictoryScreen({
           transition={{ delay: 1.2, duration: 0.5 }}
           className="w-full flex flex-col items-center gap-4 px-2 mt-2"
         >
+          {helperText && (
+            <div className="w-full px-3 text-center text-[11px] font-semibold tracking-wide text-white/65">
+              {helperText}
+            </div>
+          )}
+          {/* === ОШИБКА (inline, НЕ пропадает victory) === */}
+          <AnimatePresence>
+            {isError && nextButtonError && (
+              <motion.div
+                initial={{ opacity: 0, y: -8, height: 0 }}
+                animate={{ opacity: 1, y: 0, height: 'auto' }}
+                exit={{ opacity: 0, y: -8, height: 0 }}
+                className="w-full flex items-center gap-2 px-4 py-3 rounded-2xl bg-red-950/60 border border-red-500/30 backdrop-blur-xl overflow-hidden"
+              >
+                <AlertCircle size={16} className="text-red-400 shrink-0" />
+                <span className="text-red-200 text-xs font-medium leading-tight">
+                  {nextButtonError}
+                </span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* === ГЛАВНАЯ КНОПКА === */}
           <motion.button
-            whileTap={{ scale: 0.96 }}
-            onClick={onNextLevel}
-            className={`w-full py-5 rounded-[20px] ${cfg.victoryButton} text-white font-black text-xl uppercase tracking-widest hover:brightness-110 transition-all border border-white/20 shadow-xl`}
+            whileTap={isBusy ? undefined : { scale: 0.96 }}
+            onClick={handleClick}
+            disabled={isBusy}
+            className={`
+              w-full py-5 rounded-[20px] text-white font-black text-xl uppercase tracking-widest
+              transition-all border border-white/20 shadow-xl
+              flex items-center justify-center gap-3
+              ${isBusy
+                ? 'bg-white/10 cursor-wait'
+                : isError
+                  ? 'bg-gradient-to-b from-red-600 to-red-700 hover:brightness-110'
+                  : `${cfg.victoryButton} hover:brightness-110`
+              }
+            `}
           >
-            Следующий
+            {/* Спиннер (с задержкой 150ms) */}
+            <AnimatePresence mode="wait">
+              {isBusy && showSpinner && (
+                <motion.span
+                  key="spinner"
+                  initial={{ opacity: 0, width: 0 }}
+                  animate={{ opacity: 1, width: 'auto' }}
+                  exit={{ opacity: 0, width: 0 }}
+                >
+                  <Loader2 size={22} className="animate-spin" />
+                </motion.span>
+              )}
+              {isError && (
+                <motion.span
+                  key="retry-icon"
+                  initial={{ opacity: 0, rotate: -90 }}
+                  animate={{ opacity: 1, rotate: 0 }}
+                >
+                  <RotateCcw size={20} />
+                </motion.span>
+              )}
+            </AnimatePresence>
+
+            {/* Текст */}
+            <span className={isBusy ? 'text-lg' : ''}>
+              {getButtonLabel(nextButtonState, stateElapsed)}
+            </span>
           </motion.button>
 
           <button

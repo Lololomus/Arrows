@@ -221,6 +221,7 @@ export const API_ENDPOINTS = {
   game: {
     level: (n: number) => `/game/level/${n}`,
     complete: '/game/complete',
+    completeAndNext: '/game/complete-and-next',
     energy: '/game/energy',
     energyAd: '/game/energy/ad',
     hint: '/game/hint',

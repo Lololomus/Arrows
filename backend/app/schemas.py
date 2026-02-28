@@ -115,10 +115,19 @@ class CompleteResponse(BaseModel):
     stars: int = 0
     coins_earned: int = 0
     total_coins: Optional[int] = None
+    current_level: int
     new_level_unlocked: bool = False
+    already_completed: bool = False
     error: Optional[str] = None
     # Реферал: true если на этом уровне подтвердился реферал invitee
     referral_confirmed: bool = False
+
+
+class CompleteAndNextResponse(BaseModel):
+    """РћС‚РІРµС‚ Р°С‚РѕРјР°СЂРЅРѕРіРѕ complete + next."""
+    completion: CompleteResponse
+    next_level: Optional[LevelResponse] = None
+    next_level_exists: bool = False
 
 
 class EnergyResponse(BaseModel):

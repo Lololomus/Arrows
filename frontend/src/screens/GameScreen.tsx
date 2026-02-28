@@ -17,8 +17,8 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useMotionValue, motion } from 'framer-motion';
 import { useAppStore, useGameStore } from '../stores/store';
 import { CanvasBoard } from '../components/CanvasBoard';
-import { gameApi } from '../api/client';
-import { MAX_CELL_SIZE, MIN_CELL_SIZE } from '../config/constants';
+import { gameApi, type CompleteAndNextResponse } from '../api/client';
+import { API_ENDPOINTS, API_URL, MAX_CELL_SIZE, MIN_CELL_SIZE } from '../config/constants';
 import { clearFlyFX } from '../game/fxBridge';
 import { FXOverlay } from '../components/FXOverlay';
 import { LevelTransitionLoader } from '../components/ui/LevelTransitionLoader';
@@ -27,7 +27,9 @@ import { getLivesForDifficulty } from './game-screen/difficultyConfig';
 import { ErrorVignette } from './game-screen/ErrorVignette';
 import { GameMenuModal } from './game-screen/GameMenuModal';
 import { GameResultModal } from './game-screen/GameResultModal';
+import type { NextButtonState, PendingVictoryAction } from './game-screen/VictoryScreen';
 import { useArrowActions } from './game-screen/useArrowActions';
+import { getFreeArrows } from '../game/engine';
 import { globalIndex } from '../game/spatialIndex';
 import { useIOSGameFieldSelectionGuard } from '../hooks/useIOSGameFieldSelectionGuard';
 
@@ -58,9 +60,11 @@ const HINT_REFOCUS_SCALE_EPS = 0.02;
 const ENABLE_INTRO_CAMERA_PUSH_IN = false;
 // Server progression must stay enabled in all envs, because backend is authoritative.
 const ENABLE_SERVER_PROGRESS_PERSIST = true;
-const ENABLE_TEMP_SMART_CONTEXT = true;
 const ENABLE_GAME_DEVTOOLS = import.meta.env.DEV;
 const DEV_LEVEL_PRESETS = [35, 36, 37, 38] as const;
+
+type VictorySaveState = 'idle' | 'saving' | 'saved' | 'error';
+type VictoryNavigationState = 'idle' | 'loading_next';
 // TODO [ВАЖНЫЙ ДО РЕЛИЗА]: удалить временный smart context и вернуть обычный flow сохранения.
 
 function resolveUserCurrentLevel(rawUser: unknown): number {
@@ -141,9 +145,11 @@ interface GameDevPanelProps {
   gridSize: { width: number; height: number };
   arrowsCount: number;
   noMoreLevels: boolean;
+  isAutoSolving: boolean;
   onJumpToLevel: (level: number) => void;
   onStepLevel: (delta: number) => void;
   onReloadLevel: () => void;
+  onAutoSolve: () => void;
 }
 
 function GameDevPanel({
@@ -153,9 +159,11 @@ function GameDevPanel({
   gridSize,
   arrowsCount,
   noMoreLevels,
+  isAutoSolving,
   onJumpToLevel,
   onStepLevel,
   onReloadLevel,
+  onAutoSolve,
 }: GameDevPanelProps) {
   const [inputValue, setInputValue] = useState(() => String(currentLevel));
   const [isExpanded, setIsExpanded] = useState(false);
@@ -207,6 +215,17 @@ function GameDevPanel({
             <button onClick={() => onStepLevel(1)} className="rounded-xl bg-white/8 px-2 py-2 text-sm font-bold transition hover:bg-white/14">+1</button>
             <button onClick={() => onStepLevel(5)} className="rounded-xl bg-white/8 px-2 py-2 text-sm font-bold transition hover:bg-white/14">+5</button>
           </div>
+
+          <button
+            onClick={onAutoSolve}
+            className={`mt-2 w-full rounded-xl px-3 py-2 text-sm font-bold transition ${
+              isAutoSolving
+                ? 'bg-rose-500/20 text-rose-100 hover:bg-rose-500/30'
+                : 'bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/30'
+            }`}
+          >
+            {isAutoSolving ? 'Stop Auto Solve' : 'Auto Solve'}
+          </button>
 
           <div className="mt-2 grid grid-cols-4 gap-2">
             {DEV_LEVEL_PRESETS.map((level) => (
@@ -261,6 +280,7 @@ function GameDevPanel({
 
 export function GameScreen() {
   const user = useAppStore(s => s.user);
+  const token = useAppStore(s => s.token);
   const setUser = useAppStore(s => s.setUser);
   const setScreen = useAppStore(s => s.setScreen);
 
@@ -311,18 +331,26 @@ export function GameScreen() {
   const lastFocusedHintRef = useRef<string | null>(null);
   const panTweenFrameRef = useRef<number>(0);
   const panTweenTokenRef = useRef(0);
-  const hasManualNavigationInSessionRef = useRef(false);
+  const autoSolveTimerRef = useRef<number | null>(null);
   const completedLevelsSentRef = useRef<Set<number>>(new Set());
-  const pendingLevelCompletionRef = useRef<Set<number>>(new Set());
   const hasInitialLevelSyncRef = useRef(false);
-  const lockedNextLevelRef = useRef<number | null>(null);
-  const queuedNextLevelRef = useRef<number | null>(null);
+  const saveStartedLevelRef = useRef<number | null>(null);
+  const saveResolvedLevelRef = useRef<number | null>(null);
+  const savedNextLevelRef = useRef<number | null>(null);
+  const nextLevelExistsRef = useRef(true);
+  const pendingVictoryActionRef = useRef<PendingVictoryAction>(null);
+  const prefetchedNextLevelRef = useRef<CompleteAndNextResponse['nextLevel']>(null);
 
-  const [confirmAction, setConfirmAction] = useState<'restart' | 'menu' | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'restart' | 'menu' | 'unsaved_menu' | null>(null);
   const [noMoreLevels, setNoMoreLevels] = useState(false);
+  const [isAutoSolving, setIsAutoSolving] = useState(false);
   const [levelDifficulty, setLevelDifficulty] = useState<string | number>(1);
   const [victoryCoinsEarned, setVictoryCoinsEarned] = useState<number | undefined>(undefined);
   const [victoryTotalCoins, setVictoryTotalCoins] = useState<number | undefined>(undefined);
+  const [saveState, setSaveState] = useState<VictorySaveState>('idle');
+  const [navigationState, setNavigationState] = useState<VictoryNavigationState>('idle');
+  const [pendingVictoryAction, setPendingVictoryAction] = useState<PendingVictoryAction>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const getElapsedSeconds = useCallback(() => {
     if (levelStartTime <= 0) return 1;
@@ -336,16 +364,12 @@ export function GameScreen() {
     [status, getElapsedSeconds],
   );
 
-  useEffect(() => {
-    if (status === 'victory' && !noMoreLevels) {
-      if (lockedNextLevelRef.current == null) {
-        lockedNextLevelRef.current = gameLevel + 1;
-      }
-      return;
-    }
-    lockedNextLevelRef.current = null;
-    queuedNextLevelRef.current = null;
-  }, [status, noMoreLevels, gameLevel]);
+  const nextButtonState = useMemo<NextButtonState>(() => {
+    if (navigationState === 'loading_next') return 'loading';
+    if (saveState === 'saving') return 'saving';
+    if (saveState === 'error') return 'error';
+    return 'idle';
+  }, [navigationState, saveState]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -405,6 +429,14 @@ export function GameScreen() {
       cancelAnimationFrame(panTweenFrameRef.current);
       panTweenFrameRef.current = 0;
     }
+  }, []);
+
+  const cancelAutoSolve = useCallback(() => {
+    if (autoSolveTimerRef.current != null) {
+      window.clearTimeout(autoSolveTimerRef.current);
+      autoSolveTimerRef.current = null;
+    }
+    setIsAutoSolving(false);
   }, []);
 
   const applyScaleImmediate = useCallback((targetScale: number) => {
@@ -557,11 +589,33 @@ export function GameScreen() {
 
   // === ЗАГРУЗКА УРОВНЯ ===
   const loadLevel = useCallback(async (levelNum: number) => {
+    cancelAutoSolve();
     setStatus('loading');
     clearFlyFX();
     setNoMoreLevels(false);
     setVictoryCoinsEarned(undefined);
     setVictoryTotalCoins(undefined);
+    setSaveState('idle');
+    setNavigationState('idle');
+    setPendingVictoryAction(null);
+    setSaveError(null);
+    pendingVictoryActionRef.current = null;
+    saveStartedLevelRef.current = null;
+    saveResolvedLevelRef.current = null;
+    savedNextLevelRef.current = null;
+    nextLevelExistsRef.current = true;
+
+    const prefetched = prefetchedNextLevelRef.current;
+    prefetchedNextLevelRef.current = null;
+
+    if (prefetched && prefetched.level === levelNum) {
+      const diff = prefetched.meta?.difficulty ?? 1;
+      setLevelDifficulty(diff);
+      const livesForLevel = getLivesForDifficulty(diff);
+      initLevel(levelNum, prefetched.seed, prefetched.grid, prefetched.arrows, livesForLevel);
+      return;
+    }
+
     try {
       const levelData = await gameApi.getLevel(levelNum);
       const diff = levelData.meta?.difficulty ?? 1;
@@ -574,7 +628,7 @@ export function GameScreen() {
       else if (error?.status === 403) { alert(`🔒 Уровень ${levelNum} закрыт!`); setScreen('home'); }
       else { alert(`❌ Ошибка загрузки уровня ${levelNum}`); setScreen('home'); }
     }
-  }, [initLevel, setStatus, setScreen]);
+  }, [cancelAutoSolve, initLevel, setStatus, setScreen]);
 
   useEffect(() => {
     loadLevel(currentLevel);
@@ -589,69 +643,181 @@ export function GameScreen() {
     setCurrentLevel(resolveUserCurrentLevel(user));
   }, [user]);
 
-  useEffect(() => {
+  const setVictoryAction = useCallback((action: PendingVictoryAction) => {
+    pendingVictoryActionRef.current = action;
+    setPendingVictoryAction(action);
+  }, []);
+
+  const clearVictoryAction = useCallback(() => {
+    pendingVictoryActionRef.current = null;
+    setPendingVictoryAction(null);
+  }, []);
+
+  const navigateToSavedNextLevel = useCallback((targetLevel?: number) => {
     if (status !== 'victory') return;
-    if (noMoreLevels) return;
-    if (!ENABLE_SERVER_PROGRESS_PERSIST) return;
-    if (ENABLE_TEMP_SMART_CONTEXT && hasManualNavigationInSessionRef.current) return;
-    const completedLevel = gameLevel;
-    if (completedLevel < 1) return;
-    if (completedLevelsSentRef.current.has(completedLevel)) return;
-    if (pendingLevelCompletionRef.current.has(completedLevel)) return;
 
-    const timeSeconds = getElapsedSeconds();
-    pendingLevelCompletionRef.current.add(completedLevel);
+    const nextLevel = targetLevel ?? savedNextLevelRef.current ?? (gameLevel + 1);
+    setNavigationState('loading_next');
 
-    void (async () => {
-      try {
-        const response = await gameApi.complete({
-          level: completedLevel,
-          seed: completedLevel,
-          moves: removedArrowIds,
-          timeSeconds,
-        });
+    window.setTimeout(() => {
+      if (!nextLevelExistsRef.current) {
+        clearVictoryAction();
+        setNavigationState('idle');
+        setNoMoreLevels(true);
+        return;
+      }
 
-        if (!response.valid) {
-          pendingLevelCompletionRef.current.delete(completedLevel);
-          if (queuedNextLevelRef.current === completedLevel + 1) {
-            queuedNextLevelRef.current = null;
-          }
-          console.warn(`[Progress] Completion rejected for level ${completedLevel}: ${response.error ?? 'unknown error'}`);
+      clearVictoryAction();
+      setCurrentLevel(nextLevel);
+    }, 200);
+  }, [clearVictoryAction, gameLevel, status]);
+
+  const applyCompletionSuccess = useCallback((result: CompleteAndNextResponse, completedLevel: number) => {
+    const { completion, nextLevel, nextLevelExists } = result;
+    const pendingAction = pendingVictoryActionRef.current;
+
+    completedLevelsSentRef.current.add(completedLevel);
+    saveResolvedLevelRef.current = completedLevel;
+    savedNextLevelRef.current = completion.currentLevel;
+    nextLevelExistsRef.current = nextLevelExists;
+    prefetchedNextLevelRef.current = nextLevel && nextLevel.level === completion.currentLevel ? nextLevel : null;
+
+    setVictoryCoinsEarned(completion.coinsEarned);
+    const nextCoinsTotal = completion.totalCoins ?? ((user?.coins ?? 0) + completion.coinsEarned);
+    setVictoryTotalCoins(nextCoinsTotal);
+
+    if (user) {
+      setUser({
+        ...user,
+        currentLevel: completion.currentLevel,
+        coins: nextCoinsTotal,
+      });
+    }
+
+    setSaveState('saved');
+    setSaveError(null);
+    setNavigationState('idle');
+    setConfirmAction(null);
+
+    if (pendingAction === 'menu') {
+      clearVictoryAction();
+      setScreen('home');
+      return;
+    }
+
+    if (pendingAction === 'next') {
+      navigateToSavedNextLevel(completion.currentLevel);
+    }
+  }, [clearVictoryAction, navigateToSavedNextLevel, setScreen, setUser, user]);
+
+  const startVictorySave = useCallback(async (completedLevel: number, force = false) => {
+    if (status !== 'victory' || noMoreLevels) return;
+
+    if (!ENABLE_SERVER_PROGRESS_PERSIST) {
+      completedLevelsSentRef.current.add(completedLevel);
+      saveResolvedLevelRef.current = completedLevel;
+      savedNextLevelRef.current = completedLevel + 1;
+      nextLevelExistsRef.current = true;
+      setSaveState('saved');
+      setSaveError(null);
+      return;
+    }
+
+    if (!force) {
+      if (completedLevelsSentRef.current.has(completedLevel)) return;
+      if (saveStartedLevelRef.current === completedLevel) return;
+      if (saveResolvedLevelRef.current === completedLevel) return;
+    } else if (saveState === 'saving' && saveStartedLevelRef.current === completedLevel) {
+      return;
+    }
+
+    saveStartedLevelRef.current = completedLevel;
+    saveResolvedLevelRef.current = null;
+    setSaveState('saving');
+    setNavigationState('idle');
+    setSaveError(null);
+    setConfirmAction(null);
+
+    try {
+      const result = await gameApi.completeAndNext({
+        level: completedLevel,
+        seed: completedLevel,
+        moves: removedArrowIds,
+        timeSeconds: getElapsedSeconds(),
+      });
+
+      if (!result.completion.valid) {
+        saveResolvedLevelRef.current = completedLevel;
+        setSaveState('error');
+        setSaveError(result.completion.error ?? 'Решение не принято сервером');
+        return;
+      }
+
+      applyCompletionSuccess(result, completedLevel);
+    } catch (error: any) {
+      console.error('[startVictorySave] Failed:', error);
+      saveResolvedLevelRef.current = completedLevel;
+      setSaveState('error');
+
+      if (typeof error?.message === 'string') {
+        const message = error.message.toLowerCase();
+        if (message.includes('fetch') || message.includes('network')) {
+          setSaveError('Нет соединения. Проверьте интернет.');
           return;
         }
-
-        completedLevelsSentRef.current.add(completedLevel);
-        pendingLevelCompletionRef.current.delete(completedLevel);
-        setVictoryCoinsEarned(response.coinsEarned);
-        const nextCoinsTotal = response.totalCoins ?? ((user?.coins ?? 0) + response.coinsEarned);
-        setVictoryTotalCoins(nextCoinsTotal);
-
-        if (user) {
-          const nextUnlockedLevel = response.newLevelUnlocked
-            ? Math.max(resolveUserCurrentLevel(user), completedLevel + 1)
-            : resolveUserCurrentLevel(user);
-          const nextUser = {
-            ...user,
-            currentLevel: nextUnlockedLevel,
-            coins: nextCoinsTotal,
-          };
-          setUser(nextUser);
-        }
-
-        if (queuedNextLevelRef.current === completedLevel + 1) {
-          const queuedLevel = queuedNextLevelRef.current;
-          queuedNextLevelRef.current = null;
-          setCurrentLevel(queuedLevel);
-        }
-      } catch (error) {
-        pendingLevelCompletionRef.current.delete(completedLevel);
-        if (queuedNextLevelRef.current === completedLevel + 1) {
-          queuedNextLevelRef.current = null;
-        }
-        console.error('[Progress] Failed to persist level completion:', error);
       }
-    })();
-  }, [status, noMoreLevels, gameLevel, removedArrowIds, user, setUser, getElapsedSeconds, setCurrentLevel]);
+
+      if (typeof error?.status === 'number' && error.status >= 500) {
+        setSaveError('Ошибка сервера. Попробуйте ещё раз.');
+        return;
+      }
+
+      setSaveError(error?.message ?? 'Не удалось сохранить прогресс');
+    }
+  }, [
+    applyCompletionSuccess,
+    getElapsedSeconds,
+    noMoreLevels,
+    removedArrowIds,
+    saveState,
+    status,
+  ]);
+
+  useEffect(() => {
+    if (!ENABLE_SERVER_PROGRESS_PERSIST) return;
+    if (status !== 'victory' || noMoreLevels) return;
+    if (completedLevelsSentRef.current.has(gameLevel)) return;
+    if (saveStartedLevelRef.current === gameLevel) return;
+    if (saveResolvedLevelRef.current === gameLevel) return;
+
+    void startVictorySave(gameLevel);
+  }, [gameLevel, noMoreLevels, startVictorySave, status]);
+
+  useEffect(() => {
+    if (!ENABLE_SERVER_PROGRESS_PERSIST) return;
+    if (status !== 'victory' || noMoreLevels) return;
+    if (saveState !== 'saving' || !token) return;
+
+    const handler = () => {
+      void fetch(`${API_URL}${API_ENDPOINTS.game.complete}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          level: gameLevel,
+          seed: gameLevel,
+          moves: removedArrowIds,
+          time_seconds: getElapsedSeconds(),
+        }),
+        keepalive: true,
+      }).catch(() => undefined);
+    };
+
+    window.addEventListener('pagehide', handler);
+    return () => window.removeEventListener('pagehide', handler);
+  }, [gameLevel, getElapsedSeconds, noMoreLevels, removedArrowIds, saveState, status, token]);
 
   // === КИНЕМАТОГРАФИЧНОЕ ИНТРО ===
   useEffect(() => {
@@ -867,42 +1033,147 @@ export function GameScreen() {
     showHint,
   });
 
+  const handleAutoSolve = useCallback(() => {
+    if (isAutoSolving) {
+      cancelAutoSolve();
+      return;
+    }
+
+    const step = () => {
+      const state = useGameStore.getState();
+      if (state.status !== 'playing') {
+        cancelAutoSolve();
+        return;
+      }
+
+      const free = getFreeArrows(state.arrows, {
+        width: state.gridSize.width,
+        height: state.gridSize.height,
+      });
+
+      if (free.length === 0) {
+        cancelAutoSolve();
+        return;
+      }
+
+      handleArrowClick(free[0].id);
+      autoSolveTimerRef.current = window.setTimeout(step, 90);
+    };
+
+    setIsAutoSolving(true);
+    step();
+  }, [cancelAutoSolve, handleArrowClick, isAutoSolving]);
+
+  useEffect(() => {
+    if (status === 'playing') return;
+    cancelAutoSolve();
+  }, [cancelAutoSolve, status]);
+
+  useEffect(() => cancelAutoSolve, [cancelAutoSolve]);
+
   const onMenuClick = useCallback(() => { if (!isIntroAnimating) setConfirmAction('menu'); }, [isIntroAnimating]);
   const jumpToLevel = useCallback((level: number) => {
     const nextLevel = Math.max(1, Math.floor(level));
-    hasManualNavigationInSessionRef.current = true;
-    queuedNextLevelRef.current = null;
-    lockedNextLevelRef.current = null;
+    clearVictoryAction();
     setConfirmAction(null);
     setCurrentLevel(nextLevel);
-  }, []);
+  }, [clearVictoryAction]);
   const stepLevel = useCallback((delta: number) => {
     jumpToLevel(currentLevel + delta);
   }, [currentLevel, jumpToLevel]);
   const reloadCurrentLevel = useCallback(() => {
-    hasManualNavigationInSessionRef.current = true;
-    queuedNextLevelRef.current = null;
-    lockedNextLevelRef.current = null;
+    clearVictoryAction();
     setConfirmAction(null);
     loadLevel(currentLevel);
-  }, [currentLevel, loadLevel]);
+  }, [clearVictoryAction, currentLevel, loadLevel]);
   const confirmRestart = useCallback(() => {
     reloadCurrentLevel();
   }, [reloadCurrentLevel]);
   const confirmMenu = useCallback(() => { setConfirmAction(null); setScreen('home'); }, [setScreen]);
   const handleNextLevel = useCallback(() => {
     if (status !== 'victory' || noMoreLevels) return;
-    const strictNextLevel = lockedNextLevelRef.current ?? (gameLevel + 1);
-    if (ENABLE_SERVER_PROGRESS_PERSIST) {
-      const completedLevel = strictNextLevel - 1;
-      const isCompletionSynced = completedLevelsSentRef.current.has(completedLevel);
-      if (!isCompletionSynced) {
-        queuedNextLevelRef.current = strictNextLevel;
-        return;
-      }
+
+    if (!ENABLE_SERVER_PROGRESS_PERSIST) {
+      setCurrentLevel(gameLevel + 1);
+      return;
     }
-    setCurrentLevel(strictNextLevel);
-  }, [status, noMoreLevels, gameLevel]);
+
+    setVictoryAction('next');
+
+    if (navigationState === 'loading_next') return;
+    if (saveState === 'saved') {
+      navigateToSavedNextLevel();
+      return;
+    }
+    if (saveState === 'saving') return;
+
+    void startVictorySave(gameLevel, true);
+  }, [
+    gameLevel,
+    navigateToSavedNextLevel,
+    navigationState,
+    noMoreLevels,
+    saveState,
+    setVictoryAction,
+    startVictorySave,
+    status,
+  ]);
+
+  const handleVictoryRetry = useCallback(() => {
+    if (status !== 'victory' || noMoreLevels) return;
+    void startVictorySave(gameLevel, true);
+  }, [gameLevel, noMoreLevels, startVictorySave, status]);
+
+  const handleVictoryMenu = useCallback(() => {
+    if (status !== 'victory') {
+      confirmMenu();
+      return;
+    }
+
+    if (navigationState === 'loading_next') return;
+
+    if (!ENABLE_SERVER_PROGRESS_PERSIST) {
+      confirmMenu();
+      return;
+    }
+
+    if (saveState === 'saved') {
+      clearVictoryAction();
+      confirmMenu();
+      return;
+    }
+
+    if (saveState === 'error') {
+      setConfirmAction('unsaved_menu');
+      return;
+    }
+
+    setVictoryAction('menu');
+    if (saveState === 'saving') return;
+
+    void startVictorySave(gameLevel, true);
+  }, [
+    clearVictoryAction,
+    confirmMenu,
+    gameLevel,
+    navigationState,
+    saveState,
+    setVictoryAction,
+    startVictorySave,
+    status,
+  ]);
+
+  const confirmRetryUnsavedMenu = useCallback(() => {
+    setConfirmAction(null);
+    setVictoryAction('menu');
+    void startVictorySave(gameLevel, true);
+  }, [gameLevel, setVictoryAction, startVictorySave]);
+
+  const confirmExitUnsavedMenu = useCallback(() => {
+    setConfirmAction(null);
+    clearVictoryAction();
+    setScreen('home');
+  }, [clearVictoryAction, setScreen]);
 
   return (
     <div
@@ -972,9 +1243,11 @@ export function GameScreen() {
           gridSize={gridSize}
           arrowsCount={arrows.length}
           noMoreLevels={noMoreLevels}
+          isAutoSolving={isAutoSolving}
           onJumpToLevel={jumpToLevel}
           onStepLevel={stepLevel}
           onReloadLevel={reloadCurrentLevel}
+          onAutoSolve={handleAutoSolve}
         />
       )}
 
@@ -994,6 +1267,8 @@ export function GameScreen() {
         onCancel={() => setConfirmAction(null)}
         onConfirmRestart={confirmRestart}
         onConfirmMenu={confirmMenu}
+        onConfirmRetrySave={confirmRetryUnsavedMenu}
+        onConfirmExitUnsaved={confirmExitUnsavedMenu}
       />
 
       <GameResultModal
@@ -1004,9 +1279,14 @@ export function GameScreen() {
         coinsEarned={victoryCoinsEarned}
         totalCoins={victoryTotalCoins ?? user?.coins ?? 0}
         noMoreLevels={noMoreLevels}
+        nextButtonState={nextButtonState}
+        pendingAction={pendingVictoryAction}
+        nextButtonError={saveError}
         onNextLevel={handleNextLevel}
-        onRetry={confirmRestart}
-        onMenu={confirmMenu}
+        onVictoryRetry={handleVictoryRetry}
+        onDefeatRetry={confirmRestart}
+        onVictoryMenu={handleVictoryMenu}
+        onDefeatMenu={confirmMenu}
       />
     </div>
   );

@@ -1,21 +1,13 @@
 /**
- * Arrow Puzzle — Game Result Modal (Orchestrator)
+ * Arrow Puzzle — Game Result Modal (OPTIMIZED)
  *
- * Оркестрирует отображение VictoryScreen или DefeatScreen
- * на основе текущего status. Заменяет старую простую модалку.
- *
- * Props:
- * - status: текущий статус игры
- * - difficulty: сложность из level.meta.difficulty (строка из JSON или legacy-число)
- * - currentLevel: номер уровня
- * - timeSeconds: время прохождения
- * - coinsEarned: монеты (опционально, fallback на конфиг)
- * - noMoreLevels: флаг «уровни закончились»
- * - onNextLevel / onRetry / onMenu: callbacks
+ * Изменения:
+ * 1. Прокидывает nextButtonState и nextButtonError в VictoryScreen
+ * 2. Прокидывает onRetry для retry при ошибке
  */
 
 import { AnimatePresence } from 'framer-motion';
-import { VictoryScreen } from './VictoryScreen';
+import { VictoryScreen, type NextButtonState, type PendingVictoryAction } from './VictoryScreen';
 import { DefeatScreen } from './DefeatScreen';
 import type { DifficultyValue } from './difficultyConfig';
 
@@ -27,9 +19,16 @@ interface GameResultModalProps {
   coinsEarned?: number;
   totalCoins?: number;
   noMoreLevels: boolean;
+  /** Состояние кнопки «Следующий» */
+  nextButtonState?: NextButtonState;
+  pendingAction?: PendingVictoryAction;
+  /** Текст ошибки */
+  nextButtonError?: string | null;
   onNextLevel: () => void;
-  onRetry: () => void;
-  onMenu: () => void;
+  onVictoryRetry: () => void;
+  onDefeatRetry: () => void;
+  onVictoryMenu: () => void;
+  onDefeatMenu: () => void;
 }
 
 export function GameResultModal({
@@ -40,9 +39,14 @@ export function GameResultModal({
   coinsEarned,
   totalCoins,
   noMoreLevels,
+  nextButtonState,
+  pendingAction,
+  nextButtonError,
   onNextLevel,
-  onRetry,
-  onMenu,
+  onVictoryRetry,
+  onDefeatRetry,
+  onVictoryMenu,
+  onDefeatMenu,
 }: GameResultModalProps) {
   const showVictory = status === 'victory' && !noMoreLevels;
   const showDefeat = status === 'defeat';
@@ -56,15 +60,19 @@ export function GameResultModal({
           timeSeconds={timeSeconds}
           coinsEarned={coinsEarned}
           totalCoins={totalCoins}
+          nextButtonState={nextButtonState}
+          pendingAction={pendingAction}
+          nextButtonError={nextButtonError}
           onNextLevel={onNextLevel}
-          onMenu={onMenu}
+          onRetry={onVictoryRetry}
+          onMenu={onVictoryMenu}
         />
       )}
       {showDefeat && (
         <DefeatScreen
           level={currentLevel}
-          onRetry={onRetry}
-          onMenu={onMenu}
+          onRetry={onDefeatRetry}
+          onMenu={onDefeatMenu}
         />
       )}
     </AnimatePresence>

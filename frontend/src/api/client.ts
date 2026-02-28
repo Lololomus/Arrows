@@ -1,6 +1,9 @@
 /**
- * Arrow Puzzle - API Client
- * * HTTP клиент для взаимодействия с backend API.
+ * Arrow Puzzle - API Client (OPTIMIZED)
+ *
+ * Изменения:
+ * 1. Добавлен gameApi.completeAndNext() — один запрос вместо двух
+ * 2. Типы CompleteAndNextResponse
  */
 
 import { API_URL, API_ENDPOINTS } from '../config/constants';
@@ -10,6 +13,7 @@ import type {
   LevelResponse,
   CompleteRequest,
   CompleteResponse,
+  CompleteAndNextResponse,
   EnergyResponse,
   HintResponse,
   ShopCatalog,
@@ -22,14 +26,25 @@ import type {
   ReferralLeaderboardResponse,
 } from '../game/types';
 
+// === NEW: Тип ответа от complete-and-next ===
+export type { CompleteAndNextResponse } from '../game/types';
+
 interface RawCompleteResponse {
   valid: boolean;
   stars?: number;
   coins_earned?: number;
   total_coins?: number;
+  current_level?: number;
   new_level_unlocked?: boolean;
+  already_completed?: boolean;
   error?: string;
   referral_confirmed?: boolean;
+}
+
+interface RawCompleteAndNextResponse {
+  completion: RawCompleteResponse & Partial<CompleteResponse>;
+  next_level: LevelResponse | null;
+  next_level_exists?: boolean;
 }
 
 // --- Raw leaderboard types (snake_case from backend) ---
@@ -114,7 +129,30 @@ function normalizeUserResponse(raw: RawUserResponse): User {
   };
 }
 
-// Определяем, запущены ли мы в режиме разработки
+function normalizeCompleteResponse(
+  raw: RawCompleteResponse & Partial<CompleteResponse>,
+  requestedLevel?: number,
+): CompleteResponse {
+  const newLevelUnlocked = raw.newLevelUnlocked ?? raw.new_level_unlocked ?? false;
+  const currentLevel = raw.currentLevel
+    ?? raw.current_level
+    ?? (typeof requestedLevel === 'number'
+      ? (newLevelUnlocked ? requestedLevel + 1 : requestedLevel)
+      : 1);
+
+  return {
+    valid: Boolean(raw.valid),
+    stars: raw.stars ?? 0,
+    coinsEarned: raw.coinsEarned ?? raw.coins_earned ?? 0,
+    totalCoins: raw.totalCoins ?? raw.total_coins,
+    currentLevel,
+    newLevelUnlocked,
+    alreadyCompleted: raw.alreadyCompleted ?? raw.already_completed ?? false,
+    error: raw.error,
+    referralConfirmed: raw.referralConfirmed ?? raw.referral_confirmed ?? false,
+  };
+}
+
 const IS_DEV = import.meta.env.DEV;
 const DEV_AUTH_ENABLED = ['1', 'true', 'yes', 'on'].includes(
   String(import.meta.env.VITE_ENABLE_DEV_AUTH || '').toLowerCase()
@@ -152,44 +190,30 @@ async function request<T>(
     ...options.headers,
   };
 
-  // Dev заголовок передаем только когда это явно включено через env.
   if (DEV_AUTH_ENABLED && DEV_AUTH_USER_ID) {
     (headers as Record<string, string>)['X-Dev-User-Id'] = DEV_AUTH_USER_ID;
-  }
-
-  if (IS_DEV) {
-    console.log(
-      '🔧 [client] IS_DEV:',
-      IS_DEV,
-      '| DEV_AUTH_ENABLED:',
-      DEV_AUTH_ENABLED,
-      '| headers:',
-      JSON.stringify(headers)
-    );
   }
 
   const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,
     headers,
   });
-  
-  // Парсим ответ
+
   let data: any;
   const contentType = response.headers.get('content-type');
-  
+
   if (contentType?.includes('application/json')) {
     data = await response.json();
   } else {
     data = await response.text();
   }
-  
-  // Обрабатываем ошибки
+
   if (!response.ok) {
     const message = typeof data === 'object' ? data.detail || 'Unknown error' : data;
     const code = typeof data === 'object' ? data.code : undefined;
     throw new ApiError(response.status, message, code);
   }
-  
+
   return data as T;
 }
 
@@ -198,9 +222,6 @@ async function request<T>(
 // ============================================
 
 export const authApi = {
-  /**
-   * Авторизация через Telegram
-   */
   telegram: async (initData: string): Promise<AuthResponse> => {
     const raw = await request<{ token: string; user: RawUserResponse }>(API_ENDPOINTS.auth.telegram, {
       method: 'POST',
@@ -212,9 +233,6 @@ export const authApi = {
     };
   },
 
-  /**
-   * Получить текущего пользователя (работает и для dev bypass)
-   */
   getMe: async (): Promise<User> =>
     normalizeUserResponse(await request<RawUserResponse>(API_ENDPOINTS.auth.me)),
 };
@@ -224,15 +242,9 @@ export const authApi = {
 // ============================================
 
 export const gameApi = {
-  /**
-   * Получить уровень
-   */
   getLevel: (level: number): Promise<LevelResponse> =>
     request<LevelResponse>(API_ENDPOINTS.game.level(level)),
-  
-  /**
-   * Завершить уровень
-   */
+
   complete: async (data: CompleteRequest): Promise<CompleteResponse> => {
     const raw = await request<RawCompleteResponse | CompleteResponse>(API_ENDPOINTS.game.complete, {
       method: 'POST',
@@ -243,49 +255,86 @@ export const gameApi = {
         time_seconds: data.timeSeconds,
       }),
     });
-
-    const normalized = raw as RawCompleteResponse & Partial<CompleteResponse>;
-    const coinsEarned = normalized.coinsEarned ?? normalized.coins_earned ?? 0;
-    const totalCoins = normalized.totalCoins ?? normalized.total_coins;
-    const newLevelUnlocked = normalized.newLevelUnlocked ?? normalized.new_level_unlocked ?? false;
-    const referralConfirmed = normalized.referralConfirmed ?? normalized.referral_confirmed ?? false;
-
-    return {
-      valid: Boolean(normalized.valid),
-      stars: normalized.stars ?? 0,
-      coinsEarned,
-      totalCoins,
-      newLevelUnlocked,
-      error: normalized.error,
-      referralConfirmed,
-    };
+    return normalizeCompleteResponse(raw as RawCompleteResponse & Partial<CompleteResponse>, data.level);
   },
-  
+
   /**
-   * Получить энергию
+   * === NEW: Атомарный complete + загрузка следующего уровня ===
+   * Один запрос вместо двух. Сервер проверяет, сохраняет, и сразу
+   * возвращает данные следующего уровня (если он существует).
    */
+  completeAndNext: async (data: CompleteRequest): Promise<CompleteAndNextResponse> => {
+    try {
+      const raw = await request<RawCompleteAndNextResponse>(
+        API_ENDPOINTS.game.completeAndNext ?? '/game/complete-and-next',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            level: data.level,
+            seed: data.seed,
+            moves: data.moves,
+            time_seconds: data.timeSeconds,
+          }),
+        }
+      );
+      return {
+        completion: normalizeCompleteResponse(raw.completion, data.level),
+        nextLevel: raw.next_level ?? null,
+        nextLevelExists: raw.next_level_exists ?? raw.next_level != null,
+      };
+    } catch (error) {
+      if (!(error instanceof ApiError) || ![404, 405, 501].includes(error.status)) {
+        throw error;
+      }
+
+      const completion = await gameApi.complete(data);
+      const shouldTryPrefetch = completion.valid && completion.currentLevel > data.level;
+      if (!shouldTryPrefetch) {
+        return {
+          completion,
+          nextLevel: null,
+          nextLevelExists: false,
+        };
+      }
+
+      try {
+        const nextLevel = await gameApi.getLevel(completion.currentLevel);
+        return {
+          completion,
+          nextLevel,
+          nextLevelExists: true,
+        };
+      } catch (prefetchError) {
+        if (prefetchError instanceof ApiError && prefetchError.status === 404) {
+          return {
+            completion,
+            nextLevel: null,
+            nextLevelExists: false,
+          };
+        }
+        return {
+          completion,
+          nextLevel: null,
+          nextLevelExists: true,
+        };
+      }
+    }
+  },
+
   getEnergy: (): Promise<EnergyResponse> =>
     request<EnergyResponse>(API_ENDPOINTS.game.energy),
-  
-  /**
-   * Сброс прогресса (DEV)
-   */
+
   resetProgress: (): Promise<{ success: boolean }> =>
-    request<{ success: boolean }>(API_ENDPOINTS.game.reset || '/game/reset', { // Fallback если в constants нет пути
+    request<{ success: boolean }>(API_ENDPOINTS.game.reset || '/game/reset', {
       method: 'POST',
     }),
-  /**
-   * Восстановить энергию за рекламу
-   */
+
   restoreEnergyAd: (adId: string): Promise<{ energy: number }> =>
     request<{ energy: number }>(API_ENDPOINTS.game.energyAd, {
       method: 'POST',
       body: JSON.stringify({ ad_id: adId }),
     }),
-  
-  /**
-   * Получить подсказку
-   */
+
   getHint: (
     level: number,
     seed: number,
@@ -306,15 +355,9 @@ export const gameApi = {
 // ============================================
 
 export const shopApi = {
-  /**
-   * Получить каталог
-   */
   getCatalog: (): Promise<ShopCatalog> =>
     request<ShopCatalog>(API_ENDPOINTS.shop.catalog),
-  
-  /**
-   * Покупка за монеты
-   */
+
   purchaseCoins: (
     itemType: string,
     itemId: string
@@ -323,10 +366,7 @@ export const shopApi = {
       method: 'POST',
       body: JSON.stringify({ item_type: itemType, item_id: itemId }),
     }),
-  
-  /**
-   * Покупка за Stars
-   */
+
   purchaseStars: (
     itemType: string,
     itemId: string
@@ -335,10 +375,7 @@ export const shopApi = {
       method: 'POST',
       body: JSON.stringify({ item_type: itemType, item_id: itemId }),
     }),
-  
-  /**
-   * Покупка за TON
-   */
+
   purchaseTon: (
     itemType: string,
     itemId: string
@@ -357,46 +394,26 @@ export const shopApi = {
 // ============================================
 
 export const socialApi = {
-  /**
-   * Получить реферальный код
-   */
   getReferralCode: (): Promise<{ code: string; link: string }> =>
     request<{ code: string; link: string }>(API_ENDPOINTS.social.referralCode),
-  
-  /**
-   * Применить реферальный код.
-   * Invitee получает +100 монет СРАЗУ.
-   * reason: 'already_referred' | 'self_referral' | 'invalid_code' | 'account_too_old'
-   */
+
   applyReferral: (code: string): Promise<ReferralApplyResponse> =>
     request<ReferralApplyResponse>(API_ENDPOINTS.social.applyReferral, {
       method: 'POST',
       body: JSON.stringify({ code }),
     }),
-  
-  /**
-   * Статистика рефералов текущего пользователя
-   */
+
   getReferralStats: (): Promise<ReferralStatsResponse> =>
     request<ReferralStatsResponse>(API_ENDPOINTS.social.referralStats),
-  
-  /**
-   * Список приглашённых рефералов (для вкладки «Мои друзья»)
-   */
+
   getMyReferrals: (): Promise<ReferralListResponse> =>
     request<ReferralListResponse>(API_ENDPOINTS.social.referralList),
-  
-  /**
-   * Глобальный лидерборд рефоводов
-   */
+
   getReferralLeaderboard: (limit = 100): Promise<ReferralLeaderboardResponse> =>
     request<ReferralLeaderboardResponse>(
       `${API_ENDPOINTS.social.referralLeaderboard}?limit=${limit}`
     ),
-  
-  /**
-   * Получить лидерборд
-   */
+
   getLeaderboard: async (
     type: 'global' | 'weekly' | 'arcade',
     limit = 100
@@ -407,25 +424,16 @@ export const socialApi = {
     return normalizeLeaderboardResponse(raw);
   },
 
-  /**
-   * Лидерборд среди друзей (приглашённых)
-   */
   getFriendsLeaderboard: async (): Promise<LeaderboardResponse> => {
     const raw = await request<RawLeaderboardResponse>(
       API_ENDPOINTS.social.friendsLeaderboard
     );
     return normalizeLeaderboardResponse(raw);
   },
-  
-  /**
-   * Получить каналы для подписки
-   */
+
   getChannels: (): Promise<RewardChannel[]> =>
     request<RewardChannel[]>(API_ENDPOINTS.social.channels),
-  
-  /**
-   * Получить награду за подписку
-   */
+
   claimChannel: (channelId: string): Promise<{ success: boolean; coins: number }> =>
     request<{ success: boolean; coins: number }>(API_ENDPOINTS.social.claimChannel, {
       method: 'POST',
@@ -437,9 +445,6 @@ export const socialApi = {
 // HELPER FUNCTIONS
 // ============================================
 
-/**
- * Проверка доступности API
- */
 export const checkApiHealth = async (): Promise<boolean> => {
   try {
     await fetch(`${API_URL}/health`, { method: 'GET' });
@@ -449,33 +454,19 @@ export const checkApiHealth = async (): Promise<boolean> => {
   }
 };
 
-/**
- * Обработчик ошибок API
- */
 export const handleApiError = (error: unknown): string => {
   if (error instanceof ApiError) {
     switch (error.status) {
-      case 401:
-        return 'Требуется авторизация';
-      case 403:
-        return 'Доступ запрещён';
-      case 404:
-        return 'Не найдено';
+      case 401: return 'Требуется авторизация';
+      case 403: return 'Доступ запрещён';
+      case 404: return 'Не найдено';
       case 400:
-        if (error.code === 'NO_ENERGY') {
-          return 'Недостаточно энергии';
-        }
+        if (error.code === 'NO_ENERGY') return 'Недостаточно энергии';
         return error.message;
-      case 500:
-        return 'Ошибка сервера';
-      default:
-        return error.message;
+      case 500: return 'Ошибка сервера';
+      default: return error.message;
     }
   }
-  
-  if (error instanceof Error) {
-    return error.message;
-  }
-  
+  if (error instanceof Error) return error.message;
   return 'Неизвестная ошибка';
 };

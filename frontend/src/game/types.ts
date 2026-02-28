@@ -324,10 +324,18 @@ export interface CompleteResponse {
   stars: number;
   coinsEarned: number;
   totalCoins?: number;
+  currentLevel: number;
   newLevelUnlocked: boolean;
+  alreadyCompleted: boolean;
   error?: string;
   /** true если на этом уровне подтвердился реферал (invitee достиг уровня подтверждения) */
   referralConfirmed?: boolean;
+}
+
+export interface CompleteAndNextResponse {
+  completion: CompleteResponse;
+  nextLevel: LevelResponse | null;
+  nextLevelExists: boolean;
 }
 
 /** Ответ энергии */
