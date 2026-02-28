@@ -59,6 +59,8 @@ const ENABLE_INTRO_CAMERA_PUSH_IN = false;
 // Server progression must stay enabled in all envs, because backend is authoritative.
 const ENABLE_SERVER_PROGRESS_PERSIST = true;
 const ENABLE_TEMP_SMART_CONTEXT = true;
+const ENABLE_GAME_DEVTOOLS = import.meta.env.DEV;
+const DEV_LEVEL_PRESETS = [35, 36, 37, 38] as const;
 // TODO [ВАЖНЫЙ ДО РЕЛИЗА]: удалить временный smart context и вернуть обычный flow сохранения.
 
 function resolveUserCurrentLevel(rawUser: unknown): number {
@@ -130,6 +132,131 @@ function clampPan(x: number, y: number, bounds: PanBounds): { x: number; y: numb
     x: clamp(x, bounds.minX, bounds.maxX),
     y: clamp(y, bounds.minY, bounds.maxY),
   };
+}
+
+interface GameDevPanelProps {
+  currentLevel: number;
+  gameLevel: number;
+  status: string;
+  gridSize: { width: number; height: number };
+  arrowsCount: number;
+  noMoreLevels: boolean;
+  onJumpToLevel: (level: number) => void;
+  onStepLevel: (delta: number) => void;
+  onReloadLevel: () => void;
+}
+
+function GameDevPanel({
+  currentLevel,
+  gameLevel,
+  status,
+  gridSize,
+  arrowsCount,
+  noMoreLevels,
+  onJumpToLevel,
+  onStepLevel,
+  onReloadLevel,
+}: GameDevPanelProps) {
+  const [inputValue, setInputValue] = useState(() => String(currentLevel));
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  useEffect(() => {
+    setInputValue(String(currentLevel));
+  }, [currentLevel]);
+
+  const submitJump = useCallback(() => {
+    const nextLevel = Number(inputValue);
+    if (!Number.isFinite(nextLevel)) return;
+    onJumpToLevel(nextLevel);
+  }, [inputValue, onJumpToLevel]);
+
+  return (
+    <div
+      className="absolute right-3 z-[120] w-[min(280px,calc(100vw-24px))] text-white pointer-events-auto"
+      style={{ top: 'calc(max(env(safe-area-inset-top), 12px) + 12px)' }}
+    >
+      <div className="flex justify-end">
+        <button
+          onClick={() => setIsExpanded((value) => !value)}
+          className="flex items-center gap-2 rounded-2xl border border-amber-400/35 bg-slate-950/92 px-3 py-2 shadow-[0_16px_40px_rgba(0,0,0,0.45)] backdrop-blur-md transition hover:bg-slate-900/95"
+        >
+          <span className="text-[10px] font-black uppercase tracking-[0.24em] text-amber-300/85">Dev</span>
+          <span className="text-sm font-bold leading-none">Tools</span>
+          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-bold tabular-nums text-white/70">
+            {currentLevel}
+          </span>
+          <span className="text-xs font-black text-white/70">{isExpanded ? '−' : '+'}</span>
+        </button>
+      </div>
+
+      {isExpanded && (
+        <div className="mt-2 rounded-2xl border border-amber-400/30 bg-slate-950/88 p-3 shadow-[0_16px_40px_rgba(0,0,0,0.45)] backdrop-blur-md">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-bold leading-none">Level Tools</div>
+            </div>
+            <div className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-bold tabular-nums text-white/70">
+              UI {currentLevel} / Store {gameLevel}
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-5 gap-2">
+            <button onClick={() => onStepLevel(-5)} className="rounded-xl bg-white/8 px-2 py-2 text-sm font-bold transition hover:bg-white/14">-5</button>
+            <button onClick={() => onStepLevel(-1)} className="rounded-xl bg-white/8 px-2 py-2 text-sm font-bold transition hover:bg-white/14">-1</button>
+            <button onClick={onReloadLevel} className="rounded-xl bg-amber-500/15 px-2 py-2 text-sm font-bold text-amber-200 transition hover:bg-amber-500/25">Reload</button>
+            <button onClick={() => onStepLevel(1)} className="rounded-xl bg-white/8 px-2 py-2 text-sm font-bold transition hover:bg-white/14">+1</button>
+            <button onClick={() => onStepLevel(5)} className="rounded-xl bg-white/8 px-2 py-2 text-sm font-bold transition hover:bg-white/14">+5</button>
+          </div>
+
+          <div className="mt-2 grid grid-cols-4 gap-2">
+            {DEV_LEVEL_PRESETS.map((level) => (
+              <button
+                key={level}
+                onClick={() => onJumpToLevel(level)}
+                className={`rounded-xl px-2 py-2 text-sm font-bold transition ${
+                  level === currentLevel
+                    ? 'bg-cyan-500/25 text-cyan-100'
+                    : 'bg-white/8 text-white/85 hover:bg-white/14'
+                }`}
+              >
+                {level}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-2 flex gap-2">
+            <input
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value.replace(/[^\d]/g, ''))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  submitJump();
+                }
+              }}
+              className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm font-semibold text-white outline-none placeholder:text-white/25"
+              placeholder="Level"
+            />
+            <button
+              onClick={submitJump}
+              className="rounded-xl bg-cyan-500/20 px-3 py-2 text-sm font-bold text-cyan-100 transition hover:bg-cyan-500/30"
+            >
+              Go
+            </button>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] font-medium text-white/60">
+            <div>Status: <span className="text-white/85">{status}</span></div>
+            <div>Arrows: <span className="text-white/85">{arrowsCount}</span></div>
+            <div>Grid: <span className="text-white/85">{gridSize.width}x{gridSize.height}</span></div>
+            <div>End: <span className="text-white/85">{noMoreLevels ? 'yes' : 'no'}</span></div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function GameScreen() {
@@ -741,7 +868,27 @@ export function GameScreen() {
   });
 
   const onMenuClick = useCallback(() => { if (!isIntroAnimating) setConfirmAction('menu'); }, [isIntroAnimating]);
-  const confirmRestart = useCallback(() => { setConfirmAction(null); loadLevel(currentLevel); }, [currentLevel, loadLevel]);
+  const jumpToLevel = useCallback((level: number) => {
+    const nextLevel = Math.max(1, Math.floor(level));
+    hasManualNavigationInSessionRef.current = true;
+    queuedNextLevelRef.current = null;
+    lockedNextLevelRef.current = null;
+    setConfirmAction(null);
+    setCurrentLevel(nextLevel);
+  }, []);
+  const stepLevel = useCallback((delta: number) => {
+    jumpToLevel(currentLevel + delta);
+  }, [currentLevel, jumpToLevel]);
+  const reloadCurrentLevel = useCallback(() => {
+    hasManualNavigationInSessionRef.current = true;
+    queuedNextLevelRef.current = null;
+    lockedNextLevelRef.current = null;
+    setConfirmAction(null);
+    loadLevel(currentLevel);
+  }, [currentLevel, loadLevel]);
+  const confirmRestart = useCallback(() => {
+    reloadCurrentLevel();
+  }, [reloadCurrentLevel]);
   const confirmMenu = useCallback(() => { setConfirmAction(null); setScreen('home'); }, [setScreen]);
   const handleNextLevel = useCallback(() => {
     if (status !== 'victory' || noMoreLevels) return;
@@ -816,6 +963,20 @@ export function GameScreen() {
         </div>
       </GameHUD>
       <ErrorVignette />
+
+      {ENABLE_GAME_DEVTOOLS && (
+        <GameDevPanel
+          currentLevel={currentLevel}
+          gameLevel={gameLevel}
+          status={status}
+          gridSize={gridSize}
+          arrowsCount={arrows.length}
+          noMoreLevels={noMoreLevels}
+          onJumpToLevel={jumpToLevel}
+          onStepLevel={stepLevel}
+          onReloadLevel={reloadCurrentLevel}
+        />
+      )}
 
       {/* ===== СЛОЙ ЭФФЕКТОВ (fly-out) ===== */}
       <FXOverlay

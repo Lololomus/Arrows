@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 from typing import Any, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -192,6 +192,10 @@ async def check_referral_confirmation(user: User, completed_level: int, db: Asyn
     return True
 
 
+def is_dev_level_unlock_bypass_active(x_dev_user_id: str | None) -> bool:
+    return settings.dev_auth_active and bool(x_dev_user_id)
+
+
 # ============================================
 # ENDPOINTS
 # ============================================
@@ -199,6 +203,7 @@ async def check_referral_confirmation(user: User, completed_level: int, db: Asyn
 @router.get("/level/{level_num}", response_model=LevelResponse)
 async def get_level(
     level_num: int,
+    x_dev_user_id: str | None = Header(None, alias="X-Dev-User-Id"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -206,9 +211,11 @@ async def get_level(
     Получить данные уровня из файла.
     (Strict Linear Mode: only current unlocked level is accessible)
     """
+    allow_locked_level_debug = is_dev_level_unlock_bypass_active(x_dev_user_id)
+
     if level_num < 1:
         raise HTTPException(status_code=400, detail="Invalid level number")
-    if level_num != user.current_level:
+    if level_num != user.current_level and not allow_locked_level_debug:
         raise HTTPException(status_code=403, detail="Level not unlocked")
     
     print(f"🎮 Loading level {level_num} for user {user.id}")
@@ -265,11 +272,13 @@ async def get_level(
 @router.post("/start/{level_num}")
 async def start_level(
     level_num: int,
+    x_dev_user_id: str | None = Header(None, alias="X-Dev-User-Id"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Начать уровень - тратит энергию."""
-    if level_num != user.current_level:
+    allow_locked_level_debug = is_dev_level_unlock_bypass_active(x_dev_user_id)
+    if level_num != user.current_level and not allow_locked_level_debug:
         raise HTTPException(status_code=403, detail="Level not unlocked")
     
     # Проверяем и тратим энергию

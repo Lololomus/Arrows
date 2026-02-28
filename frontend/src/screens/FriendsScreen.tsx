@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Users, Share2, Copy, Trophy, CheckCircle, UserPlus } from 'lucide-react';
+import { Users, Share2, Copy, Trophy, CheckCircle, UserPlus, Coins, Gift, Clock, Check } from 'lucide-react';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { FriendsLeaderboardScreen } from './FriendsLeaderboardScreen';
 import { useReferral } from '../hooks/hooks';
@@ -41,7 +41,9 @@ function ReferralProgressBar({
   return (
     <div className="mt-1.5">
       <div className="flex items-center justify-between text-[10px] mb-1">
-        <span className="text-yellow-300/70">⏳ Ещё {remaining} ур. до бонуса</span>
+        <span className="text-yellow-300/70 flex items-center gap-1">
+          <Clock size={10} /> Ещё {remaining} ур. до бонуса
+        </span>
         <span className="text-white/40">{progress}%</span>
       </div>
       <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
@@ -79,11 +81,11 @@ function ReferralCard({
     >
       <div className="flex items-center gap-3 flex-1 min-w-0">
         <div className="text-white/30 font-bold text-lg w-6 text-center shrink-0">{index + 1}</div>
-        <div className="w-11 h-11 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-xl shrink-0 overflow-hidden">
+        <div className="w-11 h-11 rounded-full bg-gradient-to-br from-blue-400/20 to-purple-500/20 border border-white/10 flex items-center justify-center text-xl shrink-0 overflow-hidden">
           {referral.photo_url ? (
             <img src={referral.photo_url} alt="" className="w-full h-full rounded-full object-cover" />
           ) : (
-            isConfirmed ? '✅' : '⏳'
+            isConfirmed ? <Check size={20} className="text-white/80" /> : <Clock size={20} className="text-white/50" />
           )}
         </div>
         <div className="flex-1 min-w-0">
@@ -120,7 +122,11 @@ function ReferralCard({
 function EmptyReferralList({ onShare }: { onShare: () => void }) {
   return (
     <div className="text-center py-10">
-      <div className="text-5xl mb-4">👥</div>
+      <div className="flex justify-center mb-4">
+        <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center border border-white/10">
+          <Users size={32} className="text-white/20" />
+        </div>
+      </div>
       <p className="text-white/60 text-sm mb-1">Пока никого нет</p>
       <p className="text-white/40 text-xs mb-5">Пригласи друга и получи 200 монет!</p>
       <button
@@ -172,7 +178,7 @@ function FriendsListContent({
               className="z-0 opacity-75"
             />
             <div className="relative z-10 bg-gradient-to-br from-yellow-500/20 to-orange-500/20 border border-yellow-500/30 rounded-2xl p-4 text-center">
-              <div className="text-3xl mb-2">💰</div>
+              <Coins size={28} className="mx-auto mb-2 text-yellow-400" />
               <div className="text-yellow-400 font-bold text-lg">+200</div>
               <div className="text-yellow-200/60 text-xs">монет тебе</div>
             </div>
@@ -186,7 +192,7 @@ function FriendsListContent({
               className="z-0 opacity-75"
             />
             <div className="relative z-10 bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-blue-500/30 rounded-2xl p-4 text-center">
-              <div className="text-3xl mb-2">🎁</div>
+              <Gift size={28} className="mx-auto mb-2 text-cyan-400" />
               <div className="text-cyan-400 font-bold text-lg">+100</div>
               <div className="text-cyan-200/60 text-xs">монет другу</div>
             </div>
@@ -194,23 +200,18 @@ function FriendsListContent({
         </div>
 
         {/* Статистика */}
-        <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="text-center">
-                <div className="text-white font-black text-xl">{stats.count}</div>
-                <div className="text-white/40 text-[10px]">подтв.</div>
-              </div>
-              <div className="w-px h-8 bg-white/10" />
-              <div className="text-center">
-                <div className="text-yellow-300 font-black text-xl">{stats.pending}</div>
-                <div className="text-white/40 text-[10px]">ожидают</div>
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-green-400 font-bold text-lg">+{stats.earned}</div>
-              <div className="text-white/40 text-[10px]">заработано</div>
-            </div>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-white/5 rounded-2xl p-3 border border-white/10 flex flex-col items-center justify-center">
+            <div className="text-white/40 text-[10px] uppercase tracking-wider mb-1">Подтв.</div>
+            <div className="text-white font-black text-xl">{stats.count}</div>
+          </div>
+          <div className="bg-yellow-500/10 rounded-2xl p-3 border border-yellow-500/20 flex flex-col items-center justify-center">
+            <div className="text-yellow-500/60 text-[10px] uppercase tracking-wider mb-1">Ожидают</div>
+            <div className="text-yellow-400 font-black text-xl">{stats.pending}</div>
+          </div>
+          <div className="bg-green-500/10 rounded-2xl p-3 border border-green-500/20 flex flex-col items-center justify-center">
+            <div className="text-green-500/60 text-[10px] uppercase tracking-wider mb-1">Заработано</div>
+            <div className="text-green-400 font-black text-xl">+{stats.earned}</div>
           </div>
         </div>
 
