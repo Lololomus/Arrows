@@ -48,6 +48,9 @@ export const REFERRAL_REWARD_INVITER = 200;
 /** Награда за реферала (приглашённому) */
 export const REFERRAL_REWARD_INVITEE = 100;
 
+export const APP_NAME = import.meta.env.VITE_APP_NAME || 'ArrowReward';
+export const PUBLIC_BOT_USERNAME = import.meta.env.VITE_PUBLIC_BOT_USERNAME || 'ArrowReward_bot';
+
 // ============================================
 // DIRECTIONS
 // ============================================

@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
+import { APP_NAME } from './config/constants';
 
 type SafeAreaInsets = Partial<Record<'top' | 'bottom' | 'left' | 'right', unknown>>;
 
@@ -65,7 +66,7 @@ const setupTelegramSafeAreaSync = (tg: any): (() => void) => {
     applySafeArea(tg.safeAreaInset);
     applyContentSafeArea(tg.contentSafeAreaInset);
   } catch (error) {
-    console.warn('[Arrow Puzzle] Safe-area init sync failed:', error);
+    console.warn(`[${APP_NAME}] Safe-area init sync failed:`, error);
   }
 
   if (typeof tg.onEvent !== 'function') {
@@ -84,7 +85,7 @@ const setupTelegramSafeAreaSync = (tg: any): (() => void) => {
     try {
       tg.onEvent(eventName, handler);
     } catch (error) {
-      console.warn(`[Arrow Puzzle] Failed to subscribe ${eventName}:`, error);
+      console.warn(`[${APP_NAME}] Failed to subscribe ${eventName}:`, error);
     }
   }
 
@@ -152,7 +153,7 @@ const initTelegramApp = () => {
   disposeTelegramSafeAreaSync = null;
 
   if (!tg) {
-    console.log('[Arrow Puzzle] Local mode - running without Telegram WebApp');
+    console.log(`[${APP_NAME}] Local mode - running without Telegram WebApp`);
     return;
   }
 
@@ -161,14 +162,14 @@ const initTelegramApp = () => {
   if (tg.requestFullscreen) {
     try {
       tg.requestFullscreen();
-      console.log('[Arrow Puzzle] Fullscreen mode enabled (native)');
+      console.log(`[${APP_NAME}] Fullscreen mode enabled (native)`);
     } catch (error) {
-      console.warn('[Arrow Puzzle] requestFullscreen exists but unsupported:', error);
+      console.warn(`[${APP_NAME}] requestFullscreen exists but unsupported:`, error);
       tg.expand();
     }
   } else {
     tg.expand();
-    console.log('[Arrow Puzzle] Fullscreen not supported, using expand()');
+    console.log(`[${APP_NAME}] Fullscreen not supported, using expand()`);
   }
 
   tg.setHeaderColor('#1e3a52');
@@ -177,13 +178,13 @@ const initTelegramApp = () => {
   try {
     disposeTelegramSafeAreaSync = setupTelegramSafeAreaSync(tg);
   } catch (error) {
-    console.warn('[Arrow Puzzle] Safe-area sync setup failed:', error);
+    console.warn(`[${APP_NAME}] Safe-area sync setup failed:`, error);
   }
 
   if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
   if (tg.enableClosingConfirmation) tg.enableClosingConfirmation();
 
-  console.log('[Arrow Puzzle] Telegram Mini App initialized', {
+  console.log(`[${APP_NAME}] Telegram Mini App initialized`, {
     version: tg.version,
     platform: tg.platform,
     isExpanded: tg.isExpanded,

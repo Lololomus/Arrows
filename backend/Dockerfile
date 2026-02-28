@@ -5,8 +5,8 @@
 FROM python:3.11-slim
 
 # Метаданные
-LABEL maintainer="Arrow Puzzle Team"
-LABEL description="Arrow Puzzle Backend - FastAPI + PostgreSQL"
+LABEL maintainer="ArrowReward Team"
+LABEL description="ArrowReward Backend - FastAPI + PostgreSQL"
 
 # Рабочая директория
 WORKDIR /app

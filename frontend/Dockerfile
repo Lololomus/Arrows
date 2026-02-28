@@ -28,8 +28,8 @@ RUN npm run build
 FROM nginx:alpine
 
 # Метаданные
-LABEL maintainer="Arrow Puzzle Team"
-LABEL description="Arrow Puzzle Frontend - React + Nginx"
+LABEL maintainer="ArrowReward Team"
+LABEL description="ArrowReward Frontend - React + Nginx"
 
 # Копируем built файлы из stage 1
 COPY --from=builder /app/dist /usr/share/nginx/html

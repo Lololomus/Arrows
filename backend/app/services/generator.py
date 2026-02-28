@@ -927,7 +927,7 @@ def validate_level(level_data: Dict) -> Dict:
 if __name__ == "__main__":
     import time
     
-    print("🎮 Arrow Puzzle Generator v4.0 (DAG-FIRST)")
+    print("🎮 ArrowReward Generator v4.0 (DAG-FIRST)")
     print("=" * 60)
     
     test_levels = [1, 5, 10, 50, 100]

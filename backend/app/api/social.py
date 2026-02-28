@@ -515,10 +515,7 @@ async def get_leaderboard(
 # ============================================
 
 # Каналы для подписки (конфигурируется)
-REWARD_CHANNELS = [
-    {"id": "main", "name": "@ArrowPuzzleGame", "username": "ArrowPuzzleGame", "reward_coins": 100},
-    {"id": "news", "name": "@ArrowPuzzleNews", "username": "ArrowPuzzleNews", "reward_coins": 50},
-]
+REWARD_CHANNELS = []
 
 
 @router.get("/channels", response_model=List[RewardChannel])

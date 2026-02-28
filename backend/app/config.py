@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     """Настройки приложения."""
     
     # App
-    APP_NAME: str = "Arrow Puzzle"
+    APP_NAME: str = "ArrowReward"
     DEBUG: bool = False
     API_PREFIX: str = "/api/v1"
     ENVIRONMENT: Literal["development", "production"] = "development"
@@ -41,8 +41,8 @@ class Settings(BaseSettings):
     # Telegram
     BOT_TOKEN: str = ""
     TELEGRAM_BOT_TOKEN: str = ""
-    TELEGRAM_BOT_USERNAME: str = ""
-    WEBAPP_URL: str = "https://yourdomain.com"
+    TELEGRAM_BOT_USERNAME: str = "ArrowReward_bot"
+    WEBAPP_URL: str = "https://arrowreward.ru.tuna.am/"
     
     # TON
     TON_API_KEY: str = ""

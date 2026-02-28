@@ -5,6 +5,7 @@ import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { FriendsLeaderboardScreen } from './FriendsLeaderboardScreen';
 import { useReferral } from '../hooks/hooks';
 import type { ReferralInfo } from '../game/types';
+import { PUBLIC_BOT_USERNAME } from '../config/constants';
 
 type FriendsTab = 'friends' | 'leaderboard';
 
@@ -220,7 +221,7 @@ function FriendsListContent({
           <div className="text-white/70 text-xs mb-2 font-medium">Твоя реферальная ссылка:</div>
           <div className="flex gap-2">
             <div className="flex-1 bg-black/30 rounded-xl px-3 py-2 text-white/50 text-xs font-mono truncate">
-              {link || `t.me/arrowpuzzle_bot?start=ref_${code || '...'}`}
+              {link || `t.me/${PUBLIC_BOT_USERNAME}?start=ref_${code || '...'}`}
             </div>
             <button onClick={onCopyReferral} className="bg-white/10 hover:bg-white/20 px-3 rounded-xl transition-colors">
               <Copy size={16} className="text-white" />
@@ -302,7 +303,7 @@ export function FriendsScreen() {
   }, [fetchReferralCode, fetchReferralStats, fetchMyReferrals]);
 
   const handleCopyReferral = () => {
-    const referralLink = link || `https://t.me/arrowpuzzle_bot?start=ref_${code}`;
+    const referralLink = link || `https://t.me/${PUBLIC_BOT_USERNAME}?start=ref_${code}`;
     navigator.clipboard.writeText(referralLink);
     const tg = (window as any).Telegram?.WebApp;
     tg?.HapticFeedback?.notificationOccurred?.('success');
