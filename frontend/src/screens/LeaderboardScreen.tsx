@@ -68,7 +68,8 @@ const LEADERBOARD_MODES: readonly LeaderboardModeConfig[] = [
     label: 'Arcade',
     icon: '🕹',
     state: 'live',
-    boardType: 'arcade',
+    // Current Arcade tab is backed by global progression until Adventure gets its own leaderboard.
+    boardType: 'global',
     emptyTitle: 'Лидерборд пока пуст',
     emptySubtitle: 'Играй и попади в топ!',
   },
