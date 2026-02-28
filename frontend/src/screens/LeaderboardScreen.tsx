@@ -33,7 +33,18 @@ interface Player {
   userId?: number;
 }
 
-type LeaderboardTab = 'arcade' | 'campaign';
+type LeaderboardModeId = 'arcade' | 'campaign';
+type LiveBoardType = 'global' | 'weekly' | 'arcade';
+
+interface LeaderboardModeConfig {
+  id: LeaderboardModeId;
+  label: string;
+  icon: string;
+  state: 'live' | 'coming_soon';
+  boardType?: LiveBoardType;
+  emptyTitle?: string;
+  emptySubtitle?: string;
+}
 
 const RANK_STYLES: Record<number, { bg: string; border: string; rankClass: string; icon: string; particleColor?: string }> = {
   1: { bg: 'bg-[#3f3113]', border: 'border-[#ca8a04]/30', rankClass: 'text-yellow-400 drop-shadow-glow', icon: '🥇', particleColor: '255, 215, 0' },
@@ -48,6 +59,30 @@ const TWO_LINE_CLAMP_STYLE: CSSProperties = {
   WebkitLineClamp: 2,
   WebkitBoxOrient: 'vertical',
   overflow: 'hidden',
+};
+
+// Live mode must define boardType. Coming-soon mode must not trigger leaderboard requests.
+const LEADERBOARD_MODES: readonly LeaderboardModeConfig[] = [
+  {
+    id: 'arcade',
+    label: 'Arcade',
+    icon: '🕹',
+    state: 'live',
+    boardType: 'arcade',
+    emptyTitle: 'Лидерборд пока пуст',
+    emptySubtitle: 'Играй и попади в топ!',
+  },
+  {
+    id: 'campaign',
+    label: 'Adventure',
+    icon: '⚡️',
+    state: 'coming_soon',
+  },
+] as const;
+
+const LEADERBOARD_MODE_BY_ID: Record<LeaderboardModeId, LeaderboardModeConfig> = {
+  arcade: LEADERBOARD_MODES[0],
+  campaign: LEADERBOARD_MODES[1],
 };
 
 const normalizeUsername = (rawUsername: unknown): string | null => {
@@ -462,8 +497,8 @@ CurrentUserFooter.displayName = 'CurrentUserFooter';
 
 // --- ОСНОВНОЙ ЭКРАН ---
 export function LeaderboardScreen() {
-  const [activeTab, setActiveTab] = useState<LeaderboardTab>('arcade');
-  const [displayTab, setDisplayTab] = useState<LeaderboardTab>('arcade');
+  const [activeModeId, setActiveModeId] = useState<LeaderboardModeId>('arcade');
+  const [displayModeId, setDisplayModeId] = useState<LeaderboardModeId>('arcade');
   const [isSwitchingTab, setIsSwitchingTab] = useState(false);
   const [listRenderVersion, setListRenderVersion] = useState(0);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
@@ -486,32 +521,49 @@ export function LeaderboardScreen() {
   const visibleCountRef = useRef(INITIAL_VISIBLE_COUNT);
   const switchRequestIdRef = useRef(0);
 
-  const isAdventureComingSoon = displayTab === 'campaign';
+  const displayMode = LEADERBOARD_MODE_BY_ID[displayModeId];
+  const isCurrentModeComingSoon = displayMode.state === 'coming_soon';
+  const isCurrentModeLive = displayMode.state === 'live';
   const stickyBottomPx = bottomNavHeight + CARD_GAP_PX;
   const shouldAnimateListEnter = listRenderVersion > 0;
 
+  const applyLeaderboardMeta = useCallback((data: Awaited<ReturnType<typeof socialApi.getLeaderboard>>) => {
+    setMyPosition(data.myPosition);
+    setMyScore(data.myScore);
+    setMyInTop(data.myInTop);
+    setTotalParticipants(data.totalParticipants);
+  }, []);
+
+  const resetLeaderboardMeta = useCallback(() => {
+    setMyPosition(null);
+    setMyScore(null);
+    setMyInTop(false);
+    setTotalParticipants(0);
+  }, []);
+
   // --- API FETCHING ---
-  const fetchLeaderboardData = useCallback(async (tab: LeaderboardTab): Promise<Player[]> => {
-    if (tab === 'campaign') return [];
+  const fetchLeaderboardData = useCallback(async (mode: LeaderboardModeConfig): Promise<Player[]> => {
+    if (mode.state !== 'live' || !mode.boardType) {
+      resetLeaderboardMeta();
+      return [];
+    }
+
     try {
-      const boardType = tab === 'arcade' ? 'arcade' as const : 'global' as const;
-      const data = await socialApi.getLeaderboard(boardType, 100);
-      setMyPosition(data.myPosition);
-      setMyScore(data.myScore);
-      setMyInTop(data.myInTop);
-      setTotalParticipants(data.totalParticipants);
+      const data = await socialApi.getLeaderboard(mode.boardType, 100);
+      applyLeaderboardMeta(data);
       return mapApiToPlayers(data.leaders);
     } catch (error) {
       console.error('Leaderboard fetch error:', error);
+      resetLeaderboardMeta();
       return [];
     }
-  }, []);
+  }, [applyLeaderboardMeta, resetLeaderboardMeta]);
 
   // Initial load
   const initialLoadDone = useRef(false);
   useEffect(() => {
     void (async () => {
-      const players = await fetchLeaderboardData('arcade');
+      const players = await fetchLeaderboardData(LEADERBOARD_MODE_BY_ID.arcade);
       setLeaderboard(players);
       if (players.length > 0) {
         await prepareLeaderboardForDisplay(players);
@@ -526,14 +578,13 @@ export function LeaderboardScreen() {
   useEffect(() => {
     if (screen !== 'leaderboard') return;
     if (!initialLoadDone.current) return;
+    if (displayMode.state !== 'live') return;
 
     void (async () => {
-      const players = await fetchLeaderboardData(displayTab);
-      if (players.length > 0 || displayTab !== 'campaign') {
-        setLeaderboard(players);
-      }
+      const players = await fetchLeaderboardData(displayMode);
+      setLeaderboard(players);
     })();
-  }, [screen, displayTab, fetchLeaderboardData]);
+  }, [screen, displayMode, fetchLeaderboardData]);
 
   useEffect(() => {
     const nav = document.querySelector(BOTTOM_NAV_SELECTOR) as HTMLElement | null;
@@ -556,7 +607,7 @@ export function LeaderboardScreen() {
   }, []);
 
   useEffect(() => {
-    if (isAdventureComingSoon || myInTop) {
+    if (isCurrentModeComingSoon || myInTop) {
       setIsDocked(false);
       return;
     }
@@ -577,7 +628,7 @@ export function LeaderboardScreen() {
 
     observer.observe(target);
     return () => observer.disconnect();
-  }, [visibleCount, leaderboard.length, displayTab, isAdventureComingSoon, myInTop]);
+  }, [visibleCount, leaderboard.length, displayModeId, isCurrentModeComingSoon, myInTop]);
 
   const prevDocked = useRef(isDocked);
   useEffect(() => {
@@ -595,21 +646,24 @@ export function LeaderboardScreen() {
     switchRequestIdRef.current += 1;
   }, []);
 
-  const handleTabChange = useCallback((tab: LeaderboardTab) => {
-    if (tab === activeTab && !isSwitchingTab) return;
+  const handleTabChange = useCallback((modeId: LeaderboardModeId) => {
+    if (modeId === activeModeId && !isSwitchingTab) return;
 
     const requestId = switchRequestIdRef.current + 1;
     switchRequestIdRef.current = requestId;
     triggerHaptic('selection');
-    setActiveTab(tab);
+    setActiveModeId(modeId);
     setIsSwitchingTab(true);
     setIsDocked(false);
     setVisibleCount(INITIAL_VISIBLE_COUNT);
     visibleCountRef.current = INITIAL_VISIBLE_COUNT;
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
 
-    if (tab === 'campaign') {
-      setDisplayTab(tab);
+    const nextMode = LEADERBOARD_MODE_BY_ID[modeId];
+
+    if (nextMode.state !== 'live' || !nextMode.boardType) {
+      resetLeaderboardMeta();
+      setDisplayModeId(modeId);
       setLeaderboard([]);
       setListRenderVersion((prev) => prev + 1);
       setIsSwitchingTab(false);
@@ -620,7 +674,7 @@ export function LeaderboardScreen() {
 
     void (async () => {
       try {
-        const players = await fetchLeaderboardData(tab);
+        const players = await fetchLeaderboardData(nextMode);
         
         if (players.length > 0) {
           await prepareLeaderboardForDisplay(players);
@@ -634,7 +688,7 @@ export function LeaderboardScreen() {
         if (switchRequestIdRef.current !== requestId) return;
 
         setLeaderboard(players);
-        setDisplayTab(tab);
+        setDisplayModeId(modeId);
         setListRenderVersion((prev) => prev + 1);
       } finally {
         if (switchRequestIdRef.current === requestId) {
@@ -642,7 +696,7 @@ export function LeaderboardScreen() {
         }
       }
     })();
-  }, [activeTab, isSwitchingTab, fetchLeaderboardData]);
+  }, [activeModeId, isSwitchingTab, fetchLeaderboardData, resetLeaderboardMeta]);
 
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
@@ -683,17 +737,20 @@ export function LeaderboardScreen() {
           className="absolute top-1 bottom-1 bg-white/10 rounded-xl shadow-sm"
           initial={false}
           animate={{
-            left: activeTab === 'arcade' ? '4px' : '50%',
+            left: activeModeId === 'arcade' ? '4px' : '50%',
             width: 'calc(50% - 6px)',
           }}
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
         />
-        <button onClick={() => handleTabChange('arcade')} className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${activeTab === 'arcade' ? 'text-white' : 'text-white/50'}`}>
-          <span className="inline mr-1 mb-1" aria-hidden="true">🕹</span> Arcade
-        </button>
-        <button onClick={() => handleTabChange('campaign')} className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${activeTab === 'campaign' ? 'text-white' : 'text-white/50'}`}>
-          <span className="inline mr-1 mb-1" aria-hidden="true">⚡️</span> Adventure
-        </button>
+        {LEADERBOARD_MODES.map((mode) => (
+          <button
+            key={mode.id}
+            onClick={() => handleTabChange(mode.id)}
+            className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${activeModeId === mode.id ? 'text-white' : 'text-white/50'}`}
+          >
+            <span className="inline mr-1 mb-1" aria-hidden="true">{mode.icon}</span> {mode.label}
+          </button>
+        ))}
       </div>
 
       {/* Banner */}
@@ -728,15 +785,15 @@ export function LeaderboardScreen() {
       <div className="flex-1 overflow-hidden relative rounded-t-2xl">
         <div 
           ref={scrollRef} 
-          onScroll={isSwitchingTab || isAdventureComingSoon || isLoading ? undefined : handleScroll}
+          onScroll={isSwitchingTab || isCurrentModeComingSoon || isLoading ? undefined : handleScroll}
           style={{ paddingBottom: stickyBottomPx }}
           className="h-full overflow-y-auto overflow-x-hidden custom-scrollbar px-1"
         >
           {isSwitchingTab || isLoading ? (
             <LeaderboardSkeleton />
-          ) : isAdventureComingSoon ? (
+          ) : isCurrentModeComingSoon ? (
             <motion.div
-              key="campaign-coming-soon"
+              key={`${displayMode.id}-coming-soon`}
               initial={shouldAnimateListEnter ? { opacity: 0, y: 10, filter: 'blur(4px)' } : false}
               animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
               transition={shouldAnimateListEnter ? { duration: 0.28, ease: 'easeOut' } : { duration: 0 }}
@@ -750,14 +807,14 @@ export function LeaderboardScreen() {
                   baseSpeed={0.14}
                   className="z-0 opacity-55"
                 />
-                <span className="text-4xl mb-3 block relative z-10" aria-hidden="true">⚡️</span>
-                <h3 className="text-white text-xl font-bold mb-2 relative z-10">Adventure</h3>
+                <span className="text-4xl mb-3 block relative z-10" aria-hidden="true">{displayMode.icon}</span>
+                <h3 className="text-white text-xl font-bold mb-2 relative z-10">{displayMode.label}</h3>
                 <p className="text-white/60 text-sm relative z-10">Скоро</p>
               </div>
             </motion.div>
           ) : leaderboard.length === 0 ? (
             <motion.div
-              key="empty-state"
+              key={`${displayMode.id}-empty-state`}
               initial={shouldAnimateListEnter ? { opacity: 0, y: 10, filter: 'blur(4px)' } : false}
               animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
               transition={shouldAnimateListEnter ? { duration: 0.28, ease: 'easeOut' } : { duration: 0 }}
@@ -765,13 +822,13 @@ export function LeaderboardScreen() {
             >
               <div className="text-center py-16">
                 <div className="text-5xl mb-4">🏆</div>
-                <p className="text-white/60 text-base font-medium">Лидерборд пока пуст</p>
-                <p className="text-white/35 text-sm mt-2">Играй и попади в топ!</p>
+                <p className="text-white/60 text-base font-medium">{displayMode.emptyTitle ?? 'Лидерборд пока пуст'}</p>
+                <p className="text-white/35 text-sm mt-2">{displayMode.emptySubtitle ?? 'Играй и попади в топ!'}</p>
               </div>
             </motion.div>
           ) : (
             <motion.div
-              key={`${displayTab}-${listRenderVersion}`}
+              key={`${displayMode.id}-${listRenderVersion}`}
               initial={shouldAnimateListEnter ? { opacity: 0, y: 10, filter: 'blur(4px)' } : false}
               animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
               transition={shouldAnimateListEnter ? { duration: 0.28, ease: 'easeOut' } : { duration: 0 }}
@@ -780,12 +837,12 @@ export function LeaderboardScreen() {
                 const isMe = player.userId === user?.id;
                 if (player.rank <= 3) {
                   return (
-                    <div key={`top-${displayTab}-${player.rank}`} className={isMe ? 'rounded-2xl ring-2 ring-blue-500/40 shadow-[0_0_12px_rgba(59,130,246,0.15)]' : ''}>
+                    <div key={`top-${displayMode.id}-${player.rank}`} className={isMe ? 'rounded-2xl ring-2 ring-blue-500/40 shadow-[0_0_12px_rgba(59,130,246,0.15)]' : ''}>
                       <TopLeaderboardItem player={player} index={i} animateEntry={true} />
                     </div>
                   );
                 }
-                return <RegularLeaderboardItem key={`reg-${displayTab}-${player.rank}`} player={player} isCurrentUser={isMe} />;
+                return <RegularLeaderboardItem key={`reg-${displayMode.id}-${player.rank}`} player={player} isCurrentUser={isMe} />;
               })}
 
               {visibleCount < leaderboard.length && (
@@ -823,7 +880,7 @@ export function LeaderboardScreen() {
           )}
         </div>
 
-        {!isSwitchingTab && !isLoading && !isDocked && !isAdventureComingSoon && !myInTop && leaderboard.length > 0 && (
+        {!isSwitchingTab && !isLoading && isCurrentModeLive && !isDocked && !myInTop && leaderboard.length > 0 && (
           <div className="absolute left-1 right-1 z-50 pointer-events-none" style={{ bottom: stickyBottomPx }}>
             <CurrentUserFooter user={user} isDocked={false} myPosition={myPosition} myScore={myScore} />
           </div>
