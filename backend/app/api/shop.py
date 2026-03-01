@@ -38,6 +38,8 @@ ARROW_SKINS = [
     {"id": "cyber", "name": "Киберпанк", "price_ton": 2.0, "preview": "🤖"},
 ]
 
+BETA_VISIBLE_BOOST_IDS = {"hints_3", "hints_10"}
+
 # Темы оформления
 THEMES = [
     {"id": "light", "name": "Светлая", "price_coins": 0, "preview": "☀️"},
@@ -109,9 +111,13 @@ async def get_catalog(
         )
     
     return ShopCatalog(
-        arrow_skins=[make_shop_item(s, "arrow_skins") for s in ARROW_SKINS],
-        themes=[make_shop_item(t, "themes") for t in THEMES],
-        boosts=[make_shop_item(b, "boosts") for b in BOOSTS]
+        arrow_skins=[],
+        themes=[],
+        boosts=[
+            make_shop_item(b, "boosts")
+            for b in BOOSTS
+            if b["id"] in BETA_VISIBLE_BOOST_IDS
+        ]
     )
 
 
@@ -126,6 +132,9 @@ async def purchase_item(
     item = get_item_by_id(request.item_type, request.item_id)
     if not item:
         return PurchaseResponse(success=False, error="Item not found")
+
+    if request.item_type != "boosts" or request.item_id not in BETA_VISIBLE_BOOST_IDS:
+        return PurchaseResponse(success=False, error="Item unavailable in beta shop")
     
     # Проверяем что это покупка за монеты
     price = item.get("price_coins")
@@ -179,7 +188,11 @@ async def purchase_item(
     
     await db.commit()
     
-    return PurchaseResponse(success=True, coins=user.coins)
+    return PurchaseResponse(
+        success=True,
+        coins=user.coins,
+        hint_balance=user.hint_balance,
+    )
 
 
 @router.post("/purchase/stars", response_model=PurchaseResponse)
@@ -295,12 +308,11 @@ async def equip_item(
 async def apply_boost(user: User, boost_id: str, db: AsyncSession):
     """Применить буст к пользователю."""
     if boost_id == "hints_3":
-        # Подсказки обрабатываются на клиенте
-        pass
+        user.hint_balance += 3
     elif boost_id == "hints_10":
-        pass
+        user.hint_balance += 10
     elif boost_id == "life_1":
-        pass
+        pass  # lives client-side only
     elif boost_id == "energy_5":
         user.energy = min(user.energy + 5, settings.MAX_ENERGY + 5)
     elif boost_id == "energy_full":

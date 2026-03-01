@@ -12,7 +12,7 @@ from slowapi.errors import RateLimitExceeded
 
 from .config import settings
 from .database import init_db, close_redis
-from .api import auth, game, shop, social, webhooks
+from .api import ads, auth, game, shop, social, webhooks
 from .middleware.security import (
     limiter, 
     add_security_headers,
@@ -134,6 +134,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # API prefix
 api_prefix = settings.API_PREFIX
 
+app.include_router(ads.router, prefix=api_prefix)
 app.include_router(auth.router, prefix=api_prefix)
 app.include_router(game.router, prefix=api_prefix)
 app.include_router(shop.router, prefix=api_prefix)

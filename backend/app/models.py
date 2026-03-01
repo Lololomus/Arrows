@@ -6,8 +6,8 @@ Arrow Puzzle - Database Models
 
 from datetime import datetime
 from sqlalchemy import (
-    Column, Integer, BigInteger, String, Boolean, DateTime, 
-    ForeignKey, Text, Numeric, Date, JSON
+    Column, Integer, BigInteger, String, Boolean, DateTime,
+    ForeignKey, Text, Numeric, Date, JSON, UniqueConstraint, func
 )
 from sqlalchemy.orm import relationship
 
@@ -35,6 +35,7 @@ class User(Base):
     
     # Экономика
     coins = Column(Integer, default=0)
+    hint_balance = Column(Integer, nullable=False, server_default="5")
     energy = Column(Integer, default=5)
     energy_updated_at = Column(DateTime, default=datetime.utcnow)
     
@@ -82,6 +83,7 @@ class User(Base):
             "current_level": self.current_level,
             "total_stars": self.total_stars,
             "coins": self.coins,
+            "hint_balance": self.hint_balance,
             "energy": self.energy,
             "is_premium": self.is_premium,
             "active_arrow_skin": self.active_arrow_skin,
@@ -275,3 +277,61 @@ class ChannelSubscription(Base):
     channel_id = Column(String(64), nullable=False)
     subscribed_at = Column(DateTime, default=datetime.utcnow)
     reward_claimed = Column(Boolean, default=False)
+
+
+# ============================================
+# AD REWARD CLAIM
+# ============================================
+
+class AdRewardClaim(Base):
+    """Запись о выдаче награды за рекламу."""
+
+    __tablename__ = "ad_reward_claims"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    placement = Column(String(32), nullable=False)    # reward_daily_coins | reward_hint | reward_revive
+    ad_reference = Column(String(256), nullable=True)  # телеметрия от AdsGram
+    session_id = Column(String(64), nullable=True)     # для revive idempotency
+    level_number = Column(Integer, nullable=True)
+    reward_amount = Column(Integer, nullable=True)
+    claim_day_msk = Column(Date, nullable=True)        # для daily coins лимита
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "placement", "session_id", name="uq_revive_per_session"),
+    )
+
+
+class AdRewardIntent(Base):
+    """Pending/server-authoritative reward intent for rewarded ads."""
+
+    __tablename__ = "ad_reward_intents"
+
+    id = Column(Integer, primary_key=True)
+    intent_id = Column(String(64), unique=True, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    placement = Column(String(32), nullable=False, index=True)
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    session_id = Column(String(64), nullable=True)
+    level_number = Column(Integer, nullable=True)
+    failure_code = Column(String(64), nullable=True)
+
+    coins = Column(Integer, nullable=True)
+    hint_balance = Column(Integer, nullable=True)
+    revive_granted = Column(Boolean, nullable=False, default=False)
+    used_today = Column(Integer, nullable=True)
+    limit_today = Column(Integer, nullable=True)
+    resets_at = Column(DateTime, nullable=True)
+    claim_day_msk = Column(Date, nullable=True)
+
+    created_at = Column(DateTime, server_default=func.now())
+    expires_at = Column(DateTime, nullable=False, index=True)
+    fulfilled_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("intent_id", name="uq_ad_reward_intents_intent_id"),
+    )

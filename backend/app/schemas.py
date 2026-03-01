@@ -5,7 +5,7 @@ Arrow Puzzle - Pydantic Schemas
 """
 
 from datetime import datetime
-from typing import Optional, List, Union
+from typing import Literal, Optional, List, Union
 from pydantic import BaseModel, Field
 
 
@@ -21,6 +21,7 @@ class TelegramAuthRequest(BaseModel):
 class AuthResponse(BaseModel):
     """Ответ авторизации."""
     token: str
+    expires_at: str
     user: dict
 
 
@@ -46,6 +47,7 @@ class UserResponse(BaseModel):
     current_level: int
     total_stars: int
     coins: int
+    hint_balance: int
     energy: int
     is_premium: bool
     active_arrow_skin: str
@@ -147,6 +149,7 @@ class HintRequest(BaseModel):
 class HintResponse(BaseModel):
     """Ответ подсказки."""
     arrow_id: str
+    hint_balance: int
 
 
 # ============================================
@@ -181,6 +184,7 @@ class PurchaseResponse(BaseModel):
     """Ответ покупки."""
     success: bool
     coins: Optional[int] = None
+    hint_balance: Optional[int] = None
     error: Optional[str] = None
 
 
@@ -328,3 +332,88 @@ class AdsgramRewardWebhook(BaseModel):
     user_id: int
     reward_type: str
     ad_id: str
+
+
+# ============================================
+# ADS
+# ============================================
+
+class DailyCoinsStatus(BaseModel):
+    """Статус дневных монет за рекламу."""
+    used: int
+    limit: int
+    resets_at: str
+
+class AdsStatusResponse(BaseModel):
+    """Статус рекламы для пользователя."""
+    eligible: bool
+    current_level: int
+    daily_coins: DailyCoinsStatus
+    hint_ad_available: bool
+
+class ClaimDailyCoinsRequest(BaseModel):
+    """Запрос награды за рекламу — дневные монеты."""
+    ad_reference: Optional[str] = None
+
+class ClaimDailyCoinsResponse(BaseModel):
+    """Ответ награды — дневные монеты."""
+    success: bool
+    coins: int
+    reward_coins: int
+    used_today: int
+    limit_today: int
+    resets_at: str
+
+class ClaimHintRequest(BaseModel):
+    """Запрос награды за рекламу — подсказка."""
+    ad_reference: Optional[str] = None
+
+class ClaimHintResponse(BaseModel):
+    """Ответ награды — подсказка."""
+    success: bool
+    hint_balance: int
+
+class ClaimReviveRequest(BaseModel):
+    """Запрос награды за рекламу — воскрешение."""
+    level: int
+    session_id: str
+    ad_reference: Optional[str] = None
+
+class ClaimReviveResponse(BaseModel):
+    """Ответ награды — воскрешение."""
+    success: bool
+    revive_granted: bool
+    session_id: str
+
+
+RewardPlacement = Literal["reward_daily_coins", "reward_hint", "reward_revive"]
+RewardIntentStatus = Literal["pending", "granted", "rejected", "expired"]
+
+
+class RewardIntentCreateRequest(BaseModel):
+    """Р—Р°РїСЂРѕСЃ РЅР° СЃРѕР·РґР°РЅРёРµ pending reward intent."""
+    placement: RewardPlacement
+    level: Optional[int] = None
+    session_id: Optional[str] = None
+
+
+class RewardIntentCreateResponse(BaseModel):
+    """РћС‚РІРµС‚ СЃРѕР·РґР°РЅРёСЏ reward intent."""
+    intent_id: str
+    placement: RewardPlacement
+    status: RewardIntentStatus
+    expires_at: str
+
+
+class RewardIntentStatusResponse(BaseModel):
+    """РЎС‚Р°С‚СѓСЃ reward intent РґР»СЏ polling РЅР° С„СЂРѕРЅС‚Рµ."""
+    intent_id: str
+    placement: RewardPlacement
+    status: RewardIntentStatus
+    failure_code: Optional[str] = None
+    coins: Optional[int] = None
+    hint_balance: Optional[int] = None
+    revive_granted: bool = False
+    used_today: Optional[int] = None
+    limit_today: Optional[int] = None
+    resets_at: Optional[str] = None

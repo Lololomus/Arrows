@@ -1,7 +1,12 @@
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
+import { Coins, Play, TimerReset } from 'lucide-react';
 import { useAppStore } from '../stores/store';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { CoinStashCard } from '../components/ui/CoinStashCard';
+import { adsApi } from '../api/client';
+import { ADS_ENABLED, ADS_FIRST_ELIGIBLE_LEVEL, ADSGRAM_BLOCK_IDS } from '../config/constants';
+import { pollRewardIntent, runRewardedFlow } from '../services/rewardedAds';
 
 const HOME_BG_STAR_SIZE_PROFILE = { small: 0.8, medium: 0.16, large: 0.04 } as const;
 
@@ -26,6 +31,153 @@ const titleLine = {
   },
 };
 
+function formatResetTime(resetsAt: string, now: number): string {
+  const resetTimestamp = Date.parse(resetsAt);
+  if (!Number.isFinite(resetTimestamp)) return 'до сброса позже';
+
+  const diffMs = Math.max(0, resetTimestamp - now);
+  const totalMinutes = Math.ceil(diffMs / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours <= 0) return `${Math.max(1, minutes)} мин`;
+  return `${hours} ч ${minutes.toString().padStart(2, '0')} мин`;
+}
+
+function DailyCoinsCard({ currentLevel }: { currentLevel: number }) {
+  const updateUser = useAppStore((s) => s.updateUser);
+  const [eligible, setEligible] = useState(false);
+  const [used, setUsed] = useState(0);
+  const [limit, setLimit] = useState(3);
+  const [resetsAt, setResetsAt] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [statusLoaded, setStatusLoaded] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const [pendingIntentId, setPendingIntentId] = useState<string | null>(null);
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const status = await adsApi.getStatus();
+      setEligible(status.eligible);
+      setUsed(status.dailyCoins.used);
+      setLimit(status.dailyCoins.limit);
+      setResetsAt(status.dailyCoins.resetsAt);
+      setStatusLoaded(true);
+    } catch {
+      setStatusLoaded(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadStatus();
+  }, [loadStatus]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void loadStatus();
+      }
+    };
+
+    const handleWindowFocus = () => {
+      void loadStatus();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, [loadStatus]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const handleWatch = useCallback(async () => {
+    if (loading || used >= limit) return;
+    setLoading(true);
+
+    try {
+      const result = pendingIntentId
+        ? await pollRewardIntent(pendingIntentId)
+        : await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardDailyCoins, {
+            placement: 'reward_daily_coins',
+          });
+
+      if (result.outcome === 'ad_failed') {
+        return;
+      }
+
+      if (result.outcome === 'timeout') {
+        setPendingIntentId(result.intentId);
+        return;
+      }
+
+      setPendingIntentId(null);
+      if (result.outcome === 'granted' && result.status) {
+        setUsed(result.status.usedToday ?? used);
+        setLimit(result.status.limitToday ?? limit);
+        if (result.status.resetsAt) setResetsAt(result.status.resetsAt);
+        if (result.status.coins != null) updateUser({ coins: result.status.coins });
+        return;
+      }
+
+      await loadStatus();
+    } catch {
+      // Keep current UI state; status refresh will recover.
+    } finally {
+      setLoading(false);
+    }
+  }, [limit, loadStatus, loading, pendingIntentId, updateUser, used]);
+
+  if (!statusLoaded || !eligible || currentLevel < ADS_FIRST_ELIGIBLE_LEVEL) {
+    return null;
+  }
+
+  const remaining = Math.max(0, limit - used);
+  const limitReached = used >= limit;
+  const waitingForReward = pendingIntentId !== null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="relative bg-[#16192d]/60 backdrop-blur-xl border border-amber-500/20 rounded-2xl p-4 flex items-center gap-4 shadow-[0_4px_20px_rgba(0,0,0,0.3)]"
+    >
+      <div className="w-12 h-12 shrink-0 bg-gradient-to-br from-amber-500/20 to-orange-600/20 border border-amber-500/30 rounded-xl flex items-center justify-center">
+        <Coins size={24} className="text-amber-400" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-white font-bold text-sm">+20 монет</p>
+        {limitReached ? (
+          <div className="flex items-center gap-1.5 text-white/50 text-xs">
+            <TimerReset size={12} />
+            <span>Лимит исчерпан, сброс через {formatResetTime(resetsAt, now)}</span>
+          </div>
+        ) : waitingForReward ? (
+          <p className="text-white/50 text-xs">Награда еще проверяется</p>
+        ) : (
+          <p className="text-white/50 text-xs">Осталось: {remaining}/{limit}</p>
+        )}
+      </div>
+      <button
+        onClick={handleWatch}
+        disabled={loading || limitReached}
+        className="shrink-0 px-4 py-2.5 bg-gradient-to-b from-amber-500 to-orange-600 rounded-xl text-white font-bold text-sm flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <Play size={14} />
+        {loading ? '...' : waitingForReward ? 'Обновить' : 'Смотреть'}
+      </button>
+    </motion.div>
+  );
+}
+
 export function HomeScreen() {
   const { setScreen, user } = useAppStore();
   const displayTitleFont = { fontFamily: '"Bungee Inline", cursive' } as const;
@@ -33,6 +185,10 @@ export function HomeScreen() {
   const displayedLevel = (user as (typeof user & { current_level?: number }) | null)?.currentLevel
     ?? (user as (typeof user & { current_level?: number }) | null)?.current_level
     ?? 1;
+
+  const showDailyCoins = displayedLevel >= ADS_FIRST_ELIGIBLE_LEVEL
+    && ADS_ENABLED
+    && !!ADSGRAM_BLOCK_IDS.rewardDailyCoins;
 
   const handlePlayArcade = () => {
     setScreen('game');
@@ -50,8 +206,6 @@ export function HomeScreen() {
       />
 
       <div className="relative z-10 flex flex-col h-full px-6">
-
-        {/* Title — абсолютно позиционирован, не влияет на поток */}
         <motion.div
           className="absolute top-[10%] sm:top-[14%] left-6 right-6 text-center z-10"
           variants={titleContainer}
@@ -71,9 +225,10 @@ export function HomeScreen() {
           </h1>
         </motion.div>
 
-        {/* Кнопки — центрируются на всю высоту экрана */}
         <div className="flex-1 flex flex-col justify-center space-y-3 pb-8">
           <CoinStashCard balance={coinBalance} />
+
+          {showDailyCoins && <DailyCoinsCard currentLevel={displayedLevel} />}
 
           <motion.button
             type="button"
@@ -124,7 +279,7 @@ export function HomeScreen() {
             <div className="absolute inset-0 bg-cyan-500 rounded-3xl blur-xl opacity-20" />
             <div className="relative bg-[#0c0e1c]/60 backdrop-blur-xl border border-white/10 border-t-white/20 p-8 rounded-3xl text-center shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden">
               <div className="absolute top-0 right-0 p-4 opacity-20">
-                <span className="text-7xl leading-none">⚡️</span>
+                <span className="text-7xl leading-none">⚡</span>
               </div>
               <h2
                 style={displayTitleFont}
@@ -135,7 +290,6 @@ export function HomeScreen() {
               <p className="relative z-10 text-blue-100/70 text-sm font-medium">Скоро</p>
             </div>
           </motion.div>
-
         </div>
       </div>
     </div>

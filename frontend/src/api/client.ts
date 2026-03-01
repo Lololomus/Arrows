@@ -7,6 +7,8 @@
  */
 
 import { API_URL, API_ENDPOINTS } from '../config/constants';
+import { normalizeAuthResponse, normalizeUserResponse, type RawAuthResponse, type RawUserResponse } from './authTransforms';
+import { ensureFreshSession, markAuthExpired, reauthenticate } from '../services/authSession';
 import { useAppStore } from '../stores/store';
 import type {
   AuthResponse,
@@ -17,6 +19,8 @@ import type {
   EnergyResponse,
   HintResponse,
   ShopCatalog,
+  ShopItem,
+  PurchaseCoinsResponse,
   LeaderboardResponse,
   RewardChannel,
   User,
@@ -24,6 +28,13 @@ import type {
   ReferralStatsResponse,
   ReferralListResponse,
   ReferralLeaderboardResponse,
+  AdsStatusResponse,
+  ClaimDailyCoinsResponse,
+  ClaimHintResponse,
+  ClaimReviveResponse,
+  RewardIntentCreateRequest,
+  RewardIntentCreateResponse,
+  RewardIntentStatusResponse,
 } from '../game/types';
 
 // === NEW: Тип ответа от complete-and-next ===
@@ -83,49 +94,40 @@ function normalizeLeaderboardResponse(raw: RawLeaderboardResponse): LeaderboardR
   };
 }
 
-interface RawUserResponse {
-  id: number;
-  telegram_id?: number;
-  telegramId?: number;
-  username: string | null;
-  first_name?: string | null;
-  firstName?: string | null;
-  photo_url?: string | null;
-  current_level?: number;
-  currentLevel?: number;
-  total_stars?: number;
-  totalStars?: number;
-  coins?: number;
-  energy?: number;
-  energy_updated_at?: string;
-  energyUpdatedAt?: string;
-  active_arrow_skin?: string;
-  activeArrowSkin?: string;
-  active_theme?: string;
-  activeTheme?: string;
-  is_premium?: boolean;
-  isPremium?: boolean;
-  referrals_count?: number;
-  referrals_pending?: number;
+interface RawShopItem {
+  id: string;
+  name: string;
+  price_coins?: number | null;
+  price_stars?: number | null;
+  price_ton?: number | null;
+  preview?: string | null;
+  owned?: boolean;
 }
 
-function normalizeUserResponse(raw: RawUserResponse): User {
+interface RawShopCatalog {
+  arrow_skins?: RawShopItem[];
+  themes?: RawShopItem[];
+  boosts?: RawShopItem[];
+}
+
+function normalizeShopItem(raw: RawShopItem, itemType: ShopItem['itemType']): ShopItem {
   return {
     id: raw.id,
-    telegramId: raw.telegramId ?? raw.telegram_id ?? 0,
-    username: raw.username ?? null,
-    firstName: raw.firstName ?? raw.first_name ?? null,
-    photo_url: raw.photo_url ?? null,
-    currentLevel: raw.currentLevel ?? raw.current_level ?? 1,
-    totalStars: raw.totalStars ?? raw.total_stars ?? 0,
-    coins: raw.coins ?? 0,
-    energy: raw.energy ?? 0,
-    energyUpdatedAt: raw.energyUpdatedAt ?? raw.energy_updated_at ?? '',
-    activeArrowSkin: raw.activeArrowSkin ?? raw.active_arrow_skin ?? 'default',
-    activeTheme: raw.activeTheme ?? raw.active_theme ?? 'light',
-    isPremium: raw.isPremium ?? raw.is_premium ?? false,
-    referrals_count: raw.referrals_count ?? 0,
-    referrals_pending: raw.referrals_pending ?? 0,
+    name: raw.name,
+    itemType,
+    priceCoins: raw.price_coins ?? null,
+    priceStars: raw.price_stars ?? null,
+    priceTon: raw.price_ton ?? null,
+    preview: raw.preview ?? undefined,
+    owned: raw.owned ?? false,
+  };
+}
+
+function normalizeShopCatalog(raw: RawShopCatalog): ShopCatalog {
+  return {
+    arrowSkins: (raw.arrow_skins ?? []).map((item) => normalizeShopItem(item, 'arrow_skin')),
+    themes: (raw.themes ?? []).map((item) => normalizeShopItem(item, 'theme')),
+    boosts: (raw.boosts ?? []).map((item) => normalizeShopItem(item, 'boost')),
   };
 }
 
@@ -153,11 +155,13 @@ function normalizeCompleteResponse(
   };
 }
 
-const IS_DEV = import.meta.env.DEV;
 const DEV_AUTH_ENABLED = ['1', 'true', 'yes', 'on'].includes(
   String(import.meta.env.VITE_ENABLE_DEV_AUTH || '').toLowerCase()
 );
 const DEV_AUTH_USER_ID = String(import.meta.env.VITE_DEV_AUTH_USER_ID || '').trim();
+const DEV_AUTH_ACTIVE = DEV_AUTH_ENABLED && DEV_AUTH_USER_ID.length > 0;
+const SESSION_EXPIRED_MESSAGE = 'Сессия истекла. Переоткройте Mini App из Telegram.';
+const AUTH_REQUIRED_MESSAGE = 'Требуется авторизация';
 
 // ============================================
 // API ERROR
@@ -178,39 +182,92 @@ export class ApiError extends Error {
 // BASE REQUEST FUNCTION
 // ============================================
 
-async function request<T>(
-  endpoint: string,
-  options: RequestInit = {}
-): Promise<T> {
-  const token = useAppStore.getState().token;
+type RequestAuthMode = 'required' | 'none';
 
+interface RequestOptions extends RequestInit {
+  auth?: RequestAuthMode;
+  _retry?: boolean;
+}
+
+async function parseResponseData(response: Response): Promise<unknown> {
+  const contentType = response.headers.get('content-type');
+  if (contentType?.includes('application/json')) {
+    return response.json();
+  }
+  return response.text();
+}
+
+async function executeRequest(
+  endpoint: string,
+  options: RequestOptions,
+  token: string | null,
+): Promise<Response> {
+  const { auth, _retry, headers: extraHeaders, ...fetchOptions } = options;
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
-    ...(token && { Authorization: `Bearer ${token}` }),
-    ...options.headers,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extraHeaders,
   };
 
-  if (DEV_AUTH_ENABLED && DEV_AUTH_USER_ID) {
+  if (DEV_AUTH_ACTIVE) {
     (headers as Record<string, string>)['X-Dev-User-Id'] = DEV_AUTH_USER_ID;
   }
 
-  const response = await fetch(`${API_URL}${endpoint}`, {
-    ...options,
+  return fetch(`${API_URL}${endpoint}`, {
+    ...fetchOptions,
     headers,
   });
+}
 
-  let data: any;
-  const contentType = response.headers.get('content-type');
+async function request<T>(
+  endpoint: string,
+  options: RequestOptions = {}
+): Promise<T> {
+  const authMode = options.auth ?? 'required';
+  const managesSession = authMode !== 'none' && !DEV_AUTH_ACTIVE;
+  const stateBeforeRequest = useAppStore.getState();
 
-  if (contentType?.includes('application/json')) {
-    data = await response.json();
-  } else {
-    data = await response.text();
+  if (managesSession && stateBeforeRequest.authStatus === 'expired') {
+    throw new ApiError(401, stateBeforeRequest.authMessage || SESSION_EXPIRED_MESSAGE);
   }
 
+  if (managesSession) {
+    try {
+      await ensureFreshSession();
+    } catch {
+      const expiredState = useAppStore.getState();
+      if (expiredState.authStatus === 'expired') {
+        throw new ApiError(401, expiredState.authMessage || SESSION_EXPIRED_MESSAGE);
+      }
+      throw new ApiError(401, AUTH_REQUIRED_MESSAGE);
+    }
+  }
+
+  const token = authMode === 'none' ? null : useAppStore.getState().token;
+  const response = await executeRequest(endpoint, options, token);
+  const data = await parseResponseData(response);
+
   if (!response.ok) {
-    const message = typeof data === 'object' ? data.detail || 'Unknown error' : data;
-    const code = typeof data === 'object' ? data.code : undefined;
+    if (response.status === 401 && managesSession && !options._retry) {
+      try {
+        await reauthenticate('401');
+      } catch {
+        const expiredState = useAppStore.getState();
+        throw new ApiError(401, expiredState.authMessage || SESSION_EXPIRED_MESSAGE);
+      }
+      return request<T>(endpoint, { ...options, _retry: true });
+    }
+
+    if (response.status === 401 && managesSession && options._retry) {
+      markAuthExpired(SESSION_EXPIRED_MESSAGE);
+    }
+
+    const message = typeof data === 'object' && data !== null
+      ? String((data as { detail?: unknown }).detail || 'Unknown error')
+      : String(data);
+    const code = typeof data === 'object' && data !== null
+      ? (data as { code?: string }).code
+      : undefined;
     throw new ApiError(response.status, message, code);
   }
 
@@ -223,18 +280,21 @@ async function request<T>(
 
 export const authApi = {
   telegram: async (initData: string): Promise<AuthResponse> => {
-    const raw = await request<{ token: string; user: RawUserResponse }>(API_ENDPOINTS.auth.telegram, {
+    const raw = await request<RawAuthResponse>(API_ENDPOINTS.auth.telegram, {
       method: 'POST',
       body: JSON.stringify({ init_data: initData }),
+      auth: 'none',
     });
-    return {
-      token: raw.token,
-      user: normalizeUserResponse(raw.user),
-    };
+    return normalizeAuthResponse(raw);
   },
 
   getMe: async (): Promise<User> =>
     normalizeUserResponse(await request<RawUserResponse>(API_ENDPOINTS.auth.me)),
+
+  refresh: async (): Promise<AuthResponse> =>
+    normalizeAuthResponse(await request<RawAuthResponse>(API_ENDPOINTS.auth.refresh, {
+      method: 'POST',
+    })),
 };
 
 // ============================================
@@ -335,19 +395,139 @@ export const gameApi = {
       body: JSON.stringify({ ad_id: adId }),
     }),
 
-  getHint: (
+  getHint: async (
     level: number,
     seed: number,
     remainingArrows: string[]
-  ): Promise<HintResponse> =>
-    request<HintResponse>(API_ENDPOINTS.game.hint, {
+  ): Promise<HintResponse> => {
+    const raw = await request<{ arrow_id?: string; arrowId?: string; hint_balance?: number; hintBalance?: number }>(
+      API_ENDPOINTS.game.hint,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          level,
+          seed,
+          remaining_arrows: remainingArrows,
+        }),
+      },
+    );
+    return {
+      arrowId: raw.arrowId ?? raw.arrow_id ?? '',
+      hintBalance: raw.hintBalance ?? raw.hint_balance ?? 0,
+    };
+  },
+};
+
+// ============================================
+// ADS API
+// ============================================
+
+export const adsApi = {
+  getStatus: async (): Promise<AdsStatusResponse> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.ads.status);
+    const dc = raw.daily_coins as Record<string, unknown> | undefined;
+    return {
+      eligible: raw.eligible as boolean,
+      currentLevel: (raw.current_level ?? raw.currentLevel) as number,
+      dailyCoins: {
+        used: (dc?.used ?? 0) as number,
+        limit: (dc?.limit ?? 3) as number,
+        resetsAt: (dc?.resets_at ?? dc?.resetsAt ?? '') as string,
+      },
+      hintAdAvailable: (raw.hint_ad_available ?? raw.hintAdAvailable ?? false) as boolean,
+    };
+  },
+
+  claimDailyCoins: async (adReference?: string): Promise<ClaimDailyCoinsResponse> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.ads.claimDailyCoins, {
+      method: 'POST',
+      body: JSON.stringify({ ad_reference: adReference }),
+    });
+    return {
+      success: raw.success as boolean,
+      coins: raw.coins as number,
+      rewardCoins: (raw.reward_coins ?? raw.rewardCoins) as number,
+      usedToday: (raw.used_today ?? raw.usedToday) as number,
+      limitToday: (raw.limit_today ?? raw.limitToday) as number,
+      resetsAt: (raw.resets_at ?? raw.resetsAt) as string,
+    };
+  },
+
+  claimHint: async (adReference?: string): Promise<ClaimHintResponse> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.ads.claimHint, {
+      method: 'POST',
+      body: JSON.stringify({ ad_reference: adReference }),
+    });
+    return {
+      success: raw.success as boolean,
+      hintBalance: (raw.hint_balance ?? raw.hintBalance) as number,
+    };
+  },
+
+  claimRevive: async (
+    level: number,
+    sessionId: string,
+    adReference?: string,
+  ): Promise<ClaimReviveResponse> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.ads.claimRevive, {
       method: 'POST',
       body: JSON.stringify({
         level,
-        seed,
-        remaining_arrows: remainingArrows,
+        session_id: sessionId,
+        ad_reference: adReference,
       }),
-    }),
+    });
+    return {
+      success: raw.success as boolean,
+      reviveGranted: (raw.revive_granted ?? raw.reviveGranted) as boolean,
+      sessionId: (raw.session_id ?? raw.sessionId) as string,
+    };
+  },
+
+  createRewardIntent: async (payload: RewardIntentCreateRequest): Promise<RewardIntentCreateResponse> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.ads.rewardIntents, {
+      method: 'POST',
+      body: JSON.stringify({
+        placement: payload.placement,
+        level: payload.level,
+        session_id: payload.sessionId,
+      }),
+    });
+    return {
+      intentId: (raw.intent_id ?? raw.intentId) as string,
+      placement: (raw.placement ?? payload.placement) as RewardIntentCreateResponse['placement'],
+      status: (raw.status ?? 'pending') as RewardIntentCreateResponse['status'],
+      expiresAt: (raw.expires_at ?? raw.expiresAt ?? '') as string,
+    };
+  },
+
+  getRewardIntentStatus: async (intentId: string): Promise<RewardIntentStatusResponse> => {
+    const raw = await request<Record<string, unknown>>(`${API_ENDPOINTS.ads.rewardIntents}/${intentId}`);
+    return {
+      intentId: (raw.intent_id ?? raw.intentId ?? intentId) as string,
+      placement: raw.placement as RewardIntentStatusResponse['placement'],
+      status: (raw.status ?? 'pending') as RewardIntentStatusResponse['status'],
+      failureCode: (raw.failure_code ?? raw.failureCode) as string | undefined,
+      coins: raw.coins != null ? Number(raw.coins) : undefined,
+      hintBalance: raw.hint_balance != null
+        ? Number(raw.hint_balance)
+        : raw.hintBalance != null
+          ? Number(raw.hintBalance)
+          : undefined,
+      reviveGranted: Boolean(raw.revive_granted ?? raw.reviveGranted),
+      usedToday: raw.used_today != null
+        ? Number(raw.used_today)
+        : raw.usedToday != null
+          ? Number(raw.usedToday)
+          : undefined,
+      limitToday: raw.limit_today != null
+        ? Number(raw.limit_today)
+        : raw.limitToday != null
+          ? Number(raw.limitToday)
+          : undefined,
+      resetsAt: (raw.resets_at ?? raw.resetsAt) as string | undefined,
+    };
+  },
 };
 
 // ============================================
@@ -355,17 +535,26 @@ export const gameApi = {
 // ============================================
 
 export const shopApi = {
-  getCatalog: (): Promise<ShopCatalog> =>
-    request<ShopCatalog>(API_ENDPOINTS.shop.catalog),
+  getCatalog: async (): Promise<ShopCatalog> =>
+    normalizeShopCatalog(await request<RawShopCatalog>(API_ENDPOINTS.shop.catalog)),
 
   purchaseCoins: (
     itemType: string,
     itemId: string
-  ): Promise<{ success: boolean; coins: number }> =>
-    request<{ success: boolean; coins: number }>(API_ENDPOINTS.shop.purchaseCoins, {
+  ): Promise<PurchaseCoinsResponse> =>
+    request<Record<string, unknown>>(API_ENDPOINTS.shop.purchaseCoins, {
       method: 'POST',
       body: JSON.stringify({ item_type: itemType, item_id: itemId }),
-    }),
+    }).then((raw) => ({
+      success: Boolean(raw.success),
+      coins: Number(raw.coins ?? 0),
+      hintBalance: raw.hintBalance != null
+        ? Number(raw.hintBalance)
+        : raw.hint_balance != null
+          ? Number(raw.hint_balance)
+          : undefined,
+      error: typeof raw.error === 'string' ? raw.error : undefined,
+    })),
 
   purchaseStars: (
     itemType: string,
@@ -444,6 +633,33 @@ export const socialApi = {
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
+
+export function sendAuthorizedKeepalive(endpoint: string, body: unknown): void {
+  const { token, authStatus } = useAppStore.getState();
+  if (authStatus === 'expired' || authStatus === 'reauthenticating') {
+    return;
+  }
+  if (!token && !DEV_AUTH_ACTIVE) {
+    return;
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  if (DEV_AUTH_ACTIVE) {
+    headers['X-Dev-User-Id'] = DEV_AUTH_USER_ID;
+  }
+
+  void fetch(`${API_URL}${endpoint}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    keepalive: true,
+  }).catch(() => undefined);
+}
 
 export const checkApiHealth = async (): Promise<boolean> => {
   try {

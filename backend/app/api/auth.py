@@ -5,7 +5,7 @@ Arrow Puzzle - Authentication API
 """
 
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header
@@ -28,17 +28,55 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # JWT HELPERS
 # ============================================
 
-def create_jwt_token(user_id: int) -> str:
+def create_jwt_token(user_id: int, issued_at: Optional[int] = None) -> str:
     """
     Создаёт JWT токен.
     ВАЖНО: Короткий expiration (1 hour) для безопасности!
     """
+    issued_at = issued_at or int(time.time())
     payload = {
         "sub": str(user_id),
-        "iat": int(time.time()),
-        "exp": int(time.time()) + settings.JWT_EXPIRE_HOURS * 3600,
+        "iat": issued_at,
+        "exp": get_jwt_expiration_timestamp(issued_at),
     }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
+def get_jwt_expiration_timestamp(issued_at: int) -> int:
+    return issued_at + settings.JWT_EXPIRE_HOURS * 3600
+
+
+def serialize_user(user: User) -> dict:
+    return {
+        "id": user.id,
+        "telegram_id": user.telegram_id,
+        "username": user.username,
+        "first_name": user.first_name,
+        "photo_url": user.photo_url,
+        "current_level": user.current_level,
+        "total_stars": user.total_stars,
+        "coins": user.coins,
+        "hint_balance": user.hint_balance,
+        "energy": user.energy,
+        "is_premium": user.is_premium,
+        "active_arrow_skin": user.active_arrow_skin,
+        "active_theme": user.active_theme,
+        "referrals_count": user.referrals_count,
+        "referrals_pending": user.referrals_pending,
+    }
+
+
+def build_auth_response(user: User) -> AuthResponse:
+    issued_at = int(time.time())
+    expires_at_ts = get_jwt_expiration_timestamp(issued_at)
+    token = create_jwt_token(user.id, issued_at=issued_at)
+    expires_at_iso = datetime.fromtimestamp(expires_at_ts, tz=timezone.utc).isoformat()
+
+    return AuthResponse(
+        token=token,
+        expires_at=expires_at_iso,
+        user=serialize_user(user),
+    )
 
 
 def verify_jwt_token(token: str) -> Optional[int]:
@@ -304,27 +342,7 @@ async def auth_telegram(
     await apply_redis_referral(user, db)
     
     # Создаём JWT токен
-    token = create_jwt_token(user.id)
-    
-    return AuthResponse(
-        token=token,
-        user={
-            "id": user.id,
-            "telegram_id": user.telegram_id,
-            "username": user.username,
-            "first_name": user.first_name,
-            "photo_url": user.photo_url,
-            "current_level": user.current_level,
-            "total_stars": user.total_stars,
-            "coins": user.coins,
-            "energy": user.energy,
-            "is_premium": user.is_premium,
-            "active_arrow_skin": user.active_arrow_skin,
-            "active_theme": user.active_theme,
-            "referrals_count": user.referrals_count,
-            "referrals_pending": user.referrals_pending,
-        }
-    )
+    return build_auth_response(user)
 
 
 @router.get("/me", response_model=UserResponse)
@@ -340,24 +358,4 @@ async def refresh_token(user: User = Depends(get_current_user)):
     """
     Обновить JWT токен.
     """
-    token = create_jwt_token(user.id)
-    
-    return AuthResponse(
-        token=token,
-        user={
-            "id": user.id,
-            "telegram_id": user.telegram_id,
-            "username": user.username,
-            "first_name": user.first_name,
-            "photo_url": user.photo_url,
-            "current_level": user.current_level,
-            "total_stars": user.total_stars,
-            "coins": user.coins,
-            "energy": user.energy,
-            "is_premium": user.is_premium,
-            "active_arrow_skin": user.active_arrow_skin,
-            "active_theme": user.active_theme,
-            "referrals_count": user.referrals_count,
-            "referrals_pending": user.referrals_pending,
-        }
-    )
+    return build_auth_response(user)

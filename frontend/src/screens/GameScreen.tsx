@@ -17,15 +17,25 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useMotionValue, motion } from 'framer-motion';
 import { useAppStore, useGameStore } from '../stores/store';
 import { CanvasBoard } from '../components/CanvasBoard';
-import { gameApi, type CompleteAndNextResponse } from '../api/client';
-import { API_ENDPOINTS, API_URL, MAX_CELL_SIZE, MIN_CELL_SIZE } from '../config/constants';
+import { gameApi, sendAuthorizedKeepalive, type CompleteAndNextResponse } from '../api/client';
+import { showInterstitialAd } from '../services/adsgram';
+import { runRewardedFlow } from '../services/rewardedAds';
+import {
+  API_ENDPOINTS,
+  MAX_CELL_SIZE,
+  MIN_CELL_SIZE,
+  ADS_ENABLED,
+  ADSGRAM_BLOCK_IDS,
+  ADS_FIRST_ELIGIBLE_LEVEL,
+} from '../config/constants';
 import { clearFlyFX } from '../game/fxBridge';
 import { FXOverlay } from '../components/FXOverlay';
 import { LevelTransitionLoader } from '../components/ui/LevelTransitionLoader';
 import { GameHUD } from './game-screen/GameHUD';
-import { getLivesForDifficulty } from './game-screen/difficultyConfig';
+import { getDifficultyTier, getLivesForDifficulty } from './game-screen/difficultyConfig';
 import { ErrorVignette } from './game-screen/ErrorVignette';
 import { GameMenuModal } from './game-screen/GameMenuModal';
+import { HintEmptyModal } from './game-screen/HintEmptyModal';
 import { GameResultModal } from './game-screen/GameResultModal';
 import type { NextButtonState, PendingVictoryAction } from './game-screen/VictoryScreen';
 import { useArrowActions } from './game-screen/useArrowActions';
@@ -280,7 +290,6 @@ function GameDevPanel({
 
 export function GameScreen() {
   const user = useAppStore(s => s.user);
-  const token = useAppStore(s => s.token);
   const setUser = useAppStore(s => s.setUser);
   const setScreen = useAppStore(s => s.setScreen);
 
@@ -289,7 +298,7 @@ export function GameScreen() {
   const arrows = useGameStore(s => s.arrows);
   const lives = useGameStore(s => s.lives);
   const status = useGameStore(s => s.status);
-  const hintsRemaining = useGameStore(s => s.hintsRemaining);
+  const hintBalance = useAppStore(s => s.user?.hintBalance ?? 0);
   const hintedArrowId = useGameStore(s => s.hintedArrowId);
   const removedArrowIds = useGameStore(s => s.removedArrowIds);
   const levelStartTime = useGameStore(s => s.startTime);
@@ -305,6 +314,8 @@ export function GameScreen() {
   const setShakingArrow = useGameStore(s => s.setShakingArrow);
   const blockArrow = useGameStore(s => s.blockArrow);
   const unblockArrows = useGameStore(s => s.unblockArrows);
+  const lastInterstitialAt = useGameStore(s => s.lastInterstitialAt);
+  const setLastInterstitial = useGameStore(s => s.setLastInterstitial);
 
   const [currentLevel, setCurrentLevel] = useState(() =>
     ENABLE_SERVER_PROGRESS_PERSIST ? resolveUserCurrentLevel(user) : 1
@@ -342,6 +353,7 @@ export function GameScreen() {
   const prefetchedNextLevelRef = useRef<CompleteAndNextResponse['nextLevel']>(null);
 
   const [confirmAction, setConfirmAction] = useState<'restart' | 'menu' | 'unsaved_menu' | null>(null);
+  const [showHintModal, setShowHintModal] = useState(false);
   const [noMoreLevels, setNoMoreLevels] = useState(false);
   const [isAutoSolving, setIsAutoSolving] = useState(false);
   const [levelDifficulty, setLevelDifficulty] = useState<string | number>(1);
@@ -351,6 +363,15 @@ export function GameScreen() {
   const [navigationState, setNavigationState] = useState<VictoryNavigationState>('idle');
   const [pendingVictoryAction, setPendingVictoryAction] = useState<PendingVictoryAction>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Revive
+  const sessionIdRef = useRef(Date.now().toString(36) + Math.random().toString(36).slice(2));
+  const [reviveUsed, setReviveUsed] = useState(false);
+  const [reviveLoading, setReviveLoading] = useState(false);
+  const reviveAvailable = currentLevel >= ADS_FIRST_ELIGIBLE_LEVEL
+    && ADS_ENABLED
+    && !!ADSGRAM_BLOCK_IDS.rewardRevive
+    && !reviveUsed;
 
   const getElapsedSeconds = useCallback(() => {
     if (levelStartTime <= 0) return 1;
@@ -604,6 +625,10 @@ export function GameScreen() {
     saveResolvedLevelRef.current = null;
     savedNextLevelRef.current = null;
     nextLevelExistsRef.current = true;
+    // Reset revive for new level
+    setReviveUsed(false);
+    setReviveLoading(false);
+    sessionIdRef.current = Date.now().toString(36) + Math.random().toString(36).slice(2);
 
     const prefetched = prefetchedNextLevelRef.current;
     prefetchedNextLevelRef.current = null;
@@ -672,6 +697,43 @@ export function GameScreen() {
     }, 200);
   }, [clearVictoryAction, gameLevel, status]);
 
+  const maybeShowInterstitialForVictory = useCallback((completedLevel: number, difficulty: string | number, timeSeconds: number) => {
+    if (completedLevel < ADS_FIRST_ELIGIBLE_LEVEL || !ADS_ENABLED) return;
+
+    const tier = getDifficultyTier(difficulty);
+    const now = Date.now();
+    const gap = now - lastInterstitialAt;
+    let blockId = '';
+
+    if (tier === 'easy' || tier === 'normal') {
+      if (completedLevel < 25) return;
+      if (completedLevel % 5 !== 0) return;
+      if (timeSeconds < 20) return;
+      if (gap < 90_000) return;
+      blockId = ADSGRAM_BLOCK_IDS.interstitialProgress;
+    } else {
+      if (timeSeconds < 35) return;
+      if (gap < 120_000) return;
+      blockId = ADSGRAM_BLOCK_IDS.interstitialHard;
+    }
+
+    if (!blockId) return;
+
+    void showInterstitialAd(blockId).then((result) => {
+      if (result.success) {
+        setLastInterstitial(now, completedLevel);
+      }
+    }).catch(() => {
+      // Ignore interstitial failures: gameplay must not be blocked.
+    });
+  }, [lastInterstitialAt, setLastInterstitial]);
+
+  const proceedToNextLevelWithInterstitial = useCallback((targetLevel: number, completedLevel: number) => {
+    if (navigationState === 'loading_next') return;
+    maybeShowInterstitialForVictory(completedLevel, levelDifficulty, getElapsedSeconds());
+    navigateToSavedNextLevel(targetLevel);
+  }, [getElapsedSeconds, levelDifficulty, maybeShowInterstitialForVictory, navigateToSavedNextLevel, navigationState]);
+
   const applyCompletionSuccess = useCallback((result: CompleteAndNextResponse, completedLevel: number) => {
     const { completion, nextLevel, nextLevelExists } = result;
     const pendingAction = pendingVictoryActionRef.current;
@@ -706,9 +768,9 @@ export function GameScreen() {
     }
 
     if (pendingAction === 'next') {
-      navigateToSavedNextLevel(completion.currentLevel);
+      proceedToNextLevelWithInterstitial(completion.currentLevel, completedLevel);
     }
-  }, [clearVictoryAction, navigateToSavedNextLevel, setScreen, setUser, user]);
+  }, [clearVictoryAction, proceedToNextLevelWithInterstitial, setScreen, setUser, user]);
 
   const startVictorySave = useCallback(async (completedLevel: number, force = false) => {
     if (status !== 'victory' || noMoreLevels) return;
@@ -796,28 +858,20 @@ export function GameScreen() {
   useEffect(() => {
     if (!ENABLE_SERVER_PROGRESS_PERSIST) return;
     if (status !== 'victory' || noMoreLevels) return;
-    if (saveState !== 'saving' || !token) return;
+    if (saveState !== 'saving') return;
 
     const handler = () => {
-      void fetch(`${API_URL}${API_ENDPOINTS.game.complete}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          level: gameLevel,
-          seed: gameLevel,
-          moves: removedArrowIds,
-          time_seconds: getElapsedSeconds(),
-        }),
-        keepalive: true,
-      }).catch(() => undefined);
+      sendAuthorizedKeepalive(API_ENDPOINTS.game.complete, {
+        level: gameLevel,
+        seed: gameLevel,
+        moves: removedArrowIds,
+        time_seconds: getElapsedSeconds(),
+      });
     };
 
     window.addEventListener('pagehide', handler);
     return () => window.removeEventListener('pagehide', handler);
-  }, [gameLevel, getElapsedSeconds, noMoreLevels, removedArrowIds, saveState, status, token]);
+  }, [gameLevel, getElapsedSeconds, noMoreLevels, removedArrowIds, saveState, status]);
 
   // === КИНЕМАТОГРАФИЧНОЕ ИНТРО ===
   useEffect(() => {
@@ -1018,7 +1072,7 @@ export function GameScreen() {
 
   const handleMouseUp = useCallback(() => setIsDragging(false), []);
   // === КЛИК ПО СТРЕЛКЕ ===
-  const { handleArrowClick, handleHint } = useArrowActions({
+  const { handleArrowClick } = useArrowActions({
     isIntroAnimating,
     baseCellSize,
     cameraScale,
@@ -1032,6 +1086,42 @@ export function GameScreen() {
     removeArrows,
     showHint,
   });
+
+  // === ПОДСКАЗКА (server-side balance) ===
+  const onHintClick = useCallback(async () => {
+    if (isIntroAnimating) return;
+    const { hintedArrowId: currentHinted, arrows: currentArrows, seed: currentSeed } = useGameStore.getState();
+
+    // Re-focus existing hint
+    if (currentHinted && currentArrows.some(a => a.id === currentHinted)) {
+      window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('light');
+      focusHintArrow(currentHinted, true);
+      return;
+    }
+
+    // Check balance client-side first
+    const balance = useAppStore.getState().user?.hintBalance ?? 0;
+    if (balance <= 0) {
+      setShowHintModal(true);
+      return;
+    }
+
+    // Call API — server decrements balance & returns arrow to hint
+    try {
+      const remainingIds = currentArrows.map(a => a.id);
+      const result = await gameApi.getHint(currentLevel, currentSeed, remainingIds);
+      useAppStore.getState().updateUser({ hintBalance: result.hintBalance });
+      if (result.arrowId) {
+        showHint(result.arrowId);
+        focusHintArrow(result.arrowId);
+      }
+    } catch (err: unknown) {
+      // 409 = no hints available (race condition)
+      if (err && typeof err === 'object' && 'status' in err && (err as { status: number }).status === 409) {
+        setShowHintModal(true);
+      }
+    }
+  }, [isIntroAnimating, focusHintArrow, showHint, currentLevel]);
 
   const handleAutoSolve = useCallback(() => {
     if (isAutoSolving) {
@@ -1090,10 +1180,32 @@ export function GameScreen() {
     reloadCurrentLevel();
   }, [reloadCurrentLevel]);
   const confirmMenu = useCallback(() => { setConfirmAction(null); setScreen('home'); }, [setScreen]);
+
+  // === REVIVE через рекламу ===
+  const handleRevive = useCallback(async () => {
+    if (reviveUsed || reviveLoading) return;
+    setReviveLoading(true);
+    try {
+      const result = await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardRevive, {
+        placement: 'reward_revive',
+        level: currentLevel,
+        sessionId: sessionIdRef.current,
+      });
+      if (result.outcome === 'granted' && result.status?.reviveGranted) {
+        useGameStore.getState().revivePlayer();
+        setReviveUsed(true);
+      }
+    } catch {
+      // ignore — revive stays available
+    }
+    setReviveLoading(false);
+  }, [reviveUsed, reviveLoading, currentLevel]);
+
   const handleNextLevel = useCallback(() => {
     if (status !== 'victory' || noMoreLevels) return;
 
     if (!ENABLE_SERVER_PROGRESS_PERSIST) {
+      maybeShowInterstitialForVictory(gameLevel, levelDifficulty, getElapsedSeconds());
       setCurrentLevel(gameLevel + 1);
       return;
     }
@@ -1102,17 +1214,20 @@ export function GameScreen() {
 
     if (navigationState === 'loading_next') return;
     if (saveState === 'saved') {
-      navigateToSavedNextLevel();
+      proceedToNextLevelWithInterstitial(savedNextLevelRef.current ?? (gameLevel + 1), gameLevel);
       return;
     }
     if (saveState === 'saving') return;
 
     void startVictorySave(gameLevel, true);
   }, [
+    getElapsedSeconds,
     gameLevel,
-    navigateToSavedNextLevel,
+    levelDifficulty,
+    maybeShowInterstitialForVictory,
     navigationState,
     noMoreLevels,
+    proceedToNextLevelWithInterstitial,
     saveState,
     setVictoryAction,
     startVictorySave,
@@ -1184,8 +1299,8 @@ export function GameScreen() {
         currentLevel={currentLevel}
         lives={lives}
         difficulty={levelDifficulty}
-        hintsRemaining={hintsRemaining}
-        onHintClick={handleHint}
+        hintBalance={hintBalance}
+        onHintClick={onHintClick}
         onMenuClick={onMenuClick}
       >
         <div
@@ -1271,6 +1386,14 @@ export function GameScreen() {
         onConfirmExitUnsaved={confirmExitUnsavedMenu}
       />
 
+      <HintEmptyModal
+        open={showHintModal}
+        onClose={() => setShowHintModal(false)}
+        onHintEarned={() => void onHintClick()}
+        onGoToShop={() => setScreen('shop')}
+        adAllowed={currentLevel >= ADS_FIRST_ELIGIBLE_LEVEL && ADS_ENABLED && !!ADSGRAM_BLOCK_IDS.rewardHint}
+      />
+
       <GameResultModal
         status={status}
         difficulty={levelDifficulty}
@@ -1282,6 +1405,9 @@ export function GameScreen() {
         nextButtonState={nextButtonState}
         pendingAction={pendingVictoryAction}
         nextButtonError={saveError}
+        reviveAvailable={reviveAvailable}
+        reviveLoading={reviveLoading}
+        onRevive={handleRevive}
         onNextLevel={handleNextLevel}
         onVictoryRetry={handleVictoryRetry}
         onDefeatRetry={confirmRestart}

@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     # JWT
     JWT_SECRET: str = "your-super-secret-key-change-in-production"
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
-    JWT_EXPIRE_HOURS: int = 168  # 7 days in hours
+    JWT_EXPIRE_MINUTES: int = 60 * 6  # 6 hours
+    JWT_EXPIRE_HOURS: int = 6
     
     # Telegram
     BOT_TOKEN: str = ""
@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     
     # Adsgram
     ADSGRAM_SECRET: str = ""
+    ADSGRAM_WEBHOOK_REQUIRE_SIGNATURE: bool = False
     
     # CORS
     CORS_ORIGINS: str = "http://localhost:3000,https://t.me"
@@ -89,7 +90,24 @@ class Settings(BaseSettings):
     REFERRAL_BONUS_COINS: int = 100
     REFERRAL_OWNER_BONUS: int = 200
     AD_REWARD_COINS: int = 25
-    
+
+    # Ads & economy
+    AD_FIRST_ELIGIBLE_LEVEL: int = 21
+    AD_DAILY_COINS_REWARD: int = 20
+    AD_DAILY_COINS_LIMIT: int = 3
+    AD_RESET_TIMEZONE: str = "Europe/Moscow"
+    AD_INTERSTITIAL_EASY_NORMAL_INTERVAL: int = 5
+    AD_INTERSTITIAL_EASY_NORMAL_MIN_LEVEL_SECONDS: int = 20
+    AD_INTERSTITIAL_EASY_NORMAL_MIN_GAP_SECONDS: int = 90
+    AD_INTERSTITIAL_HARD_MIN_LEVEL_SECONDS: int = 35
+    AD_INTERSTITIAL_HARD_MIN_GAP_SECONDS: int = 120
+    INITIAL_HINT_BALANCE: int = 5
+    AD_REWARD_INTENT_TTL_SECONDS: int = 15 * 60
+    AD_REWARD_POLL_WINDOW_SECONDS: int = 45
+
+    # Rate Limiting - Ads
+    RATE_LIMIT_ADS: int = 10
+
     # Admin / security
     ADMIN_API_KEY: str = ""
 

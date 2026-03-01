@@ -12,7 +12,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Arrow, User, GameStatus } from '../game/types';
-import { INITIAL_LIVES, HINTS_PER_LEVEL } from '../config/constants';
+import { INITIAL_LIVES } from '../config/constants';
 import { rebuildIndex, removeFromIndex, globalIndex } from '../game/spatialIndex';
 
 // ============================================
@@ -20,6 +20,7 @@ import { rebuildIndex, removeFromIndex, globalIndex } from '../game/spatialIndex
 // ============================================
 
 export type ScreenName = 'home' | 'game' | 'shop' | 'profile' | 'leaderboard';
+export type AuthStatus = 'booting' | 'authenticated' | 'reauthenticating' | 'expired';
 
 interface AppState {
   screen: ScreenName;
@@ -31,6 +32,14 @@ interface AppState {
 
   token: string | null;
   setToken: (token: string | null) => void;
+  authStatus: AuthStatus;
+  setAuthStatus: (status: AuthStatus) => void;
+  authExpiresAt: string | null;
+  setAuthExpiresAt: (expiresAt: string | null) => void;
+  authMessage: string | null;
+  setAuthMessage: (message: string | null) => void;
+  setAuthenticatedSession: (session: { token: string | null; user: User; expiresAt: string | null }) => void;
+  clearAuthState: () => void;
   isAuthenticated: boolean;
 
   loading: boolean;
@@ -60,8 +69,26 @@ export const useAppStore = create<AppState>()(
 
       token: null,
       setToken: (token) => set({ token }),
+      authStatus: 'booting',
+      setAuthStatus: (authStatus) => set({ authStatus }),
+      authExpiresAt: null,
+      setAuthExpiresAt: (authExpiresAt) => set({ authExpiresAt }),
+      authMessage: null,
+      setAuthMessage: (authMessage) => set({ authMessage }),
+      setAuthenticatedSession: ({ token, user, expiresAt }) => set({
+        token,
+        user,
+        authExpiresAt: expiresAt,
+        authStatus: 'authenticated',
+        authMessage: null,
+      }),
+      clearAuthState: () => set({
+        token: null,
+        user: null,
+        authExpiresAt: null,
+      }),
       get isAuthenticated() {
-        return !!get().token && !!get().user;
+        return get().authStatus === 'authenticated' && !!get().user;
       },
 
       loading: false,
@@ -77,6 +104,7 @@ export const useAppStore = create<AppState>()(
       name: 'arrow-puzzle-app',
       partialize: (state) => ({
         token: state.token,
+        authExpiresAt: state.authExpiresAt,
       }),
     }
   )
@@ -111,7 +139,6 @@ interface GameStore {
 
   history: HistoryDiff[];
 
-  hintsRemaining: number;
   hintedArrowId: string | null;
   lifeHitTick: number;
 
@@ -145,13 +172,21 @@ interface GameStore {
   blockArrow: (arrowId: string) => void;
   unblockArrows: (arrowIds: string[]) => void;
 
+  // Ads
+  lastInterstitialAt: number;
+  lastInterstitialLevel: number;
+  setLastInterstitial: (at: number, level: number) => void;
+
+  // Revive
+  revivePlayer: () => void;
+
   activeSkinId: string;
   ownedSkinIds: string[];
   setSkin: (skinId: string) => void;
   purchaseSkin: (skinId: string) => void;
 }
 
-const initialGameState: Omit<GameStore, 'initLevel' | 'removeArrow' | 'removeArrows' | 'failMove' | 'undo' | 'showHint' | 'clearHint' | 'setStatus' | 'reset' | 'triggerLifeHit' | 'setShakingArrow' | 'setFlyingArrow' | 'blockArrow' | 'unblockArrows' | 'setSkin' | 'purchaseSkin'> = {
+const initialGameState: Omit<GameStore, 'initLevel' | 'removeArrow' | 'removeArrows' | 'failMove' | 'undo' | 'showHint' | 'clearHint' | 'setStatus' | 'reset' | 'triggerLifeHit' | 'setShakingArrow' | 'setFlyingArrow' | 'blockArrow' | 'unblockArrows' | 'setLastInterstitial' | 'revivePlayer' | 'setSkin' | 'purchaseSkin'> = {
   level: 1,
   seed: 0,
   gridSize: { width: 4, height: 4 },
@@ -163,12 +198,13 @@ const initialGameState: Omit<GameStore, 'initLevel' | 'removeArrow' | 'removeArr
   startTime: 0,
   endTime: 0,
   history: [],
-  hintsRemaining: HINTS_PER_LEVEL,
   hintedArrowId: null,
   lifeHitTick: 0,
   shakingArrowId: null,
   flyingArrowId: null,
   blockedArrowIds: [],
+  lastInterstitialAt: 0,
+  lastInterstitialLevel: 0,
   activeSkinId: 'classic',
   ownedSkinIds: ['classic'],
 };
@@ -233,7 +269,6 @@ export const useGameStore = create<GameStore>()(
         startTime: Date.now(),
         endTime: 0,
         history: [],
-        hintsRemaining: HINTS_PER_LEVEL,
         hintedArrowId: null,
         lifeHitTick: 0,
         shakingArrowId: null,
@@ -384,10 +419,7 @@ export const useGameStore = create<GameStore>()(
     },
 
     showHint: (arrowId) => {
-      set({
-        hintedArrowId: arrowId,
-        hintsRemaining: get().hintsRemaining - 1,
-      });
+      set({ hintedArrowId: arrowId });
     },
 
     clearHint: () => set({ hintedArrowId: null }),
@@ -403,7 +435,6 @@ export const useGameStore = create<GameStore>()(
         removedArrowIds: [],
         moves: 0,
         lives: INITIAL_LIVES,
-        hintsRemaining: HINTS_PER_LEVEL,
         hintedArrowId: null,
         lifeHitTick: 0,
         blockedArrowIds: [],
@@ -426,6 +457,10 @@ export const useGameStore = create<GameStore>()(
       set({ blockedArrowIds: get().blockedArrowIds.filter(id => !toRemove.has(id)) });
     },
 
+    setLastInterstitial: (at, level) => set({ lastInterstitialAt: at, lastInterstitialLevel: level }),
+
+    revivePlayer: () => set({ lives: 1, status: 'playing' }),
+
     setSkin: (skinId) => {
       const { ownedSkinIds } = get();
       if (ownedSkinIds.includes(skinId)) set({ activeSkinId: skinId });
@@ -442,7 +477,8 @@ export const useGameStore = create<GameStore>()(
 // SELECTORS
 // ============================================
 
-export const useIsAuthenticated = () => useAppStore(s => !!s.token && !!s.user);
+export const useIsAuthenticated = () =>
+  useAppStore((s) => s.authStatus === 'authenticated' && !!s.user);
 export const useCurrentUserLevel = () =>
   useAppStore((s) => {
     const user = s.user as (typeof s.user & { current_level?: number }) | null;
@@ -456,7 +492,7 @@ export const useGameLives = () => useGameStore(s => s.lives);
 export const useGameArrows = () => useGameStore(s => s.arrows);
 export const useGameGridSize = () => useGameStore(s => s.gridSize);
 export const useHintedArrow = () => useGameStore(s => s.hintedArrowId);
-export const useHintsRemaining = () => useGameStore(s => s.hintsRemaining);
+export const useHintBalance = () => useAppStore(s => s.user?.hintBalance ?? 0);
 export const useGameHistory = () => useGameStore(s => s.history);
 export const useShakingArrow = () => useGameStore(s => s.shakingArrowId);
 export const useBlockedArrows = () => useGameStore(s => s.blockedArrowIds);

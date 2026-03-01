@@ -121,15 +121,15 @@ export function useArrowActions({
     const {
       arrows: currentArrows,
       gridSize: currentGrid,
-      hintsRemaining: hints,
       hintedArrowId: currentHinted,
     } = useGameStore.getState();
-    if (hints <= 0) return;
+    // If hint is already shown, re-focus camera on it
     if (currentHinted && currentArrows.some((a) => a.id === currentHinted)) {
       window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('light');
       focusHintArrow(currentHinted, true);
       return;
     }
+    // Find a free arrow to hint — parent handles API call & balance check
     const free = getFreeArrows(currentArrows, { width: currentGrid.width, height: currentGrid.height });
     if (free.length > 0) showHint(free[0].id);
   }, [showHint, isIntroAnimating, focusHintArrow]);

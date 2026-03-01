@@ -147,6 +147,7 @@ export interface User {
   
   // Экономика
   coins: number;
+  hintBalance: number;
   energy: number;
   energyUpdatedAt: string;
   
@@ -204,6 +205,13 @@ export interface ShopCatalog {
   arrowSkins: ShopItem[];
   themes: ShopItem[];
   boosts: ShopItem[];
+}
+
+export interface PurchaseCoinsResponse {
+  success: boolean;
+  coins: number;
+  hintBalance?: number;
+  error?: string;
 }
 
 // ============================================
@@ -298,6 +306,7 @@ export interface ReferralLeaderboardResponse {
 /** Ответ авторизации */
 export interface AuthResponse {
   token: string;
+  expiresAt: string;
   user: User;
 }
 
@@ -348,6 +357,73 @@ export interface EnergyResponse {
 /** Ответ подсказки */
 export interface HintResponse {
   arrowId: string;
+  hintBalance: number;
+}
+
+// ============================================
+// ADS
+// ============================================
+
+export interface DailyCoinsStatus {
+  used: number;
+  limit: number;
+  resetsAt: string;
+}
+
+export interface AdsStatusResponse {
+  eligible: boolean;
+  currentLevel: number;
+  dailyCoins: DailyCoinsStatus;
+  hintAdAvailable: boolean;
+}
+
+export interface ClaimDailyCoinsResponse {
+  success: boolean;
+  coins: number;
+  rewardCoins: number;
+  usedToday: number;
+  limitToday: number;
+  resetsAt: string;
+}
+
+export interface ClaimHintResponse {
+  success: boolean;
+  hintBalance: number;
+}
+
+export interface ClaimReviveResponse {
+  success: boolean;
+  reviveGranted: boolean;
+  sessionId: string;
+}
+
+export type RewardPlacement = 'reward_daily_coins' | 'reward_hint' | 'reward_revive';
+export type RewardIntentStatus = 'pending' | 'granted' | 'rejected' | 'expired';
+
+export interface RewardIntentCreateRequest {
+  placement: RewardPlacement;
+  level?: number;
+  sessionId?: string;
+}
+
+export interface RewardIntentCreateResponse {
+  intentId: string;
+  placement: RewardPlacement;
+  status: RewardIntentStatus;
+  expiresAt: string;
+}
+
+export interface RewardIntentStatusResponse {
+  intentId: string;
+  placement: RewardPlacement;
+  status: RewardIntentStatus;
+  failureCode?: string;
+  coins?: number;
+  hintBalance?: number;
+  reviveGranted: boolean;
+  usedToday?: number;
+  limitToday?: number;
+  resetsAt?: string;
 }
 
 // ============================================

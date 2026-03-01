@@ -49,6 +49,7 @@ Set these values before first deploy:
   - `DEBUG=false`
   - `DEV_AUTH_ENABLED=false`
   - `JWT_SECRET=<long random secret, 32+ chars>`
+  - `JWT_EXPIRE_HOURS=6`
   - `TELEGRAM_BOT_TOKEN=<real bot token>`
   - `TELEGRAM_BOT_USERNAME=<your bot username>`
   - `WEBAPP_URL=https://<your-domain>`
@@ -131,7 +132,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=200 
 
 ### `Invalid or expired token`
 
-If `JWT_SECRET` changed, old JWTs become invalid. Users must re-open Mini App and login again.
+If `JWT_SECRET` changed, old JWTs become invalid. The client now tries a silent Telegram re-login first; if that fails, users must re-open Mini App and login again.
 
 ### Alembic duplicate column (`photo_url already exists`)
 

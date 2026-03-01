@@ -5,22 +5,25 @@
  * - DefeatFX (красное дыхание + пепел + vignette)
  * - HeartCrack иконка с glow (ОПТИМИЗИРОВАНО: радиальный градиент вместо blur)
  * - Плашка «Уровень N — ПРОВАЛЕН»
- * - CTA «Повторить» (с RefreshCcw) + ghost «В меню»
+ * - CTA «Revive» (через рекламу) + «Повторить» + ghost «В меню»
  */
 
 import { motion } from 'framer-motion';
-import { RefreshCcw } from 'lucide-react';
+import { RefreshCcw, Play, Heart } from 'lucide-react';
 
 import { DefeatFX } from './DefeatFX';
 import { DEFEAT_CONFIG } from './difficultyConfig';
 
 interface DefeatScreenProps {
   level: number;
+  reviveAvailable: boolean;
+  reviveLoading?: boolean;
+  onRevive: () => void;
   onRetry: () => void;
   onMenu: () => void;
 }
 
-export function DefeatScreen({ level, onRetry, onMenu }: DefeatScreenProps) {
+export function DefeatScreen({ level, reviveAvailable, reviveLoading, onRevive, onRetry, onMenu }: DefeatScreenProps) {
   const cfg = DEFEAT_CONFIG;
   const IconComponent = cfg.icon;
 
@@ -102,6 +105,20 @@ export function DefeatScreen({ level, onRetry, onMenu }: DefeatScreenProps) {
           transition={{ delay: 0.6, duration: 0.5 }}
           className="w-full flex flex-col items-center gap-4 px-2 mt-8"
         >
+          {/* Revive через рекламу */}
+          {reviveAvailable && (
+            <motion.button
+              whileTap={{ scale: 0.96 }}
+              onClick={onRevive}
+              disabled={reviveLoading}
+              className="w-full py-5 rounded-[20px] bg-gradient-to-b from-emerald-500 to-emerald-700 text-white font-black text-xl uppercase tracking-widest hover:brightness-110 transition-all border border-emerald-400/30 shadow-xl flex items-center justify-center gap-3 disabled:opacity-50"
+            >
+              <Heart size={22} fill="currentColor" />
+              {reviveLoading ? 'Загрузка...' : 'Продолжить'}
+              {!reviveLoading && <Play size={16} className="opacity-70" />}
+            </motion.button>
+          )}
+
           <motion.button
             whileTap={{ scale: 0.96 }}
             onClick={onRetry}

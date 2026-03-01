@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from ..config import settings
 from ..database import get_db, get_redis
@@ -677,6 +677,19 @@ async def get_hint(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # Атомарный декремент hint_balance
+    result = await db.execute(
+        update(User)
+        .where(User.id == user.id, User.hint_balance > 0)
+        .values(hint_balance=User.hint_balance - 1)
+        .returning(User.hint_balance)
+    )
+    row = result.first()
+    if row is None:
+        raise HTTPException(status_code=409, detail="No hints available")
+
+    new_balance = row[0]
+
     level_data = get_cached_level(request.level)
     if not level_data:
         raise HTTPException(status_code=404, detail="Level not found")
@@ -686,7 +699,9 @@ async def get_hint(
     hint_arrow_id = get_hint_arrow(remaining, level_data["grid"]["width"], level_data["grid"]["height"])
     if not hint_arrow_id:
         raise HTTPException(status_code=500, detail="No valid move found")
-    return HintResponse(arrow_id=hint_arrow_id)
+
+    await db.commit()
+    return HintResponse(arrow_id=hint_arrow_id, hint_balance=new_balance)
 
 
 @router.post("/reset")

@@ -15,9 +15,6 @@ export const INITIAL_LIVES = 3;
 /** Максимальное количество жизней */
 export const MAX_LIVES = 5;
 
-/** Количество подсказок на уровень */
-export const HINTS_PER_LEVEL = 3;
-
 // ============================================
 // ENERGY SYSTEM
 // ============================================
@@ -220,6 +217,7 @@ export const API_ENDPOINTS = {
   auth: {
     telegram: '/auth/telegram',
     me: '/auth/me',
+    refresh: '/auth/refresh',
   },
   game: {
     level: (n: number) => `/game/level/${n}`,
@@ -230,9 +228,16 @@ export const API_ENDPOINTS = {
     hint: '/game/hint',
     reset: '/game/reset',
   },
+  ads: {
+    status: '/ads/status',
+    rewardIntents: '/ads/reward-intents',
+    claimDailyCoins: '/ads/claim/daily-coins',
+    claimHint: '/ads/claim/hint',
+    claimRevive: '/ads/claim/revive',
+  },
   shop: {
     catalog: '/shop/catalog',
-    purchaseCoins: '/shop/purchase/coins',
+    purchaseCoins: '/shop/purchase',
     purchaseStars: '/shop/purchase/stars',
     purchaseTon: '/shop/purchase/ton',
   },
@@ -253,5 +258,14 @@ export const API_ENDPOINTS = {
 // ADSGRAM CONFIG
 // ============================================
 
-export const ADSGRAM_BLOCK_ID = import.meta.env.VITE_ADSGRAM_BLOCK_ID || '';
+export const ADS_ENABLED = import.meta.env.VITE_ADS_ENABLED === 'true';
+export const ADS_FIRST_ELIGIBLE_LEVEL = 21;
+
+export const ADSGRAM_BLOCK_IDS = {
+  rewardDailyCoins: import.meta.env.VITE_ADSGRAM_REWARD_DAILY_COINS_BLOCK_ID || '',
+  rewardHint: import.meta.env.VITE_ADSGRAM_REWARD_HINT_BLOCK_ID || '',
+  rewardRevive: import.meta.env.VITE_ADSGRAM_REWARD_REVIVE_BLOCK_ID || '',
+  interstitialProgress: import.meta.env.VITE_ADSGRAM_INTERSTITIAL_PROGRESS_BLOCK_ID || '',
+  interstitialHard: import.meta.env.VITE_ADSGRAM_INTERSTITIAL_HARD_BLOCK_ID || '',
+} as const;
 

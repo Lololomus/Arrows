@@ -19,7 +19,7 @@ interface GameHUDProps {
   currentLevel: number;
   lives: number;
   difficulty: DifficultyValue;
-  hintsRemaining: number;
+  hintBalance: number;
   onHintClick: () => void;
   onMenuClick: () => void;
   children: ReactNode;
@@ -166,21 +166,21 @@ function TopBar({
 // ============================================
 
 function BottomBar({
-  hintsRemaining,
+  hintBalance,
   lives,
   currentLevel,
   lifeHitTick,
   onHintClick,
   onMenuClick,
 }: {
-  hintsRemaining: number;
+  hintBalance: number;
   lives: number;
   currentLevel: number;
   lifeHitTick: number;
   onHintClick: () => void;
   onMenuClick: () => void;
 }) {
-  const disabled = hintsRemaining <= 0;
+  const disabled = false; // hint button always clickable — opens modal when balance=0
 
   return (
     <div className="relative z-20 w-full mt-auto">
@@ -232,7 +232,7 @@ function BottomBar({
               disabled ? 'text-white/30' : 'text-white'
             }`}
           >
-            {hintsRemaining}
+            {hintBalance}
           </span>
         </motion.button>
       </motion.div>
@@ -248,7 +248,7 @@ export function GameHUD({
   currentLevel,
   lives,
   difficulty,
-  hintsRemaining,
+  hintBalance,
   onHintClick,
   onMenuClick,
   children,
@@ -268,7 +268,7 @@ export function GameHUD({
       </div>
 
       <BottomBar
-        hintsRemaining={hintsRemaining}
+        hintBalance={hintBalance}
         lives={lives}
         currentLevel={currentLevel}
         lifeHitTick={lifeHitTick}

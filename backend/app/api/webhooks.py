@@ -1,311 +1,254 @@
 """
 Arrow Puzzle - Webhooks API
 
-Обработка вебхуков: Telegram Payments, TON, Adsgram.
+Telegram Payments, TON, AdsGram and Telegram bot updates.
 """
 
-import hashlib
-import hmac
-from fastapi import APIRouter, Depends, HTTPException, Request, Header
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..api.shop import apply_boost, get_item_by_id
 from ..config import settings
 from ..database import get_db
-from ..models import User, Inventory, Transaction
-from ..schemas import TelegramPaymentWebhook, TonPaymentWebhook, AdsgramRewardWebhook
-from ..api.shop import get_item_by_id, apply_boost
+from ..middleware.security import validate_adsgram_signature
+from ..models import Inventory, Transaction, User
+from ..services.ad_rewards import (
+    FAILURE_INVALID_SIGNATURE,
+    PLACEMENT_DAILY_COINS,
+    PLACEMENT_HINT,
+    PLACEMENT_REVIVE,
+    extract_callback_value,
+    find_pending_intent_for_callback,
+    grant_intent,
+    serialize_intent,
+)
 from ..services.referrals import extract_referral_code_from_start_text, store_pending_referral_code
 
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
-# ============================================
-# TELEGRAM PAYMENTS
-# ============================================
-
 @router.post("/telegram/payment")
 async def handle_telegram_payment(
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """
-    Вебхук для Telegram Stars платежей.
-    Вызывается Telegram Bot API после успешной оплаты.
-    """
+    """Webhook for Telegram Stars payments."""
     body = await request.json()
-    
-    # Проверяем pre_checkout_query или successful_payment
+
     if "pre_checkout_query" in body:
-        # Подтверждаем возможность оплаты
-        query = body["pre_checkout_query"]
-        # TODO: Проверить инвентарь, доступность товара
-        # await bot.answer_pre_checkout_query(query["id"], ok=True)
         return {"ok": True}
-    
+
     if "message" in body and "successful_payment" in body["message"]:
         payment = body["message"]["successful_payment"]
         user_id = body["message"]["from"]["id"]
-        
-        # Парсим payload
-        payload = payment["invoice_payload"]  # format: "item_type:item_id"
-        item_type, item_id = payload.split(":")
-        
-        # Находим пользователя
-        result = await db.execute(
-            select(User).where(User.telegram_id == user_id)
-        )
+        item_type, item_id = payment["invoice_payload"].split(":")
+
+        result = await db.execute(select(User).where(User.telegram_id == user_id))
         user = result.scalar_one_or_none()
-        
         if not user:
             return {"ok": False, "error": "User not found"}
-        
-        # Выдаём товар
+
         item = get_item_by_id(item_type, item_id)
         if item:
             if item_type == "boosts":
                 await apply_boost(user, item_id, db)
             else:
-                inv = Inventory(
+                db.add(Inventory(user_id=user.id, item_type=item_type, item_id=item_id))
+
+            db.add(
+                Transaction(
                     user_id=user.id,
+                    type="purchase",
+                    currency="stars",
+                    amount=payment["total_amount"],
                     item_type=item_type,
-                    item_id=item_id
+                    item_id=item_id,
+                    status="completed",
+                    external_id=payment.get("telegram_payment_charge_id"),
                 )
-                db.add(inv)
-            
-            # Записываем транзакцию
-            tx = Transaction(
-                user_id=user.id,
-                type="purchase",
-                currency="stars",
-                amount=payment["total_amount"],
-                item_type=item_type,
-                item_id=item_id,
-                status="completed",
-                external_id=payment.get("telegram_payment_charge_id")
             )
-            db.add(tx)
-            
             await db.commit()
-        
+
         return {"ok": True}
-    
+
     return {"ok": True}
 
-
-# ============================================
-# TON PAYMENTS
-# ============================================
 
 @router.post("/ton/payment")
 async def handle_ton_payment(
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """
-    Вебхук для TON платежей.
-    Должен быть настроен через TON API или сервис типа TonConsole.
-    """
+    """Webhook for TON payments."""
     body = await request.json()
-    
-    # Формат зависит от TON provider
-    # Пример структуры:
     tx_hash = body.get("tx_hash") or body.get("hash")
     comment = body.get("comment") or body.get("memo", "")
     amount = float(body.get("amount", 0))
-    
+
     if not comment.startswith("arrow_"):
         return {"ok": False, "error": "Invalid comment format"}
-    
-    # Парсим comment: arrow_{user_id}_{tx_id}
+
     try:
-        parts = comment.split("_")
-        user_id = int(parts[1])
-        pending_tx_id = int(parts[2])
-    except (IndexError, ValueError):
+        _, user_id_raw, pending_tx_id_raw = comment.split("_")
+        user_id = int(user_id_raw)
+        pending_tx_id = int(pending_tx_id_raw)
+    except (ValueError, IndexError):
         return {"ok": False, "error": "Invalid comment format"}
-    
-    # Находим pending транзакцию
+
     result = await db.execute(
         select(Transaction).where(
             Transaction.id == pending_tx_id,
             Transaction.user_id == user_id,
-            Transaction.status == "pending"
+            Transaction.status == "pending",
         )
     )
     tx = result.scalar_one_or_none()
-    
     if not tx:
         return {"ok": False, "error": "Transaction not found"}
-    
-    # Проверяем сумму
     if amount < tx.amount:
         return {"ok": False, "error": "Insufficient amount"}
-    
-    # Получаем пользователя
+
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
-    
     if not user:
         return {"ok": False, "error": "User not found"}
-    
-    # Выдаём товар
+
     item = get_item_by_id(tx.item_type, tx.item_id)
     if item:
         if tx.item_type == "boosts":
             await apply_boost(user, tx.item_id, db)
         else:
-            inv = Inventory(
-                user_id=user.id,
-                item_type=tx.item_type,
-                item_id=tx.item_id
-            )
-            db.add(inv)
-    
-    # Обновляем транзакцию
+            db.add(Inventory(user_id=user.id, item_type=tx.item_type, item_id=tx.item_id))
+
     tx.status = "completed"
     tx.external_id = tx_hash
-    
     await db.commit()
-    
     return {"ok": True}
 
 
-# ============================================
-# ADSGRAM REWARDS
-# ============================================
-
-def verify_adsgram_signature(
-    user_id: int,
-    reward_type: str,
-    signature: str
-) -> bool:
-    """Проверка подписи Adsgram."""
-    # Формат зависит от Adsgram API
-    data = f"{user_id}:{reward_type}"
-    expected = hmac.new(
-        settings.ADSGRAM_SECRET.encode(),
-        data.encode(),
-        hashlib.sha256
-    ).hexdigest()
-    return hmac.compare_digest(signature, expected)
+async def _safe_json(request: Request) -> dict:
+    try:
+        payload = await request.json()
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
-@router.post("/adsgram/reward")
-async def handle_adsgram_reward(
+def _extract_adsgram_signature(request: Request) -> str | None:
+    for header_name in ("x-adsgram-signature", "x_adsgram_signature", "x-signature"):
+        value = request.headers.get(header_name)
+        if value:
+            return value
+    return None
+
+
+async def _handle_adsgram_reward_callback(
     request: Request,
-    x_adsgram_signature: str = Header(None),
-    db: AsyncSession = Depends(get_db)
+    placement: str,
+    db: AsyncSession,
 ):
-    """
-    Вебхук для наград за рекламу Adsgram.
-    """
-    body = await request.json()
-    
-    user_telegram_id = body.get("user_id")
-    reward_type = body.get("reward_type")  # 'energy', 'coins', 'double_reward'
-    
-    if not user_telegram_id or not reward_type:
-        return {"ok": False, "error": "Missing parameters"}
-    
-    # Проверяем подпись (опционально)
-    # if x_adsgram_signature:
-    #     if not verify_adsgram_signature(user_telegram_id, reward_type, x_adsgram_signature):
-    #         return {"ok": False, "error": "Invalid signature"}
-    
-    # Находим пользователя
-    result = await db.execute(
-        select(User).where(User.telegram_id == user_telegram_id)
+    body = await _safe_json(request)
+    query = dict(request.query_params)
+    user_telegram_id = extract_callback_value(query, body, "userid", "user_id", "userId")
+    ad_reference = extract_callback_value(query, body, "ad_id", "adId", "reference")
+    signature = _extract_adsgram_signature(request)
+
+    print(
+        f"[Adsgram Callback] placement={placement} method={request.method} "
+        f"query={query} body={body} headers={dict(request.headers)}"
     )
+
+    if not user_telegram_id:
+        return {"ok": True, "note": "missing_userid"}
+
+    try:
+        parsed_user_id = int(user_telegram_id)
+    except (TypeError, ValueError):
+        return {"ok": True, "note": "invalid_userid"}
+
+    if signature and settings.ADSGRAM_SECRET:
+        is_valid = validate_adsgram_signature(parsed_user_id, placement, signature)
+        if not is_valid:
+            print(f"[Adsgram Callback] invalid signature for user={parsed_user_id} placement={placement}")
+            if settings.ADSGRAM_WEBHOOK_REQUIRE_SIGNATURE:
+                return {"ok": True, "note": FAILURE_INVALID_SIGNATURE}
+
+    result = await db.execute(select(User).where(User.telegram_id == parsed_user_id))
     user = result.scalar_one_or_none()
-    
-    if not user:
-        return {"ok": False, "error": "User not found"}
-    
-    # Выдаём награду
-    reward_amount = 0
-    
-    if reward_type == "energy":
-        user.energy = min(user.energy + 1, settings.MAX_ENERGY)
-        reward_amount = 1
-        
-    elif reward_type == "coins":
-        bonus = settings.AD_REWARD_COINS
-        user.coins += bonus
-        reward_amount = bonus
-        
-    elif reward_type == "double_reward":
-        # Удвоение награды за уровень (клиент передаёт базовую награду)
-        base_reward = body.get("base_reward", 0)
-        user.coins += base_reward
-        reward_amount = base_reward
-        
-    elif reward_type == "life":
-        # Дополнительная жизнь (обрабатывается на клиенте)
-        reward_amount = 1
-    
-    # Записываем транзакцию
-    tx = Transaction(
-        user_id=user.id,
-        type="ad_reward",
-        currency="coins" if reward_type == "coins" else reward_type,
-        amount=reward_amount,
-        status="completed",
-        external_id=body.get("ad_id")
-    )
-    db.add(tx)
-    
-    await db.commit()
-    
-    return {
-        "ok": True,
-        "reward_type": reward_type,
-        "reward_amount": reward_amount,
-        "new_balance": {
-            "coins": user.coins,
-            "energy": user.energy
-        }
-    }
+    if user is None:
+        return {"ok": True, "note": "user_not_found"}
+
+    intent = await find_pending_intent_for_callback(db, user.id, placement)
+    if intent is None:
+        return {"ok": True, "note": "no_pending_intent"}
+
+    granted_intent = await grant_intent(db, user, intent, ad_reference=str(ad_reference) if ad_reference else None)
+    return {"ok": True, "note": "processed", "intent": serialize_intent(granted_intent).model_dump()}
 
 
-# ============================================
-# TELEGRAM BOT UPDATES
-# ============================================
+@router.api_route("/adsgram/reward/daily-coins", methods=["GET", "POST"])
+async def handle_adsgram_reward_daily_coins(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _handle_adsgram_reward_callback(request, PLACEMENT_DAILY_COINS, db)
+
+
+@router.api_route("/adsgram/reward/hint", methods=["GET", "POST"])
+async def handle_adsgram_reward_hint(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _handle_adsgram_reward_callback(request, PLACEMENT_HINT, db)
+
+
+@router.api_route("/adsgram/reward/revive", methods=["GET", "POST"])
+async def handle_adsgram_reward_revive(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _handle_adsgram_reward_callback(request, PLACEMENT_REVIVE, db)
+
+
+@router.api_route("/adsgram/reward", methods=["GET", "POST"])
+async def handle_adsgram_reward_legacy(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    body = await _safe_json(request)
+    print(f"[Adsgram Callback][legacy] query={dict(request.query_params)} body={body}")
+    return {"ok": True, "note": "deprecated_use_placement_route"}
+
 
 @router.post("/telegram/bot")
 async def handle_bot_update(
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
-    Вебхук для обновлений Telegram бота.
-    
-    При /start ref_{CODE}:
-      - Создаёт пользователя если новый
-      - НЕ привязывает реферал напрямую (это делает /referral/apply из Mini App)
-      - Сохраняет ref_code в Redis как fallback (EC-16: если Mini App откроется без start_param)
+    Telegram bot webhook.
+
+    For /start ref_{CODE}:
+    - creates user if new
+    - does not apply referral directly
+    - stores pending referral code in Redis as fallback
     """
     body = await request.json()
-    
     if "message" not in body:
         return {"ok": True}
-    
+
     message = body["message"]
-    
     if not message.get("text", "").startswith("/start"):
         return {"ok": True}
-    
+
     text = message["text"]
     user_data = message["from"]
     telegram_id = user_data["id"]
-    
-    # Ищем или создаём пользователя
-    result = await db.execute(
-        select(User).where(User.telegram_id == telegram_id)
-    )
+
+    result = await db.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
-    
     if not user:
         user = User(
             telegram_id=telegram_id,
@@ -317,8 +260,7 @@ async def handle_bot_update(
         db.add(user)
         await db.commit()
         await db.refresh(user)
-    
-    # Сохраняем реферальный код в Redis (fallback для EC-16)
+
     ref_code = extract_referral_code_from_start_text(text)
     if ref_code:
         try:
@@ -327,8 +269,7 @@ async def handle_bot_update(
                 ref_code,
                 source="webhook-bot",
             )
-        except Exception as e:
-            # Redis недоступен — не критично, Mini App start_param сработает
-            print(f"⚠️ [Webhook] Redis save failed: {e}")
-    
+        except Exception as exc:
+            print(f"[Webhook] Redis save failed: {exc}")
+
     return {"ok": True}

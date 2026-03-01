@@ -5,10 +5,12 @@ import { useAppStore } from './stores/store';
 import { authApi, socialApi } from './api/client';
 import { UI_ANIMATIONS } from './config/constants';
 import { SmartLoader } from './components/ui/SmartLoader';
+import { AuthExpiredScreen } from './components/AuthExpiredScreen';
 import { BottomNav, type TabId } from './components/BottomNav';
 import { HomeScreen } from './screens/HomeScreen';
 import { GameScreen } from './screens/GameScreen';
 import nonGameBackgroundUrl from './assets/background.webp?url';
+import { bootstrapAuth, hasUsableTelegramInitData, markAuthExpired } from './services/authSession';
 import { extractReferralCode } from './utils/referralLaunch';
 
 const ShopScreen = lazy(() =>
@@ -30,85 +32,96 @@ const DEV_AUTH_ENABLED = ['1', 'true', 'yes', 'on'].includes(
 const ENABLE_NON_GAME_BACKGROUND = true; // one-line toggle
 
 export default function App() {
-  const { screen, setToken, setUser, setError } = useAppStore();
+  const {
+    screen,
+    authStatus,
+    authMessage,
+    setUser,
+    setError,
+    setAuthenticatedSession,
+  } = useAppStore();
   const [activeTab, setActiveTab] = useState<TabId>('play');
   const handleTabChange = useCallback((id: TabId) => setActiveTab(id), []);
 
-  useEffect(() => {
-    let cancelled = false;
+  const applyReferralIfPresent = useCallback(async (context: string, isCancelled?: () => boolean) => {
+    const referralCode = extractReferralCode();
+    if (!referralCode) {
+      return;
+    }
 
-    const applyReferralIfPresent = async (context: string) => {
-      const referralCode = extractReferralCode();
-      if (!referralCode) {
+    console.info(`[Referral] Extracted code in ${context}: ${referralCode}`);
+
+    try {
+      console.info(`[Referral] Applying code in ${context}`);
+      const result = await socialApi.applyReferral(referralCode);
+      console.info(
+        `[Referral] Apply result in ${context}: success=${result.success}`
+        + (result.reason ? ` reason=${result.reason}` : '')
+      );
+
+      if (!result.success && result.reason !== 'already_referred') {
         return;
       }
 
-      console.info(`[Referral] Extracted code in ${context}: ${referralCode}`);
+      const syncedUser = await authApi.getMe();
+      if (isCancelled?.()) return;
+      setUser(syncedUser);
+    } catch (error) {
+      console.error('[Referral] Auto-apply failed:', error);
+    }
+  }, [setUser]);
 
-      try {
-        console.info(`[Referral] Applying code in ${context}`);
-        const result = await socialApi.applyReferral(referralCode);
-        console.info(
-          `[Referral] Apply result in ${context}: success=${result.success}`
-          + (result.reason ? ` reason=${result.reason}` : '')
-        );
+  const runBootstrap = useCallback(async (isCancelled?: () => boolean) => {
+    const cancelled = () => isCancelled?.() ?? false;
 
-        if (!result.success && result.reason !== 'already_referred') {
+    setError(null);
+
+    try {
+      if (!hasUsableTelegramInitData()) {
+        if (DEV_AUTH_ENABLED) {
+          console.warn('No Telegram initData - using dev auth fallback');
+          const devUser = await authApi.getMe();
+          if (cancelled()) return;
+          setAuthenticatedSession({
+            token: null,
+            user: devUser,
+            expiresAt: null,
+          });
+          await applyReferralIfPresent('dev-auth', cancelled);
           return;
         }
 
-        const syncedUser = await authApi.getMe();
-        if (cancelled) return;
-        setUser(syncedUser);
-      } catch (error) {
-        console.error('[Referral] Auto-apply failed:', error);
+        markAuthExpired('Сессия истекла. Переоткройте Mini App из Telegram.');
+        return;
       }
-    };
 
-    const authenticate = async () => {
-      setError(null);
-      try {
-        const initData = window.Telegram?.WebApp?.initData;
+      console.log('Authenticating...');
+      await bootstrapAuth();
+      if (cancelled()) return;
 
-        if (!initData) {
-          if (DEV_AUTH_ENABLED) {
-            console.warn('No Telegram initData - using dev auth fallback');
-            const devUser = await authApi.getMe();
-            if (cancelled) return;
-            setToken(null);
-            setUser(devUser);
-            await applyReferralIfPresent('dev-auth');
-            return;
-          }
+      await applyReferralIfPresent('telegram-auth', cancelled);
+      if (cancelled()) return;
 
-          setToken(null);
-          setUser(null);
-          setError('\u041d\u0443\u0436\u0435\u043d \u0437\u0430\u043f\u0443\u0441\u043a \u0447\u0435\u0440\u0435\u0437 Telegram Mini App');
-          return;
-        }
-
-        console.log('Authenticating...');
-        const response = await authApi.telegram(initData);
-        if (cancelled) return;
-
-        setToken(response.token);
-        setUser(response.user);
-        await applyReferralIfPresent('telegram-auth');
-
-        console.log('Authenticated:', response.user.id);
-      } catch (error) {
-        if (cancelled) return;
-        console.error('Auth failed:', error);
-        setError('\u041e\u0448\u0438\u0431\u043a\u0430 \u0430\u0432\u0442\u043e\u0440\u0438\u0437\u0430\u0446\u0438\u0438');
+      const currentUser = useAppStore.getState().user;
+      if (currentUser) {
+        console.log('Authenticated:', currentUser.id);
       }
-    };
+    } catch (error) {
+      if (cancelled()) return;
+      console.error('Auth failed:', error);
+      if (useAppStore.getState().authStatus !== 'expired') {
+        markAuthExpired('Сессия истекла. Переоткройте Mini App из Telegram.');
+      }
+    }
+  }, [applyReferralIfPresent, setAuthenticatedSession, setError]);
 
-    authenticate();
-
+  useEffect(() => {
+    let cancelled = false;
+    void runBootstrap(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [setError, setToken, setUser]);
+  }, [runBootstrap]);
 
   useEffect(() => {
     if (!ENABLE_NON_GAME_BACKGROUND) return;
@@ -152,6 +165,28 @@ export default function App() {
       img.onerror = null;
     };
   }, []);
+
+  if (authStatus === 'booting') {
+    return (
+      <div className="relative w-full app-viewport overflow-hidden bg-slate-950">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(34,197,94,0.16),transparent_36%),linear-gradient(180deg,#020617_0%,#0f172a_100%)]" />
+        <div className="relative z-10 flex h-full items-center justify-center">
+          <SmartLoader text="Проверяем сессию..." />
+        </div>
+      </div>
+    );
+  }
+
+  if (authStatus === 'expired') {
+    return (
+      <AuthExpiredScreen
+        message={authMessage || 'Сессия истекла. Переоткройте Mini App из Telegram.'}
+        onRetry={() => {
+          void runBootstrap();
+        }}
+      />
+    );
+  }
 
   if (screen === 'game') {
     return (

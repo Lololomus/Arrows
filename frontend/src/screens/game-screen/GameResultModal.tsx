@@ -24,6 +24,10 @@ interface GameResultModalProps {
   pendingAction?: PendingVictoryAction;
   /** Текст ошибки */
   nextButtonError?: string | null;
+  /** Revive */
+  reviveAvailable?: boolean;
+  reviveLoading?: boolean;
+  onRevive?: () => void;
   onNextLevel: () => void;
   onVictoryRetry: () => void;
   onDefeatRetry: () => void;
@@ -42,6 +46,9 @@ export function GameResultModal({
   nextButtonState,
   pendingAction,
   nextButtonError,
+  reviveAvailable = false,
+  reviveLoading = false,
+  onRevive,
   onNextLevel,
   onVictoryRetry,
   onDefeatRetry,
@@ -71,6 +78,9 @@ export function GameResultModal({
       {showDefeat && (
         <DefeatScreen
           level={currentLevel}
+          reviveAvailable={reviveAvailable}
+          reviveLoading={reviveLoading}
+          onRevive={onRevive ?? onDefeatRetry}
           onRetry={onDefeatRetry}
           onMenu={onDefeatMenu}
         />
