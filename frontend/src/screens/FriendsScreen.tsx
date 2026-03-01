@@ -28,9 +28,11 @@ const itemVariant = {
 function ReferralProgressBar({
   currentLevel,
   confirmLevel,
+  isActive,
 }: {
   currentLevel: number;
   confirmLevel: number | null;
+  isActive: boolean;
 }) {
   if (!confirmLevel || confirmLevel <= 0) {
     return null;
@@ -42,17 +44,28 @@ function ReferralProgressBar({
   return (
     <div className="mt-1.5">
       <div className="flex items-center justify-between text-[10px] mb-1">
-        <span className="text-yellow-300/70 flex items-center gap-1">
-          <Clock size={10} /> Ещё {remaining} ур. до бонуса
-        </span>
-        <span className="text-white/40">{progress}%</span>
+        {isActive ? (
+          <>
+            <span className="text-green-300/80 flex items-center gap-1">
+              <CheckCircle size={10} /> Активен
+            </span>
+            <span className="text-green-300/80 font-semibold">{currentLevel}/{confirmLevel}</span>
+          </>
+        ) : (
+          <>
+            <span className="text-yellow-300/70 flex items-center gap-1">
+              <Clock size={10} /> Ещё {remaining} ур. до бонуса
+            </span>
+            <span className="text-white/40">{progress}%</span>
+          </>
+        )}
       </div>
       <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
         <motion.div
           initial={{ width: 0 }}
           animate={{ width: `${progress}%` }}
           transition={{ duration: 0.6, ease: 'easeOut' }}
-          className="h-full bg-gradient-to-r from-yellow-500 to-orange-400 rounded-full"
+          className={`h-full rounded-full ${isActive ? 'bg-gradient-to-r from-green-500 to-emerald-400' : 'bg-gradient-to-r from-yellow-500 to-orange-400'}`}
         />
       </div>
     </div>
@@ -70,6 +83,8 @@ function ReferralCard({
   confirmLevel: number | null;
 }) {
   const isConfirmed = referral.status === 'confirmed';
+  const hasReachedConfirmLevel = typeof confirmLevel === 'number' && confirmLevel > 0 && referral.current_level >= confirmLevel;
+  const isActive = isConfirmed || hasReachedConfirmLevel;
   const displayName = referral.first_name || referral.username || 'Игрок';
 
   return (
@@ -86,7 +101,7 @@ function ReferralCard({
           {referral.photo_url ? (
             <img src={referral.photo_url} alt="" className="w-full h-full rounded-full object-cover" />
           ) : (
-            isConfirmed ? <Check size={20} className="text-white/80" /> : <Clock size={20} className="text-white/50" />
+            isActive ? <Check size={20} className="text-white/80" /> : <Clock size={20} className="text-white/50" />
           )}
         </div>
         <div className="flex-1 min-w-0">
@@ -94,19 +109,25 @@ function ReferralCard({
           {referral.username && (
             <div className="text-white/40 text-[11px] truncate">@{referral.username}</div>
           )}
-          {!isConfirmed && (
-            <ReferralProgressBar
-              currentLevel={referral.current_level}
-              confirmLevel={confirmLevel}
-            />
-          )}
+          <ReferralProgressBar
+            currentLevel={referral.current_level}
+            confirmLevel={confirmLevel}
+            isActive={isActive}
+          />
         </div>
       </div>
 
       <div className="shrink-0 ml-3">
-        {isConfirmed ? (
-          <div className="flex items-center gap-1.5 bg-green-500/15 text-green-300 text-xs px-3 py-1.5 rounded-xl font-medium">
-            <CheckCircle size={14} /> Активен
+        {isActive ? (
+          <div className="text-center">
+            <div className="flex items-center gap-1.5 bg-green-500/15 text-green-300 text-xs px-3 py-1.5 rounded-xl font-medium">
+              <CheckCircle size={14} /> Активен
+            </div>
+            {confirmLevel ? (
+              <div className="mt-1 text-green-300 text-[10px] font-bold">
+                {referral.current_level}/{confirmLevel}
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="text-center">

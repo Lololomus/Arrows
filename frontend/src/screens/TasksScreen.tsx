@@ -82,6 +82,8 @@ interface Task {
   locked: boolean;
 }
 
+const TASKS_PLACEHOLDER_ENABLED = true;
+
 export function TasksScreen() {
   const containerRef = useRef<HTMLDivElement>(null);
   
@@ -499,6 +501,20 @@ export function TasksScreen() {
           )}
         </AnimatePresence>
       </div>
+
+      {TASKS_PLACEHOLDER_ENABLED && (
+        <div className="absolute inset-0 z-[220] flex items-center justify-center bg-[#080b16]/72 backdrop-blur-md px-6">
+          <div className="w-full max-w-sm rounded-3xl border border-white/12 bg-[#14192b]/92 p-6 text-center shadow-[0_24px_80px_rgba(0,0,0,0.55)]">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-400/25 bg-amber-500/10 text-amber-300">
+              <Lock size={28} />
+            </div>
+            <h2 className="mt-4 text-xl font-black text-white">Задания скоро откроются</h2>
+            <p className="mt-2 text-sm leading-relaxed text-white/60">
+              Этот раздел еще в работе. Пока награды и задания временно недоступны.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
