@@ -22,6 +22,7 @@ from ..schemas import (
     ClaimReviveRequest,
     ClaimReviveResponse,
     DailyCoinsStatus,
+    ReviveStatusResponse,
     RewardIntentCreateRequest,
     RewardIntentCreateResponse,
     RewardIntentStatusResponse,
@@ -30,6 +31,7 @@ from ..services.ad_rewards import (
     FAILURE_DAILY_LIMIT_REACHED,
     FAILURE_HINT_BALANCE_NOT_ZERO,
     FAILURE_REVIVE_ALREADY_USED,
+    REVIVE_LIMIT_PER_LEVEL,
     PLACEMENT_DAILY_COINS,
     PLACEMENT_HINT,
     PLACEMENT_REVIVE,
@@ -37,6 +39,7 @@ from ..services.ad_rewards import (
     create_reward_intent,
     ensure_eligible,
     get_intent_by_public_id,
+    get_revive_limit_status,
     mark_expired,
     next_reset_iso,
     serialize_create_intent,
@@ -85,6 +88,32 @@ async def create_reward_intent_endpoint(
     return serialize_create_intent(intent)
 
 
+@router.get("/revive-status", response_model=ReviveStatusResponse)
+async def get_revive_status(
+    level: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    eligible = user.current_level >= settings.AD_FIRST_ELIGIBLE_LEVEL
+    if not eligible:
+        return ReviveStatusResponse(
+            eligible=False,
+            level=level,
+            used=0,
+            limit=REVIVE_LIMIT_PER_LEVEL,
+            remaining=0,
+        )
+
+    status = await get_revive_limit_status(db, user.id, level)
+    return ReviveStatusResponse(
+        eligible=True,
+        level=level,
+        used=status["used"],
+        limit=status["limit"],
+        remaining=status["remaining"],
+    )
+
+
 @router.get("/reward-intents/{intent_id}", response_model=RewardIntentStatusResponse)
 async def get_reward_intent_status(
     intent_id: str,
@@ -100,7 +129,15 @@ async def get_reward_intent_status(
         await db.commit()
         await db.refresh(intent)
 
-    return serialize_intent(intent)
+    revive_status = None
+    if intent.placement == PLACEMENT_REVIVE and intent.level_number is not None:
+        revive_status = await get_revive_limit_status(db, user.id, intent.level_number)
+
+    return serialize_intent(
+        intent,
+        revives_used=revive_status["used"] if revive_status else None,
+        revives_limit=revive_status["limit"] if revive_status else None,
+    )
 
 
 @router.post("/claim/daily-coins", response_model=ClaimDailyCoinsResponse)

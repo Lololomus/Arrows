@@ -421,9 +421,19 @@ export interface RewardIntentStatusResponse {
   coins?: number;
   hintBalance?: number;
   reviveGranted: boolean;
+  revivesUsed?: number;
+  revivesLimit?: number;
   usedToday?: number;
   limitToday?: number;
   resetsAt?: string;
+}
+
+export interface ReviveStatusResponse {
+  eligible: boolean;
+  level: number;
+  used: number;
+  limit: number;
+  remaining: number;
 }
 
 // ============================================

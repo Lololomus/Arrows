@@ -4,9 +4,15 @@ import { Coins, Play, TimerReset } from 'lucide-react';
 import { useAppStore } from '../stores/store';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { CoinStashCard } from '../components/ui/CoinStashCard';
-import { adsApi } from '../api/client';
+import { adsApi, authApi } from '../api/client';
 import { ADS_ENABLED, ADS_FIRST_ELIGIBLE_LEVEL, ADSGRAM_BLOCK_IDS } from '../config/constants';
-import { pollRewardIntent, runRewardedFlow } from '../services/rewardedAds';
+import { isValidRewardedBlockId } from '../services/adsgram';
+import {
+  PENDING_RETRY_TIMEOUT_MS,
+  getRewardedFlowMessage,
+  pollRewardIntent,
+  runRewardedFlow,
+} from '../services/rewardedAds';
 
 const HOME_BG_STAR_SIZE_PROFILE = { small: 0.8, medium: 0.16, large: 0.04 } as const;
 
@@ -46,6 +52,7 @@ function formatResetTime(resetsAt: string, now: number): string {
 
 function DailyCoinsCard({ currentLevel }: { currentLevel: number }) {
   const updateUser = useAppStore((s) => s.updateUser);
+  const setUser = useAppStore((s) => s.setUser);
   const [eligible, setEligible] = useState(false);
   const [used, setUsed] = useState(0);
   const [limit, setLimit] = useState(3);
@@ -54,6 +61,8 @@ function DailyCoinsCard({ currentLevel }: { currentLevel: number }) {
   const [statusLoaded, setStatusLoaded] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [pendingIntentId, setPendingIntentId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -67,6 +76,15 @@ function DailyCoinsCard({ currentLevel }: { currentLevel: number }) {
       setStatusLoaded(false);
     }
   }, []);
+
+  const syncCoins = useCallback(async () => {
+    try {
+      const me = await authApi.getMe();
+      setUser(me);
+    } catch {
+      void 0;
+    }
+  }, [setUser]);
 
   useEffect(() => {
     void loadStatus();
@@ -102,39 +120,55 @@ function DailyCoinsCard({ currentLevel }: { currentLevel: number }) {
   const handleWatch = useCallback(async () => {
     if (loading || used >= limit) return;
     setLoading(true);
+    setError(null);
+    setInfoMessage(null);
 
     try {
       const result = pendingIntentId
-        ? await pollRewardIntent(pendingIntentId)
+        ? await pollRewardIntent(pendingIntentId, PENDING_RETRY_TIMEOUT_MS)
         : await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardDailyCoins, {
             placement: 'reward_daily_coins',
           });
 
-      if (result.outcome === 'ad_failed') {
+      if (result.outcome === 'timeout') {
+        setPendingIntentId(result.intentId);
+        setInfoMessage(getRewardedFlowMessage('reward_daily_coins', result));
         return;
       }
 
-      if (result.outcome === 'timeout') {
+      if (result.outcome === 'ad_failed') {
+        setPendingIntentId(null);
+        setError(getRewardedFlowMessage('reward_daily_coins', result));
+        return;
+      }
+      if (result.outcome === 'error') {
         setPendingIntentId(result.intentId);
+        setError(getRewardedFlowMessage('reward_daily_coins', result));
+        return;
+      }
+
+      if (result.outcome === 'rejected') {
+        setPendingIntentId(null);
+        setError(getRewardedFlowMessage('reward_daily_coins', result));
+        await loadStatus();
         return;
       }
 
       setPendingIntentId(null);
-      if (result.outcome === 'granted' && result.status) {
-        setUsed(result.status.usedToday ?? used);
-        setLimit(result.status.limitToday ?? limit);
-        if (result.status.resetsAt) setResetsAt(result.status.resetsAt);
-        if (result.status.coins != null) updateUser({ coins: result.status.coins });
-        return;
+      setUsed(result.status?.usedToday ?? used);
+      setLimit(result.status?.limitToday ?? limit);
+      if (result.status?.resetsAt) setResetsAt(result.status.resetsAt);
+      if (result.status?.coins != null) {
+        updateUser({ coins: result.status.coins });
+      } else {
+        await syncCoins();
       }
-
-      await loadStatus();
     } catch {
-      // Keep current UI state; status refresh will recover.
+      setError('Не удалось связаться с сервером. Попробуйте еще раз.');
     } finally {
       setLoading(false);
     }
-  }, [limit, loadStatus, loading, pendingIntentId, updateUser, used]);
+  }, [limit, loadStatus, loading, pendingIntentId, syncCoins, updateUser, used]);
 
   if (!statusLoaded || !eligible || currentLevel < ADS_FIRST_ELIGIBLE_LEVEL) {
     return null;
@@ -165,6 +199,8 @@ function DailyCoinsCard({ currentLevel }: { currentLevel: number }) {
         ) : (
           <p className="text-white/50 text-xs">Осталось: {remaining}/{limit}</p>
         )}
+        {infoMessage && <p className="mt-1 text-xs text-amber-300">{infoMessage}</p>}
+        {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
       </div>
       <button
         onClick={handleWatch}
@@ -172,7 +208,7 @@ function DailyCoinsCard({ currentLevel }: { currentLevel: number }) {
         className="shrink-0 px-4 py-2.5 bg-gradient-to-b from-amber-500 to-orange-600 rounded-xl text-white font-bold text-sm flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <Play size={14} />
-        {loading ? '...' : waitingForReward ? 'Обновить' : 'Смотреть'}
+        {loading ? '...' : waitingForReward ? 'Проверить награду' : 'Смотреть'}
       </button>
     </motion.div>
   );
@@ -188,7 +224,7 @@ export function HomeScreen() {
 
   const showDailyCoins = displayedLevel >= ADS_FIRST_ELIGIBLE_LEVEL
     && ADS_ENABLED
-    && !!ADSGRAM_BLOCK_IDS.rewardDailyCoins;
+    && isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardDailyCoins);
 
   const handlePlayArcade = () => {
     setScreen('game');

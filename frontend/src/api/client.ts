@@ -35,6 +35,7 @@ import type {
   RewardIntentCreateRequest,
   RewardIntentCreateResponse,
   RewardIntentStatusResponse,
+  ReviveStatusResponse,
 } from '../game/types';
 
 // === NEW: Тип ответа от complete-and-next ===
@@ -197,6 +198,43 @@ async function parseResponseData(response: Response): Promise<unknown> {
   return response.text();
 }
 
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function parseApiErrorPayload(data: unknown): { message: string; code?: string } {
+  if (typeof data === 'string') {
+    return { message: data };
+  }
+
+  if (typeof data !== 'object' || data === null) {
+    return { message: 'Unknown error' };
+  }
+
+  const payload = data as Record<string, unknown>;
+  const detail = typeof payload.detail === 'object' && payload.detail !== null
+    ? payload.detail as Record<string, unknown>
+    : null;
+  const detailString = typeof payload.detail === 'string' ? payload.detail : undefined;
+  const code = firstString(detail?.error, detail?.code, payload.error, payload.code);
+  const message = firstString(
+    detail?.message,
+    detail?.error,
+    detail?.code,
+    detailString,
+    payload.message,
+    payload.error,
+    payload.code,
+  ) ?? 'Unknown error';
+
+  return { message, code };
+}
+
 async function executeRequest(
   endpoint: string,
   options: RequestOptions,
@@ -262,12 +300,7 @@ async function request<T>(
       markAuthExpired(SESSION_EXPIRED_MESSAGE);
     }
 
-    const message = typeof data === 'object' && data !== null
-      ? String((data as { detail?: unknown }).detail || 'Unknown error')
-      : String(data);
-    const code = typeof data === 'object' && data !== null
-      ? (data as { code?: string }).code
-      : undefined;
+    const { message, code } = parseApiErrorPayload(data);
     throw new ApiError(response.status, message, code);
   }
 
@@ -515,6 +548,16 @@ export const adsApi = {
           ? Number(raw.hintBalance)
           : undefined,
       reviveGranted: Boolean(raw.revive_granted ?? raw.reviveGranted),
+      revivesUsed: raw.revives_used != null
+        ? Number(raw.revives_used)
+        : raw.revivesUsed != null
+          ? Number(raw.revivesUsed)
+          : undefined,
+      revivesLimit: raw.revives_limit != null
+        ? Number(raw.revives_limit)
+        : raw.revivesLimit != null
+          ? Number(raw.revivesLimit)
+          : undefined,
       usedToday: raw.used_today != null
         ? Number(raw.used_today)
         : raw.usedToday != null
@@ -526,6 +569,17 @@ export const adsApi = {
           ? Number(raw.limitToday)
           : undefined,
       resetsAt: (raw.resets_at ?? raw.resetsAt) as string | undefined,
+    };
+  },
+
+  getReviveStatus: async (level: number): Promise<ReviveStatusResponse> => {
+    const raw = await request<Record<string, unknown>>(`${API_ENDPOINTS.ads.reviveStatus}?level=${level}`);
+    return {
+      eligible: Boolean(raw.eligible),
+      level: Number(raw.level ?? level),
+      used: Number(raw.used ?? 0),
+      limit: Number(raw.limit ?? 0),
+      remaining: Number(raw.remaining ?? 0),
     };
   },
 };

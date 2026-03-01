@@ -24,7 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--fix",
         action="store_true",
-        help="Write fixes back to disk. Without this flag, the script only reports issues.",
+        help="Write fixes back to disk without prompting.",
     )
     return parser.parse_args()
 
@@ -92,6 +92,20 @@ def process_level(path: Path, apply_fix: bool) -> tuple[bool, list[tuple[int, An
     return changed, changes
 
 
+def should_apply_fix(path: Path, changes: list[tuple[int, Any, Any]]) -> bool:
+    print(f"{path.name}: duplicate ids found")
+    for index, old_id, new_id in changes:
+        print(f"  arrow[{index}] id {old_id!r} -> {new_id!r}")
+
+    while True:
+        answer = input("Apply fix? [y/n]: ").strip().lower()
+        if answer in {"y", "yes"}:
+            return True
+        if answer in {"n", "no"}:
+            return False
+        print("Please answer y or n.")
+
+
 def main() -> int:
     args = parse_args()
 
@@ -99,6 +113,7 @@ def main() -> int:
         raise SystemExit(f"Levels directory not found: {LEVELS_DIR}")
 
     processed = 0
+    found = 0
     fixed = 0
 
     for path in sorted(LEVELS_DIR.glob("level_*.json")):
@@ -107,17 +122,22 @@ def main() -> int:
             continue
 
         processed += 1
-        changed, changes = process_level(path, args.fix)
+        changed, changes = process_level(path, apply_fix=False)
         if not changed:
             continue
 
-        fixed += 1
-        print(f"{path.name}: duplicate ids fixed")
-        for index, old_id, new_id in changes:
-            print(f"  arrow[{index}] id {old_id!r} -> {new_id!r}")
+        found += 1
+        apply_fix = args.fix or should_apply_fix(path, changes)
+        if apply_fix:
+            process_level(path, apply_fix=True)
+            fixed += 1
+            print(f"{path.name}: duplicate ids fixed")
+        else:
+            print(f"{path.name}: skipped")
 
-    mode = "fixed" if args.fix else "found"
-    print(f"Processed {processed} level files, {mode} issues in {fixed} file(s).")
+    print(
+        f"Processed {processed} level files, found issues in {found} file(s), fixed {fixed} file(s)."
+    )
     return 0
 
 

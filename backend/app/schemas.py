@@ -414,6 +414,16 @@ class RewardIntentStatusResponse(BaseModel):
     coins: Optional[int] = None
     hint_balance: Optional[int] = None
     revive_granted: bool = False
+    revives_used: Optional[int] = None
+    revives_limit: Optional[int] = None
     used_today: Optional[int] = None
     limit_today: Optional[int] = None
     resets_at: Optional[str] = None
+
+
+class ReviveStatusResponse(BaseModel):
+    eligible: bool
+    level: int
+    used: int
+    limit: int
+    remaining: int

@@ -37,12 +37,15 @@ INTENT_STATUS_EXPIRED = "expired"
 FAILURE_DAILY_LIMIT_REACHED = "DAILY_LIMIT_REACHED"
 FAILURE_HINT_BALANCE_NOT_ZERO = "HINT_BALANCE_NOT_ZERO"
 FAILURE_REVIVE_ALREADY_USED = "REVIVE_ALREADY_USED"
+FAILURE_REVIVE_LIMIT_REACHED = "REVIVE_LIMIT_REACHED"
 FAILURE_ADS_LOCKED = "ADS_LOCKED_BEFORE_LEVEL_21"
 FAILURE_INTENT_EXPIRED = "INTENT_EXPIRED"
 FAILURE_INTENT_ALREADY_PENDING = "REWARD_INTENT_ALREADY_PENDING"
+FAILURE_INTENT_SUPERSEDED = "INTENT_SUPERSEDED"
 FAILURE_INVALID_SIGNATURE = "INVALID_SIGNATURE"
 
 MSK = timezone(timedelta(hours=3))
+REVIVE_LIMIT_PER_LEVEL = 3
 
 
 def utcnow() -> datetime:
@@ -87,7 +90,23 @@ async def count_daily_coins_used(db: AsyncSession, user_id: int) -> int:
     return int(result.scalar_one())
 
 
-def serialize_intent(intent: AdRewardIntent) -> RewardIntentStatusResponse:
+async def count_revives_used_for_level(db: AsyncSession, user_id: int, level: int) -> int:
+    result = await db.execute(
+        select(func.count(AdRewardClaim.id)).where(
+            AdRewardClaim.user_id == user_id,
+            AdRewardClaim.placement == PLACEMENT_REVIVE,
+            AdRewardClaim.level_number == level,
+        )
+    )
+    return int(result.scalar_one())
+
+
+def serialize_intent(
+    intent: AdRewardIntent,
+    *,
+    revives_used: int | None = None,
+    revives_limit: int | None = None,
+) -> RewardIntentStatusResponse:
     resets_at = intent.resets_at.replace(tzinfo=MSK).isoformat() if intent.resets_at else None
     return RewardIntentStatusResponse(
         intent_id=intent.intent_id,
@@ -97,6 +116,8 @@ def serialize_intent(intent: AdRewardIntent) -> RewardIntentStatusResponse:
         coins=intent.coins,
         hint_balance=intent.hint_balance,
         revive_granted=bool(intent.revive_granted),
+        revives_used=revives_used,
+        revives_limit=revives_limit,
         used_today=intent.used_today,
         limit_today=intent.limit_today,
         resets_at=resets_at,
@@ -116,6 +137,8 @@ async def expire_stale_pending_intents(
     db: AsyncSession,
     user_id: int,
     placement: str,
+    *,
+    auto_commit: bool = True,
 ) -> None:
     result = await db.execute(
         select(AdRewardIntent).where(
@@ -130,7 +153,8 @@ async def expire_stale_pending_intents(
         return
     for intent in stale:
         mark_expired(intent)
-    await db.commit()
+    if auto_commit:
+        await db.commit()
 
 
 async def get_active_pending_intent(
@@ -173,40 +197,50 @@ async def create_reward_intent(
     level: int | None = None,
     session_id: str | None = None,
 ) -> AdRewardIntent:
-    ensure_eligible(user)
-    await expire_stale_pending_intents(db, user.id, placement)
+    locked_user_result = await db.execute(
+        select(User).where(User.id == user.id).with_for_update()
+    )
+    locked_user = locked_user_result.scalar_one()
 
-    active_intent = await get_active_pending_intent(db, user.id, placement)
-    if active_intent is not None:
-        if placement != PLACEMENT_REVIVE or active_intent.session_id == session_id:
-            return active_intent
-        raise HTTPException(status_code=409, detail={"error": FAILURE_INTENT_ALREADY_PENDING})
+    ensure_eligible(locked_user)
+    await expire_stale_pending_intents(db, locked_user.id, placement, auto_commit=False)
 
     if placement == PLACEMENT_DAILY_COINS:
-        used_today = await count_daily_coins_used(db, user.id)
+        used_today = await count_daily_coins_used(db, locked_user.id)
         if used_today >= settings.AD_DAILY_COINS_LIMIT:
             raise HTTPException(status_code=409, detail={"error": FAILURE_DAILY_LIMIT_REACHED})
     elif placement == PLACEMENT_HINT:
-        if user.hint_balance != 0:
+        if locked_user.hint_balance != 0:
             raise HTTPException(status_code=409, detail={"error": FAILURE_HINT_BALANCE_NOT_ZERO})
     elif placement == PLACEMENT_REVIVE:
         if not session_id or level is None:
             raise HTTPException(status_code=422, detail={"error": "SESSION_AND_LEVEL_REQUIRED"})
         existing = await db.execute(
             select(AdRewardClaim.id).where(
-                AdRewardClaim.user_id == user.id,
+                AdRewardClaim.user_id == locked_user.id,
                 AdRewardClaim.placement == PLACEMENT_REVIVE,
                 AdRewardClaim.session_id == session_id,
             )
         )
         if existing.scalar_one_or_none() is not None:
             raise HTTPException(status_code=409, detail={"error": FAILURE_REVIVE_ALREADY_USED})
+        used_for_level = await count_revives_used_for_level(db, locked_user.id, level)
+        if used_for_level >= REVIVE_LIMIT_PER_LEVEL:
+            raise HTTPException(status_code=409, detail={"error": FAILURE_REVIVE_LIMIT_REACHED})
     else:
         raise HTTPException(status_code=400, detail={"error": "UNKNOWN_PLACEMENT"})
 
+    active_intent = await get_active_pending_intent(db, locked_user.id, placement)
+    if active_intent is not None:
+        if placement != PLACEMENT_REVIVE or active_intent.session_id == session_id:
+            return active_intent
+        active_intent.status = INTENT_STATUS_REJECTED
+        active_intent.failure_code = FAILURE_INTENT_SUPERSEDED
+        active_intent.fulfilled_at = utcnow()
+
     intent = AdRewardIntent(
         intent_id=uuid4().hex,
-        user_id=user.id,
+        user_id=locked_user.id,
         placement=placement,
         status=INTENT_STATUS_PENDING,
         session_id=session_id,
@@ -324,6 +358,13 @@ async def _grant_revive(
     *,
     ad_reference: str | None,
 ) -> AdRewardIntent:
+    if intent.level_number is None:
+        return await reject_intent(db, intent, "SESSION_AND_LEVEL_REQUIRED")
+
+    revives_used = await count_revives_used_for_level(db, user.id, intent.level_number)
+    if revives_used >= REVIVE_LIMIT_PER_LEVEL:
+        return await reject_intent(db, intent, FAILURE_REVIVE_LIMIT_REACHED)
+
     claim = AdRewardClaim(
         user_id=user.id,
         placement=PLACEMENT_REVIVE,
@@ -397,6 +438,20 @@ async def find_pending_intent_for_callback(
         .order_by(AdRewardIntent.created_at.asc(), AdRewardIntent.id.asc())
     )
     return result.scalars().first()
+
+
+async def get_revive_limit_status(
+    db: AsyncSession,
+    user_id: int,
+    level: int,
+) -> dict[str, int]:
+    used = await count_revives_used_for_level(db, user_id, level)
+    remaining = max(0, REVIVE_LIMIT_PER_LEVEL - used)
+    return {
+        "used": used,
+        "limit": REVIVE_LIMIT_PER_LEVEL,
+        "remaining": remaining,
+    }
 
 
 def extract_callback_value(

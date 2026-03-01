@@ -6,9 +6,15 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Lightbulb, ShoppingBag, Play } from 'lucide-react';
+import { authApi } from '../../api/client';
 import { ADSGRAM_BLOCK_IDS } from '../../config/constants';
 import { useAppStore } from '../../stores/store';
-import { runRewardedFlow } from '../../services/rewardedAds';
+import {
+  PENDING_RETRY_TIMEOUT_MS,
+  getRewardedFlowMessage,
+  pollRewardIntent,
+  runRewardedFlow,
+} from '../../services/rewardedAds';
 
 interface HintEmptyModalProps {
   open: boolean;
@@ -27,46 +33,75 @@ export function HintEmptyModal({
 }: HintEmptyModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [pendingIntentId, setPendingIntentId] = useState<string | null>(null);
+
+  const syncHintBalance = async () => {
+    try {
+      const me = await authApi.getMe();
+      useAppStore.getState().setUser(me);
+      return;
+    } catch {
+      const currentHintBalance = useAppStore.getState().user?.hintBalance ?? 0;
+      useAppStore.getState().updateUser({ hintBalance: Math.max(currentHintBalance, 1) });
+    }
+  };
 
   const handleWatchAd = async () => {
     if (loading) return;
     setLoading(true);
     setError(null);
+    setInfoMessage(null);
 
     try {
-      const result = await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardHint, {
-        placement: 'reward_hint',
-      });
+      const result = pendingIntentId
+        ? await pollRewardIntent(pendingIntentId, PENDING_RETRY_TIMEOUT_MS)
+        : await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardHint, {
+            placement: 'reward_hint',
+          });
 
-      if (result.outcome === 'ad_failed') {
-        setError('Реклама недоступна');
+      if (result.outcome === 'timeout') {
+        setPendingIntentId(result.intentId);
+        setInfoMessage(getRewardedFlowMessage('reward_hint', result));
         return;
       }
 
-      if (result.outcome === 'timeout') {
-        setError('Награда еще проверяется. Попробуйте снова через несколько секунд');
+      if (result.outcome === 'ad_failed') {
+        setPendingIntentId(null);
+        setError(getRewardedFlowMessage('reward_hint', result));
+        return;
+      }
+      if (result.outcome === 'error') {
+        setPendingIntentId(result.intentId);
+        setError(getRewardedFlowMessage('reward_hint', result));
         return;
       }
 
       if (result.outcome === 'rejected') {
-        const failure = result.status?.failureCode;
-        if (failure === 'HINT_BALANCE_NOT_ZERO') {
+        if (result.failureCode === 'HINT_BALANCE_NOT_ZERO') {
+          await syncHintBalance();
+          setPendingIntentId(null);
           onClose();
           onHintEarned();
           return;
         }
-        setError('Не удалось получить подсказку');
+
+        setPendingIntentId(null);
+        setError(getRewardedFlowMessage('reward_hint', result));
         return;
       }
 
       if (result.status?.hintBalance != null) {
         useAppStore.getState().updateUser({ hintBalance: result.status.hintBalance });
+      } else {
+        await syncHintBalance();
       }
 
+      setPendingIntentId(null);
       onClose();
       onHintEarned();
     } catch {
-      setError('Произошла ошибка');
+      setError('Не удалось связаться с сервером. Попробуйте еще раз.');
     } finally {
       setLoading(false);
     }
@@ -100,9 +135,8 @@ export function HintEmptyModal({
               Посмотрите рекламу или купите подсказки в магазине
             </p>
 
-            {error && (
-              <p className="text-sm text-red-400 mb-3">{error}</p>
-            )}
+            {infoMessage && <p className="text-sm text-amber-300 mb-3">{infoMessage}</p>}
+            {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
 
             <div className="flex flex-col gap-3">
               {adAllowed && (
@@ -112,7 +146,7 @@ export function HintEmptyModal({
                   className="w-full py-3.5 bg-gradient-to-b from-amber-500 to-orange-600 rounded-xl text-white font-bold flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <Play size={18} />
-                  {loading ? 'Загрузка...' : 'Смотреть рекламу'}
+                  {loading ? 'Загрузка...' : pendingIntentId ? 'Проверить награду' : 'Смотреть рекламу'}
                 </button>
               )}
 

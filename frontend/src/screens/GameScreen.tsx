@@ -17,9 +17,14 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useMotionValue, motion } from 'framer-motion';
 import { useAppStore, useGameStore } from '../stores/store';
 import { CanvasBoard } from '../components/CanvasBoard';
-import { gameApi, sendAuthorizedKeepalive, type CompleteAndNextResponse } from '../api/client';
-import { showInterstitialAd } from '../services/adsgram';
-import { runRewardedFlow } from '../services/rewardedAds';
+import { adsApi, gameApi, sendAuthorizedKeepalive, type CompleteAndNextResponse } from '../api/client';
+import { isValidInterstitialBlockId, isValidRewardedBlockId, showInterstitialAd } from '../services/adsgram';
+import {
+  PENDING_RETRY_TIMEOUT_MS,
+  getRewardedFlowMessage,
+  pollRewardIntent,
+  runRewardedFlow,
+} from '../services/rewardedAds';
 import {
   API_ENDPOINTS,
   MAX_CELL_SIZE,
@@ -37,6 +42,7 @@ import { ErrorVignette } from './game-screen/ErrorVignette';
 import { GameMenuModal } from './game-screen/GameMenuModal';
 import { HintEmptyModal } from './game-screen/HintEmptyModal';
 import { GameResultModal } from './game-screen/GameResultModal';
+import type { ReviveStatusResponse } from '../game/types';
 import type { NextButtonState, PendingVictoryAction } from './game-screen/VictoryScreen';
 import { useArrowActions } from './game-screen/useArrowActions';
 import { getFreeArrows } from '../game/engine';
@@ -72,6 +78,10 @@ const ENABLE_INTRO_CAMERA_PUSH_IN = false;
 const ENABLE_SERVER_PROGRESS_PERSIST = true;
 const ENABLE_GAME_DEVTOOLS = import.meta.env.DEV;
 const DEV_LEVEL_PRESETS = [35, 36, 37, 38] as const;
+
+function createClientId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
 
 type VictorySaveState = 'idle' | 'saving' | 'saved' | 'error';
 type VictoryNavigationState = 'idle' | 'loading_next';
@@ -365,13 +375,17 @@ export function GameScreen() {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // Revive
-  const sessionIdRef = useRef(Date.now().toString(36) + Math.random().toString(36).slice(2));
-  const [reviveUsed, setReviveUsed] = useState(false);
+  const reviveOpportunityIdRef = useRef(createClientId());
+  const previousStatusRef = useRef(status);
   const [reviveLoading, setReviveLoading] = useState(false);
+  const [reviveMessage, setReviveMessage] = useState<string | null>(null);
+  const [pendingReviveIntentId, setPendingReviveIntentId] = useState<string | null>(null);
+  const [reviveQuota, setReviveQuota] = useState<ReviveStatusResponse | null>(null);
+  const revivePending = pendingReviveIntentId !== null;
   const reviveAvailable = currentLevel >= ADS_FIRST_ELIGIBLE_LEVEL
     && ADS_ENABLED
-    && !!ADSGRAM_BLOCK_IDS.rewardRevive
-    && !reviveUsed;
+    && isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardRevive)
+    && (revivePending || reviveQuota === null || reviveQuota.remaining > 0);
 
   const getElapsedSeconds = useCallback(() => {
     if (levelStartTime <= 0) return 1;
@@ -391,6 +405,35 @@ export function GameScreen() {
     if (saveState === 'error') return 'error';
     return 'idle';
   }, [navigationState, saveState]);
+
+  const loadReviveStatus = useCallback(async (level: number) => {
+    try {
+      const nextStatus = await adsApi.getReviveStatus(level);
+      setReviveQuota(nextStatus);
+      return nextStatus;
+    } catch {
+      setReviveQuota(null);
+      return null;
+    }
+  }, []);
+
+  const applyReviveQuotaFromStatus = useCallback((rewardStatus?: {
+    revivesUsed?: number;
+    revivesLimit?: number;
+  }) => {
+    if (rewardStatus?.revivesUsed == null || rewardStatus.revivesLimit == null) {
+      return false;
+    }
+
+    setReviveQuota({
+      eligible: true,
+      level: currentLevel,
+      used: rewardStatus.revivesUsed,
+      limit: rewardStatus.revivesLimit,
+      remaining: Math.max(0, rewardStatus.revivesLimit - rewardStatus.revivesUsed),
+    });
+    return true;
+  }, [currentLevel]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -626,9 +669,11 @@ export function GameScreen() {
     savedNextLevelRef.current = null;
     nextLevelExistsRef.current = true;
     // Reset revive for new level
-    setReviveUsed(false);
     setReviveLoading(false);
-    sessionIdRef.current = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    setReviveMessage(null);
+    setPendingReviveIntentId(null);
+    setReviveQuota(null);
+    reviveOpportunityIdRef.current = createClientId();
 
     const prefetched = prefetchedNextLevelRef.current;
     prefetchedNextLevelRef.current = null;
@@ -667,6 +712,26 @@ export function GameScreen() {
     hasInitialLevelSyncRef.current = true;
     setCurrentLevel(resolveUserCurrentLevel(user));
   }, [user]);
+
+  useEffect(() => {
+    const previousStatus = previousStatusRef.current;
+    previousStatusRef.current = status;
+
+    if (status !== 'defeat' || previousStatus === 'defeat') {
+      return;
+    }
+
+    reviveOpportunityIdRef.current = createClientId();
+    setReviveMessage(null);
+
+    if (!pendingReviveIntentId) {
+      void loadReviveStatus(currentLevel).then((nextStatus) => {
+        if (nextStatus && nextStatus.remaining <= 0) {
+          setReviveMessage('Лимит воскрешений на этом уровне исчерпан');
+        }
+      });
+    }
+  }, [currentLevel, loadReviveStatus, pendingReviveIntentId, status]);
 
   const setVictoryAction = useCallback((action: PendingVictoryAction) => {
     pendingVictoryActionRef.current = action;
@@ -717,7 +782,7 @@ export function GameScreen() {
       blockId = ADSGRAM_BLOCK_IDS.interstitialHard;
     }
 
-    if (!blockId) return;
+    if (!isValidInterstitialBlockId(blockId)) return;
 
     void showInterstitialAd(blockId).then((result) => {
       if (result.success) {
@@ -1183,23 +1248,63 @@ export function GameScreen() {
 
   // === REVIVE через рекламу ===
   const handleRevive = useCallback(async () => {
-    if (reviveUsed || reviveLoading) return;
+    if (reviveLoading) return;
     setReviveLoading(true);
+    setReviveMessage(null);
     try {
-      const result = await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardRevive, {
-        placement: 'reward_revive',
-        level: currentLevel,
-        sessionId: sessionIdRef.current,
-      });
-      if (result.outcome === 'granted' && result.status?.reviveGranted) {
+      const result = pendingReviveIntentId
+        ? await pollRewardIntent(pendingReviveIntentId, PENDING_RETRY_TIMEOUT_MS)
+        : await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardRevive, {
+            placement: 'reward_revive',
+            level: currentLevel,
+            sessionId: reviveOpportunityIdRef.current,
+          });
+      if (result.outcome === 'granted') {
         useGameStore.getState().revivePlayer();
-        setReviveUsed(true);
+        setPendingReviveIntentId(null);
+        setReviveMessage(null);
+        if (!applyReviveQuotaFromStatus(result.status)) {
+          await loadReviveStatus(currentLevel);
+        }
+        return;
       }
+      if (result.outcome === 'timeout') {
+        setPendingReviveIntentId(result.intentId);
+        setReviveMessage(getRewardedFlowMessage('reward_revive', result));
+        return;
+      }
+      if (result.outcome === 'ad_failed') {
+        setPendingReviveIntentId(null);
+        setReviveMessage(getRewardedFlowMessage('reward_revive', result));
+        return;
+      }
+      if (result.outcome === 'error') {
+        setPendingReviveIntentId(result.intentId);
+        setReviveMessage(getRewardedFlowMessage('reward_revive', result));
+        return;
+      }
+      setPendingReviveIntentId(null);
+      if (result.failureCode === 'REVIVE_ALREADY_USED' && useGameStore.getState().status === 'defeat') {
+        useGameStore.getState().revivePlayer();
+        setReviveMessage(null);
+        if (!applyReviveQuotaFromStatus(result.status)) {
+          await loadReviveStatus(currentLevel);
+        }
+        return;
+      }
+      if (result.failureCode === 'REVIVE_LIMIT_REACHED'
+        || result.failureCode === 'INTENT_EXPIRED'
+        || result.failureCode === 'INTENT_SUPERSEDED') {
+        await loadReviveStatus(currentLevel);
+      }
+      setReviveMessage(getRewardedFlowMessage('reward_revive', result));
     } catch {
-      // ignore — revive stays available
+      setPendingReviveIntentId(null);
+      setReviveMessage('Не удалось связаться с сервером. Попробуйте еще раз.');
+    } finally {
+      setReviveLoading(false);
     }
-    setReviveLoading(false);
-  }, [reviveUsed, reviveLoading, currentLevel]);
+  }, [applyReviveQuotaFromStatus, currentLevel, loadReviveStatus, pendingReviveIntentId, reviveLoading]);
 
   const handleNextLevel = useCallback(() => {
     if (status !== 'victory' || noMoreLevels) return;
@@ -1391,7 +1496,9 @@ export function GameScreen() {
         onClose={() => setShowHintModal(false)}
         onHintEarned={() => void onHintClick()}
         onGoToShop={() => setScreen('shop')}
-        adAllowed={currentLevel >= ADS_FIRST_ELIGIBLE_LEVEL && ADS_ENABLED && !!ADSGRAM_BLOCK_IDS.rewardHint}
+        adAllowed={currentLevel >= ADS_FIRST_ELIGIBLE_LEVEL
+          && ADS_ENABLED
+          && isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardHint)}
       />
 
       <GameResultModal
@@ -1407,6 +1514,10 @@ export function GameScreen() {
         nextButtonError={saveError}
         reviveAvailable={reviveAvailable}
         reviveLoading={reviveLoading}
+        reviveMessage={reviveMessage}
+        revivePending={revivePending}
+        reviveRemaining={reviveQuota?.remaining ?? null}
+        reviveLimit={reviveQuota?.limit ?? null}
         onRevive={handleRevive}
         onNextLevel={handleNextLevel}
         onVictoryRetry={handleVictoryRetry}

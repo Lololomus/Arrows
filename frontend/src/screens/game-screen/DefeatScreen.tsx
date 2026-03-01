@@ -18,12 +18,27 @@ interface DefeatScreenProps {
   level: number;
   reviveAvailable: boolean;
   reviveLoading?: boolean;
+  reviveMessage?: string | null;
+  revivePending?: boolean;
+  reviveRemaining?: number | null;
+  reviveLimit?: number | null;
   onRevive: () => void;
   onRetry: () => void;
   onMenu: () => void;
 }
 
-export function DefeatScreen({ level, reviveAvailable, reviveLoading, onRevive, onRetry, onMenu }: DefeatScreenProps) {
+export function DefeatScreen({
+  level,
+  reviveAvailable,
+  reviveLoading,
+  reviveMessage,
+  revivePending,
+  reviveRemaining,
+  reviveLimit,
+  onRevive,
+  onRetry,
+  onMenu,
+}: DefeatScreenProps) {
   const cfg = DEFEAT_CONFIG;
   const IconComponent = cfg.icon;
 
@@ -105,18 +120,33 @@ export function DefeatScreen({ level, reviveAvailable, reviveLoading, onRevive, 
           transition={{ delay: 0.6, duration: 0.5 }}
           className="w-full flex flex-col items-center gap-4 px-2 mt-8"
         >
+          {reviveLimit != null && reviveRemaining != null && (
+            <p className="text-sm font-semibold text-white/65">
+              Осталось воскрешений: {reviveRemaining}/{reviveLimit}
+            </p>
+          )}
+
           {/* Revive через рекламу */}
           {reviveAvailable && (
-            <motion.button
-              whileTap={{ scale: 0.96 }}
-              onClick={onRevive}
-              disabled={reviveLoading}
-              className="w-full py-5 rounded-[20px] bg-gradient-to-b from-emerald-500 to-emerald-700 text-white font-black text-xl uppercase tracking-widest hover:brightness-110 transition-all border border-emerald-400/30 shadow-xl flex items-center justify-center gap-3 disabled:opacity-50"
-            >
-              <Heart size={22} fill="currentColor" />
-              {reviveLoading ? 'Загрузка...' : 'Продолжить'}
-              {!reviveLoading && <Play size={16} className="opacity-70" />}
-            </motion.button>
+            <>
+              <motion.button
+                whileTap={{ scale: 0.96 }}
+                onClick={onRevive}
+                disabled={reviveLoading}
+                className="w-full py-5 rounded-[20px] bg-gradient-to-b from-emerald-500 to-emerald-700 text-white font-black text-xl uppercase tracking-widest hover:brightness-110 transition-all border border-emerald-400/30 shadow-xl flex items-center justify-center gap-3 disabled:opacity-50"
+              >
+                <Heart size={22} fill="currentColor" />
+                {reviveLoading ? 'Загрузка...' : revivePending ? 'Проверить награду' : 'Продолжить'}
+                {!reviveLoading && <Play size={16} className="opacity-70" />}
+              </motion.button>
+              {reviveMessage && (
+                <p className="text-center text-sm font-medium text-white/75">{reviveMessage}</p>
+              )}
+            </>
+          )}
+
+          {!reviveAvailable && reviveMessage && (
+            <p className="text-center text-sm font-medium text-white/75">{reviveMessage}</p>
           )}
 
           <motion.button

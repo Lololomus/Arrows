@@ -27,6 +27,10 @@ interface GameResultModalProps {
   /** Revive */
   reviveAvailable?: boolean;
   reviveLoading?: boolean;
+  reviveMessage?: string | null;
+  revivePending?: boolean;
+  reviveRemaining?: number | null;
+  reviveLimit?: number | null;
   onRevive?: () => void;
   onNextLevel: () => void;
   onVictoryRetry: () => void;
@@ -48,6 +52,10 @@ export function GameResultModal({
   nextButtonError,
   reviveAvailable = false,
   reviveLoading = false,
+  reviveMessage = null,
+  revivePending = false,
+  reviveRemaining = null,
+  reviveLimit = null,
   onRevive,
   onNextLevel,
   onVictoryRetry,
@@ -80,6 +88,10 @@ export function GameResultModal({
           level={currentLevel}
           reviveAvailable={reviveAvailable}
           reviveLoading={reviveLoading}
+          reviveMessage={reviveMessage}
+          revivePending={revivePending}
+          reviveRemaining={reviveRemaining}
+          reviveLimit={reviveLimit}
           onRevive={onRevive ?? onDefeatRetry}
           onRetry={onDefeatRetry}
           onMenu={onDefeatMenu}
