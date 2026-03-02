@@ -161,30 +161,48 @@ async def _handle_adsgram_reward_callback(
     )
 
     if not user_telegram_id:
+        print(f"[Adsgram Callback] placement={placement} note=missing_userid ad_reference={ad_reference}")
         return {"ok": True, "note": "missing_userid"}
 
     try:
         parsed_user_id = int(user_telegram_id)
     except (TypeError, ValueError):
+        print(f"[Adsgram Callback] placement={placement} note=invalid_userid raw_userid={user_telegram_id}")
         return {"ok": True, "note": "invalid_userid"}
 
     if signature and settings.ADSGRAM_SECRET:
         is_valid = validate_adsgram_signature(parsed_user_id, placement, signature)
         if not is_valid:
-            print(f"[Adsgram Callback] invalid signature for user={parsed_user_id} placement={placement}")
+            print(
+                f"[Adsgram Callback] placement={placement} note=invalid_signature "
+                f"userid={parsed_user_id} ad_reference={ad_reference}"
+            )
             if settings.ADSGRAM_WEBHOOK_REQUIRE_SIGNATURE:
                 return {"ok": True, "note": FAILURE_INVALID_SIGNATURE}
 
     result = await db.execute(select(User).where(User.telegram_id == parsed_user_id))
     user = result.scalar_one_or_none()
     if user is None:
+        print(
+            f"[Adsgram Callback] placement={placement} note=user_not_found "
+            f"userid={parsed_user_id} ad_reference={ad_reference}"
+        )
         return {"ok": True, "note": "user_not_found"}
 
     intent = await find_pending_intent_for_callback(db, user.id, placement)
     if intent is None:
+        print(
+            f"[Adsgram Callback] placement={placement} note=no_pending_intent "
+            f"userid={parsed_user_id} resolved_user={user.id} ad_reference={ad_reference}"
+        )
         return {"ok": True, "note": "no_pending_intent"}
 
     granted_intent = await grant_intent(db, user, intent, ad_reference=str(ad_reference) if ad_reference else None)
+    print(
+        f"[Adsgram Callback] placement={placement} note=processed userid={parsed_user_id} "
+        f"resolved_user={user.id} pending_intent_found=true intent_id={granted_intent.intent_id} "
+        f"ad_reference={ad_reference}"
+    )
     return {"ok": True, "note": "processed", "intent": serialize_intent(granted_intent).model_dump()}
 
 

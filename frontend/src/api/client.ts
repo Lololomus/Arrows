@@ -32,6 +32,7 @@ import type {
   ClaimDailyCoinsResponse,
   ClaimHintResponse,
   ClaimReviveResponse,
+  ActiveRewardIntentResponse,
   RewardIntentCreateRequest,
   RewardIntentCreateResponse,
   RewardIntentStatusResponse,
@@ -541,6 +542,96 @@ export const adsApi = {
       placement: raw.placement as RewardIntentStatusResponse['placement'],
       status: (raw.status ?? 'pending') as RewardIntentStatusResponse['status'],
       failureCode: (raw.failure_code ?? raw.failureCode) as string | undefined,
+      expiresAt: (raw.expires_at ?? raw.expiresAt) as string | undefined,
+      createdAt: (raw.created_at ?? raw.createdAt) as string | undefined,
+      level: raw.level != null ? Number(raw.level) : undefined,
+      sessionId: (raw.session_id ?? raw.sessionId) as string | undefined,
+      coins: raw.coins != null ? Number(raw.coins) : undefined,
+      hintBalance: raw.hint_balance != null
+        ? Number(raw.hint_balance)
+        : raw.hintBalance != null
+          ? Number(raw.hintBalance)
+          : undefined,
+      reviveGranted: Boolean(raw.revive_granted ?? raw.reviveGranted),
+      revivesUsed: raw.revives_used != null
+        ? Number(raw.revives_used)
+        : raw.revivesUsed != null
+          ? Number(raw.revivesUsed)
+          : undefined,
+      revivesLimit: raw.revives_limit != null
+        ? Number(raw.revives_limit)
+        : raw.revivesLimit != null
+          ? Number(raw.revivesLimit)
+          : undefined,
+      usedToday: raw.used_today != null
+        ? Number(raw.used_today)
+        : raw.usedToday != null
+          ? Number(raw.usedToday)
+          : undefined,
+      limitToday: raw.limit_today != null
+        ? Number(raw.limit_today)
+        : raw.limitToday != null
+          ? Number(raw.limitToday)
+          : undefined,
+      resetsAt: (raw.resets_at ?? raw.resetsAt) as string | undefined,
+    };
+  },
+
+  getActiveRewardIntents: async (): Promise<ActiveRewardIntentResponse[]> => {
+    const raw = await request<Record<string, unknown>[]>(API_ENDPOINTS.ads.activeRewardIntents);
+    return raw.map((item) => ({
+      intentId: (item.intent_id ?? item.intentId) as string,
+      placement: item.placement as ActiveRewardIntentResponse['placement'],
+      status: (item.status ?? 'pending') as ActiveRewardIntentResponse['status'],
+      failureCode: (item.failure_code ?? item.failureCode) as string | undefined,
+      expiresAt: (item.expires_at ?? item.expiresAt) as string | undefined,
+      createdAt: (item.created_at ?? item.createdAt) as string | undefined,
+      level: item.level != null ? Number(item.level) : undefined,
+      sessionId: (item.session_id ?? item.sessionId) as string | undefined,
+      coins: item.coins != null ? Number(item.coins) : undefined,
+      hintBalance: item.hint_balance != null
+        ? Number(item.hint_balance)
+        : item.hintBalance != null
+          ? Number(item.hintBalance)
+          : undefined,
+      reviveGranted: Boolean(item.revive_granted ?? item.reviveGranted),
+      revivesUsed: item.revives_used != null
+        ? Number(item.revives_used)
+        : item.revivesUsed != null
+          ? Number(item.revivesUsed)
+          : undefined,
+      revivesLimit: item.revives_limit != null
+        ? Number(item.revives_limit)
+        : item.revivesLimit != null
+          ? Number(item.revivesLimit)
+          : undefined,
+      usedToday: item.used_today != null
+        ? Number(item.used_today)
+        : item.usedToday != null
+          ? Number(item.usedToday)
+          : undefined,
+      limitToday: item.limit_today != null
+        ? Number(item.limit_today)
+        : item.limitToday != null
+          ? Number(item.limitToday)
+          : undefined,
+      resetsAt: (item.resets_at ?? item.resetsAt) as string | undefined,
+    }));
+  },
+
+  cancelRewardIntent: async (intentId: string): Promise<RewardIntentStatusResponse> => {
+    const raw = await request<Record<string, unknown>>(`${API_ENDPOINTS.ads.rewardIntents}/${intentId}/cancel`, {
+      method: 'POST',
+    });
+    return {
+      intentId: (raw.intent_id ?? raw.intentId ?? intentId) as string,
+      placement: raw.placement as RewardIntentStatusResponse['placement'],
+      status: (raw.status ?? 'rejected') as RewardIntentStatusResponse['status'],
+      failureCode: (raw.failure_code ?? raw.failureCode) as string | undefined,
+      expiresAt: (raw.expires_at ?? raw.expiresAt) as string | undefined,
+      createdAt: (raw.created_at ?? raw.createdAt) as string | undefined,
+      level: raw.level != null ? Number(raw.level) : undefined,
+      sessionId: (raw.session_id ?? raw.sessionId) as string | undefined,
       coins: raw.coins != null ? Number(raw.coins) : undefined,
       hintBalance: raw.hint_balance != null
         ? Number(raw.hint_balance)

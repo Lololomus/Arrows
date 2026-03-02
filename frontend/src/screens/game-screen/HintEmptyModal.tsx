@@ -3,16 +3,16 @@
  * Options: watch ad for +1 hint, go to shop, or close.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Lightbulb, ShoppingBag, Play } from 'lucide-react';
 import { authApi } from '../../api/client';
 import { ADSGRAM_BLOCK_IDS } from '../../config/constants';
 import { useAppStore } from '../../stores/store';
+import { useRewardStore } from '../../stores/rewardStore';
+import { clearPendingRewardIntent, rememberPendingRewardIntent } from '../../services/rewardReconciler';
 import {
-  PENDING_RETRY_TIMEOUT_MS,
   getRewardedFlowMessage,
-  pollRewardIntent,
   runRewardedFlow,
 } from '../../services/rewardedAds';
 
@@ -31,6 +31,9 @@ export function HintEmptyModal({
   onGoToShop,
   adAllowed,
 }: HintEmptyModalProps) {
+  const trackedIntent = useRewardStore((s) => s.activeIntents.reward_hint ?? null);
+  const resolvedIntent = useRewardStore((s) => s.lastResolved.reward_hint ?? null);
+  const clearResolved = useRewardStore((s) => s.clearResolved);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
@@ -47,33 +50,94 @@ export function HintEmptyModal({
     }
   };
 
+  useEffect(() => {
+    if (!trackedIntent) {
+      return;
+    }
+    if (pendingIntentId !== trackedIntent.intentId) {
+      setPendingIntentId(trackedIntent.intentId);
+    }
+    setError(null);
+    setInfoMessage('Проверяем подсказку...');
+  }, [pendingIntentId, trackedIntent]);
+
+  useEffect(() => {
+    if (!resolvedIntent) {
+      return;
+    }
+
+    const applyResolved = async () => {
+      if (resolvedIntent.status === 'granted') {
+        await syncHintBalance();
+        setPendingIntentId(null);
+        setInfoMessage(null);
+        setError(null);
+        if (open) {
+          onClose();
+          onHintEarned();
+        }
+      } else if (resolvedIntent.status === 'rejected' || resolvedIntent.status === 'expired') {
+        setPendingIntentId(null);
+        setInfoMessage(null);
+        setError(getRewardedFlowMessage('reward_hint', {
+          outcome: 'rejected',
+          failureCode: resolvedIntent.failureCode,
+        }));
+      }
+
+      clearResolved('reward_hint', resolvedIntent.intentId);
+    };
+
+    void applyResolved();
+  }, [clearResolved, onClose, onHintEarned, open, resolvedIntent]);
+
   const handleWatchAd = async () => {
-    if (loading) return;
+    if (loading || pendingIntentId) return;
     setLoading(true);
     setError(null);
     setInfoMessage(null);
 
     try {
-      const result = pendingIntentId
-        ? await pollRewardIntent(pendingIntentId, PENDING_RETRY_TIMEOUT_MS)
-        : await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardHint, {
-            placement: 'reward_hint',
-          });
+      const result = await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardHint, {
+        placement: 'reward_hint',
+      });
 
       if (result.outcome === 'timeout') {
         setPendingIntentId(result.intentId);
+        rememberPendingRewardIntent({
+          intentId: result.intentId!,
+          placement: 'reward_hint',
+        });
         setInfoMessage(getRewardedFlowMessage('reward_hint', result));
         return;
       }
 
-      if (result.outcome === 'ad_failed') {
+      if (result.outcome === 'provider_error' && result.intentId) {
+        setPendingIntentId(result.intentId);
+        rememberPendingRewardIntent({
+          intentId: result.intentId,
+          placement: 'reward_hint',
+        });
+        setInfoMessage(getRewardedFlowMessage('reward_hint', result));
+        return;
+      }
+
+      if (result.outcome === 'unavailable' || result.outcome === 'not_completed') {
         setPendingIntentId(null);
         setError(getRewardedFlowMessage('reward_hint', result));
         return;
       }
       if (result.outcome === 'error') {
-        setPendingIntentId(result.intentId);
-        setError(getRewardedFlowMessage('reward_hint', result));
+        if (result.intentId) {
+          setPendingIntentId(result.intentId);
+          rememberPendingRewardIntent({
+            intentId: result.intentId,
+            placement: 'reward_hint',
+          });
+          setInfoMessage('Связь с сервером прервалась. Мы продолжим проверку автоматически.');
+        } else {
+          setError(getRewardedFlowMessage('reward_hint', result));
+        }
         return;
       }
 
@@ -87,6 +151,7 @@ export function HintEmptyModal({
         }
 
         setPendingIntentId(null);
+        clearPendingRewardIntent('reward_hint', result.intentId ?? undefined);
         setError(getRewardedFlowMessage('reward_hint', result));
         return;
       }
@@ -98,6 +163,7 @@ export function HintEmptyModal({
       }
 
       setPendingIntentId(null);
+      clearPendingRewardIntent('reward_hint', result.intentId ?? undefined);
       onClose();
       onHintEarned();
     } catch {
@@ -142,7 +208,7 @@ export function HintEmptyModal({
               {adAllowed && (
                 <button
                   onClick={handleWatchAd}
-                  disabled={loading}
+                  disabled={loading || pendingIntentId !== null}
                   className="w-full py-3.5 bg-gradient-to-b from-amber-500 to-orange-600 rounded-xl text-white font-bold flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <Play size={18} />

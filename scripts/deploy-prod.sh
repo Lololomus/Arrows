@@ -45,6 +45,14 @@ is_true() {
   [[ "$value" == "1" || "$value" == "true" || "$value" == "yes" || "$value" == "on" ]]
 }
 
+is_rewarded_block_id() {
+  [[ "$1" =~ ^[0-9]+$ ]]
+}
+
+is_interstitial_block_id() {
+  [[ "$1" =~ ^int-[0-9]+$ ]]
+}
+
 if ! command -v docker >/dev/null 2>&1; then
   die "docker is not installed"
 fi
@@ -94,6 +102,12 @@ VITE_ENVIRONMENT="$(env_value "frontend/.env.production" "VITE_ENVIRONMENT")"
 VITE_ENABLE_DEV_AUTH="$(env_value "frontend/.env.production" "VITE_ENABLE_DEV_AUTH")"
 VITE_DEV_AUTH_USER_ID="$(env_value "frontend/.env.production" "VITE_DEV_AUTH_USER_ID")"
 VITE_API_URL="$(env_value "frontend/.env.production" "VITE_API_URL")"
+VITE_ADS_ENABLED="$(env_value "frontend/.env.production" "VITE_ADS_ENABLED")"
+VITE_ADSGRAM_REWARD_DAILY_COINS_BLOCK_ID="$(env_value "frontend/.env.production" "VITE_ADSGRAM_REWARD_DAILY_COINS_BLOCK_ID")"
+VITE_ADSGRAM_REWARD_HINT_BLOCK_ID="$(env_value "frontend/.env.production" "VITE_ADSGRAM_REWARD_HINT_BLOCK_ID")"
+VITE_ADSGRAM_REWARD_REVIVE_BLOCK_ID="$(env_value "frontend/.env.production" "VITE_ADSGRAM_REWARD_REVIVE_BLOCK_ID")"
+VITE_ADSGRAM_INTERSTITIAL_PROGRESS_BLOCK_ID="$(env_value "frontend/.env.production" "VITE_ADSGRAM_INTERSTITIAL_PROGRESS_BLOCK_ID")"
+VITE_ADSGRAM_INTERSTITIAL_HARD_BLOCK_ID="$(env_value "frontend/.env.production" "VITE_ADSGRAM_INTERSTITIAL_HARD_BLOCK_ID")"
 
 [[ "$VITE_ENVIRONMENT" == "production" ]] || die "frontend/.env.production: VITE_ENVIRONMENT must be production"
 is_true "$VITE_ENABLE_DEV_AUTH" && die "frontend/.env.production: VITE_ENABLE_DEV_AUTH must be false"
@@ -102,6 +116,24 @@ is_true "$VITE_ENABLE_DEV_AUTH" && die "frontend/.env.production: VITE_ENABLE_DE
 if [[ "$VITE_API_URL" != "/api/v1" && "$VITE_API_URL" != https://*/api/v1 ]]; then
   die "frontend/.env.production: VITE_API_URL must be /api/v1 or https://<domain>/api/v1"
 fi
+
+if is_true "$VITE_ADS_ENABLED"; then
+  is_rewarded_block_id "$VITE_ADSGRAM_REWARD_DAILY_COINS_BLOCK_ID" \
+    || die "frontend/.env.production: VITE_ADSGRAM_REWARD_DAILY_COINS_BLOCK_ID must be numeric only"
+  is_rewarded_block_id "$VITE_ADSGRAM_REWARD_HINT_BLOCK_ID" \
+    || die "frontend/.env.production: VITE_ADSGRAM_REWARD_HINT_BLOCK_ID must be numeric only"
+  is_rewarded_block_id "$VITE_ADSGRAM_REWARD_REVIVE_BLOCK_ID" \
+    || die "frontend/.env.production: VITE_ADSGRAM_REWARD_REVIVE_BLOCK_ID must be numeric only"
+fi
+
+if [[ -n "$VITE_ADSGRAM_INTERSTITIAL_PROGRESS_BLOCK_ID" ]] && ! is_interstitial_block_id "$VITE_ADSGRAM_INTERSTITIAL_PROGRESS_BLOCK_ID"; then
+  die "frontend/.env.production: VITE_ADSGRAM_INTERSTITIAL_PROGRESS_BLOCK_ID must match int-<digits>"
+fi
+if [[ -n "$VITE_ADSGRAM_INTERSTITIAL_HARD_BLOCK_ID" ]] && ! is_interstitial_block_id "$VITE_ADSGRAM_INTERSTITIAL_HARD_BLOCK_ID"; then
+  die "frontend/.env.production: VITE_ADSGRAM_INTERSTITIAL_HARD_BLOCK_ID must match int-<digits>"
+fi
+
+warn "Verify Reward URL is configured in AdsGram cabinet for each rewarded block with userid=[userId]"
 
 COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.prod.yml)
 if [[ "$MODE" == "tunnel" ]]; then

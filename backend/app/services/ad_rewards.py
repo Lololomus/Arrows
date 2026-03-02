@@ -43,6 +43,7 @@ FAILURE_INTENT_EXPIRED = "INTENT_EXPIRED"
 FAILURE_INTENT_ALREADY_PENDING = "REWARD_INTENT_ALREADY_PENDING"
 FAILURE_INTENT_SUPERSEDED = "INTENT_SUPERSEDED"
 FAILURE_INVALID_SIGNATURE = "INVALID_SIGNATURE"
+FAILURE_AD_NOT_COMPLETED = "AD_NOT_COMPLETED"
 
 MSK = timezone(timedelta(hours=3))
 REVIVE_LIMIT_PER_LEVEL = 3
@@ -108,11 +109,17 @@ def serialize_intent(
     revives_limit: int | None = None,
 ) -> RewardIntentStatusResponse:
     resets_at = intent.resets_at.replace(tzinfo=MSK).isoformat() if intent.resets_at else None
+    expires_at = intent.expires_at.replace(tzinfo=timezone.utc).isoformat() if intent.expires_at else None
+    created_at = intent.created_at.replace(tzinfo=timezone.utc).isoformat() if intent.created_at else None
     return RewardIntentStatusResponse(
         intent_id=intent.intent_id,
         placement=intent.placement,
         status=intent.status,
         failure_code=intent.failure_code,
+        expires_at=expires_at,
+        created_at=created_at,
+        level=intent.level_number,
+        session_id=intent.session_id,
         coins=intent.coins,
         hint_balance=intent.hint_balance,
         revive_granted=bool(intent.revive_granted),
@@ -175,6 +182,22 @@ async def get_active_pending_intent(
     return result.scalars().first()
 
 
+async def list_active_pending_intents(
+    db: AsyncSession,
+    user_id: int,
+) -> list[AdRewardIntent]:
+    result = await db.execute(
+        select(AdRewardIntent)
+        .where(
+            AdRewardIntent.user_id == user_id,
+            AdRewardIntent.status == INTENT_STATUS_PENDING,
+            AdRewardIntent.expires_at > utcnow(),
+        )
+        .order_by(AdRewardIntent.created_at.asc(), AdRewardIntent.id.asc())
+    )
+    return list(result.scalars())
+
+
 async def get_intent_by_public_id(
     db: AsyncSession,
     user_id: int,
@@ -232,11 +255,7 @@ async def create_reward_intent(
 
     active_intent = await get_active_pending_intent(db, locked_user.id, placement)
     if active_intent is not None:
-        if placement != PLACEMENT_REVIVE or active_intent.session_id == session_id:
-            return active_intent
-        active_intent.status = INTENT_STATUS_REJECTED
-        active_intent.failure_code = FAILURE_INTENT_SUPERSEDED
-        active_intent.fulfilled_at = utcnow()
+        return active_intent
 
     intent = AdRewardIntent(
         intent_id=uuid4().hex,
@@ -264,6 +283,20 @@ async def reject_intent(
     await db.commit()
     await db.refresh(intent)
     return intent
+
+
+async def cancel_pending_intent(
+    db: AsyncSession,
+    user_id: int,
+    intent_id: str,
+    failure_code: str = FAILURE_AD_NOT_COMPLETED,
+) -> AdRewardIntent | None:
+    intent = await get_intent_by_public_id(db, user_id, intent_id)
+    if intent is None:
+        return None
+    if intent.status != INTENT_STATUS_PENDING:
+        return intent
+    return await reject_intent(db, intent, failure_code)
 
 
 async def _grant_daily_coins(

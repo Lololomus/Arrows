@@ -16,15 +16,15 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useMotionValue, motion } from 'framer-motion';
 import { useAppStore, useGameStore } from '../stores/store';
+import { useRewardStore } from '../stores/rewardStore';
 import { CanvasBoard } from '../components/CanvasBoard';
 import { adsApi, gameApi, sendAuthorizedKeepalive, type CompleteAndNextResponse } from '../api/client';
 import { isValidInterstitialBlockId, isValidRewardedBlockId, showInterstitialAd } from '../services/adsgram';
 import {
-  PENDING_RETRY_TIMEOUT_MS,
   getRewardedFlowMessage,
-  pollRewardIntent,
   runRewardedFlow,
 } from '../services/rewardedAds';
+import { clearPendingRewardIntent, rememberPendingRewardIntent } from '../services/rewardReconciler';
 import {
   API_ENDPOINTS,
   MAX_CELL_SIZE,
@@ -375,13 +375,16 @@ export function GameScreen() {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // Revive
+  const trackedReviveIntent = useRewardStore((s) => s.activeIntents.reward_revive ?? null);
+  const resolvedReviveIntent = useRewardStore((s) => s.lastResolved.reward_revive ?? null);
+  const clearResolvedReward = useRewardStore((s) => s.clearResolved);
   const reviveOpportunityIdRef = useRef(createClientId());
   const previousStatusRef = useRef(status);
   const [reviveLoading, setReviveLoading] = useState(false);
   const [reviveMessage, setReviveMessage] = useState<string | null>(null);
   const [pendingReviveIntentId, setPendingReviveIntentId] = useState<string | null>(null);
   const [reviveQuota, setReviveQuota] = useState<ReviveStatusResponse | null>(null);
-  const revivePending = pendingReviveIntentId !== null;
+  const revivePending = pendingReviveIntentId !== null || trackedReviveIntent !== null;
   const reviveAvailable = currentLevel >= ADS_FIRST_ELIGIBLE_LEVEL
     && ADS_ENABLED
     && isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardRevive)
@@ -732,6 +735,60 @@ export function GameScreen() {
       });
     }
   }, [currentLevel, loadReviveStatus, pendingReviveIntentId, status]);
+
+  useEffect(() => {
+    if (!trackedReviveIntent) {
+      return;
+    }
+    if (pendingReviveIntentId !== trackedReviveIntent.intentId) {
+      setPendingReviveIntentId(trackedReviveIntent.intentId);
+    }
+    setReviveMessage('Подтверждаем продолжение...');
+  }, [pendingReviveIntentId, trackedReviveIntent]);
+
+  useEffect(() => {
+    if (!resolvedReviveIntent) {
+      return;
+    }
+
+    const applyResolved = async () => {
+      if (resolvedReviveIntent.status === 'granted'
+        && pendingReviveIntentId === resolvedReviveIntent.intentId
+        && useGameStore.getState().status === 'defeat') {
+        useGameStore.getState().revivePlayer();
+        setPendingReviveIntentId(null);
+        setReviveMessage(null);
+        clearPendingRewardIntent('reward_revive', resolvedReviveIntent.intentId);
+        if (!applyReviveQuotaFromStatus(resolvedReviveIntent)) {
+          await loadReviveStatus(currentLevel);
+        }
+        clearResolvedReward('reward_revive', resolvedReviveIntent.intentId);
+        return;
+      }
+
+      if (resolvedReviveIntent.status === 'rejected' || resolvedReviveIntent.status === 'expired') {
+        if (pendingReviveIntentId === resolvedReviveIntent.intentId) {
+          setPendingReviveIntentId(null);
+          setReviveMessage(getRewardedFlowMessage('reward_revive', {
+            outcome: 'rejected',
+            failureCode: resolvedReviveIntent.failureCode,
+          }));
+        }
+        clearPendingRewardIntent('reward_revive', resolvedReviveIntent.intentId);
+        await loadReviveStatus(currentLevel);
+        clearResolvedReward('reward_revive', resolvedReviveIntent.intentId);
+      }
+    };
+
+    void applyResolved();
+  }, [
+    applyReviveQuotaFromStatus,
+    clearResolvedReward,
+    currentLevel,
+    loadReviveStatus,
+    pendingReviveIntentId,
+    resolvedReviveIntent,
+  ]);
 
   const setVictoryAction = useCallback((action: PendingVictoryAction) => {
     pendingVictoryActionRef.current = action;
@@ -1248,20 +1305,19 @@ export function GameScreen() {
 
   // === REVIVE через рекламу ===
   const handleRevive = useCallback(async () => {
-    if (reviveLoading) return;
+    if (reviveLoading || pendingReviveIntentId) return;
     setReviveLoading(true);
     setReviveMessage(null);
     try {
-      const result = pendingReviveIntentId
-        ? await pollRewardIntent(pendingReviveIntentId, PENDING_RETRY_TIMEOUT_MS)
-        : await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardRevive, {
-            placement: 'reward_revive',
-            level: currentLevel,
-            sessionId: reviveOpportunityIdRef.current,
-          });
+      const result = await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardRevive, {
+        placement: 'reward_revive',
+        level: currentLevel,
+        sessionId: reviveOpportunityIdRef.current,
+      });
       if (result.outcome === 'granted') {
         useGameStore.getState().revivePlayer();
         setPendingReviveIntentId(null);
+        clearPendingRewardIntent('reward_revive', result.intentId ?? undefined);
         setReviveMessage(null);
         if (!applyReviveQuotaFromStatus(result.status)) {
           await loadReviveStatus(currentLevel);
@@ -1270,20 +1326,50 @@ export function GameScreen() {
       }
       if (result.outcome === 'timeout') {
         setPendingReviveIntentId(result.intentId);
+        rememberPendingRewardIntent({
+          intentId: result.intentId!,
+          placement: 'reward_revive',
+          level: currentLevel,
+          sessionId: reviveOpportunityIdRef.current,
+        });
         setReviveMessage(getRewardedFlowMessage('reward_revive', result));
         return;
       }
-      if (result.outcome === 'ad_failed') {
+
+      if (result.outcome === 'provider_error' && result.intentId) {
+        setPendingReviveIntentId(result.intentId);
+        rememberPendingRewardIntent({
+          intentId: result.intentId,
+          placement: 'reward_revive',
+          level: currentLevel,
+          sessionId: reviveOpportunityIdRef.current,
+        });
+        setReviveMessage('Подтверждение продолжения задерживается. Если просмотр подтвердится, продолжение станет доступно автоматически.');
+        return;
+      }
+
+      if (result.outcome === 'unavailable' || result.outcome === 'not_completed') {
         setPendingReviveIntentId(null);
         setReviveMessage(getRewardedFlowMessage('reward_revive', result));
         return;
       }
       if (result.outcome === 'error') {
-        setPendingReviveIntentId(result.intentId);
-        setReviveMessage(getRewardedFlowMessage('reward_revive', result));
+        if (result.intentId) {
+          setPendingReviveIntentId(result.intentId);
+          rememberPendingRewardIntent({
+            intentId: result.intentId,
+            placement: 'reward_revive',
+            level: currentLevel,
+            sessionId: reviveOpportunityIdRef.current,
+          });
+          setReviveMessage('Подтверждение продолжения задерживается. Если просмотр подтвердится, продолжение станет доступно автоматически.');
+        } else {
+          setReviveMessage(getRewardedFlowMessage('reward_revive', result));
+        }
         return;
       }
       setPendingReviveIntentId(null);
+      clearPendingRewardIntent('reward_revive', result.intentId ?? undefined);
       if (result.failureCode === 'REVIVE_ALREADY_USED' && useGameStore.getState().status === 'defeat') {
         useGameStore.getState().revivePlayer();
         setReviveMessage(null);

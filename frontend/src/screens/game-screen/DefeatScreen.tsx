@@ -132,7 +132,7 @@ export function DefeatScreen({
               <motion.button
                 whileTap={{ scale: 0.96 }}
                 onClick={onRevive}
-                disabled={reviveLoading}
+                disabled={reviveLoading || revivePending}
                 className="w-full py-5 rounded-[20px] bg-gradient-to-b from-emerald-500 to-emerald-700 text-white font-black text-xl uppercase tracking-widest hover:brightness-110 transition-all border border-emerald-400/30 shadow-xl flex items-center justify-center gap-3 disabled:opacity-50"
               >
                 <Heart size={22} fill="currentColor" />

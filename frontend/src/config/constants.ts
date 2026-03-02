@@ -232,6 +232,7 @@ export const API_ENDPOINTS = {
     status: '/ads/status',
     reviveStatus: '/ads/revive-status',
     rewardIntents: '/ads/reward-intents',
+    activeRewardIntents: '/ads/reward-intents/active',
     claimDailyCoins: '/ads/claim/daily-coins',
     claimHint: '/ads/claim/hint',
     claimRevive: '/ads/claim/revive',

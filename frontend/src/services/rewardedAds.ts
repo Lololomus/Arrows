@@ -10,7 +10,14 @@ const POLL_INTERVAL_MS = 2_000;
 const POLL_TIMEOUT_MS = 45_000;
 export const PENDING_RETRY_TIMEOUT_MS = 10_000;
 
-export type RewardedFlowOutcome = 'granted' | 'rejected' | 'timeout' | 'ad_failed' | 'error';
+export type RewardedFlowOutcome =
+  | 'granted'
+  | 'rejected'
+  | 'timeout'
+  | 'not_completed'
+  | 'provider_error'
+  | 'unavailable'
+  | 'error';
 
 export interface RewardedFlowResult {
   outcome: RewardedFlowOutcome;
@@ -18,6 +25,7 @@ export interface RewardedFlowResult {
   status?: RewardIntentStatusResponse;
   failureCode?: string;
   error?: string;
+  retriable?: boolean;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -74,6 +82,7 @@ export async function pollRewardIntent(
       intentId,
       status,
       failureCode: status.failureCode,
+      retriable: true,
     };
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
@@ -85,12 +94,14 @@ export async function pollRewardIntent(
         intentId,
         status: lastKnownStatus,
         failureCode: lastKnownStatus.failureCode,
+        retriable: true,
       };
     }
     return {
       outcome: 'error',
       intentId,
       error: error instanceof Error ? error.message : lastError ?? 'request_failed',
+      retriable: true,
     };
   }
 }
@@ -102,9 +113,10 @@ export async function runRewardedFlow(
   const preflight = preflightAdsgramAd('rewarded', blockId);
   if (!preflight.ok) {
     return {
-      outcome: 'ad_failed',
+      outcome: 'unavailable',
       intentId: null,
       error: preflight.error,
+      retriable: false,
     };
   }
 
@@ -121,24 +133,42 @@ export async function runRewardedFlow(
         intentId: null,
         failureCode: error.code ?? error.message,
         error: error.message,
+        retriable: false,
       };
     }
     return {
       outcome: 'error',
       intentId: null,
       error: error instanceof Error ? error.message : 'request_failed',
+      retriable: true,
     };
   }
 
   const adResult = await showRewardedAd(blockId);
-  if (!adResult.success) {
+  if (adResult.success) {
+    return pollRewardIntent(intent.intentId);
+  }
+
+  if (adResult.outcome === 'not_completed') {
+    try {
+      await adsApi.cancelRewardIntent(intent.intentId);
+    } catch {
+      // Best effort only: stale pending intents still expire on the server.
+    }
     return {
-      outcome: 'ad_failed',
-      intentId: intent.intentId,
+      outcome: 'not_completed',
+      intentId: null,
       error: adResult.error,
+      retriable: true,
     };
   }
-  return pollRewardIntent(intent.intentId);
+
+  return {
+    outcome: 'provider_error',
+    intentId: intent.intentId,
+    error: adResult.error,
+    retriable: true,
+  };
 }
 
 export function getRewardedFlowMessage(
@@ -146,19 +176,19 @@ export function getRewardedFlowMessage(
   result: Pick<RewardedFlowResult, 'outcome' | 'failureCode' | 'error'>,
 ): string {
   if (result.outcome === 'timeout') {
-    return 'Награда проверяется. Нажмите ещё раз, чтобы проверить результат.';
+    return 'Подтверждение рекламы задерживается. Мы продолжим проверку автоматически.';
   }
 
-  if (result.outcome === 'ad_failed') {
-    switch (result.error) {
-      case 'disabled':
-      case 'no_block_id':
-      case 'invalid_block_id':
-      case 'sdk_not_loaded':
-        return 'Реклама недоступна';
-      default:
-        return 'Не удалось досмотреть рекламу. Попробуйте ещё раз.';
-    }
+  if (result.outcome === 'unavailable') {
+    return 'Реклама временно недоступна';
+  }
+
+  if (result.outcome === 'not_completed') {
+    return 'Реклама была закрыта до завершения. Награда не зачислена.';
+  }
+
+  if (result.outcome === 'provider_error') {
+    return 'Мы ждём подтверждение от AdsGram. Награда начислится автоматически, как только просмотр подтвердится.';
   }
 
   if (result.outcome === 'error') {
@@ -176,11 +206,13 @@ export function getRewardedFlowMessage(
       return 'Лимит воскрешений на этом уровне исчерпан';
     case 'ADS_LOCKED_BEFORE_LEVEL_21':
       return 'Реклама доступна с уровня 21';
+    case 'AD_NOT_COMPLETED':
+      return 'Реклама была закрыта до завершения. Награда не зачислена.';
     case 'INTENT_EXPIRED':
     case 'INTENT_SUPERSEDED':
       return 'Проверка награды истекла, попробуйте снова';
     case 'REWARD_INTENT_ALREADY_PENDING':
-      return 'Награда еще проверяется. Попробуйте снова через несколько секунд.';
+      return 'Награда уже проверяется. Мы продолжим проверку автоматически.';
     default:
       if (placement === 'reward_hint') {
         return 'Не удалось получить подсказку';

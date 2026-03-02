@@ -2,15 +2,15 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Coins, Play, TimerReset } from 'lucide-react';
 import { useAppStore } from '../stores/store';
+import { useRewardStore } from '../stores/rewardStore';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { CoinStashCard } from '../components/ui/CoinStashCard';
 import { adsApi, authApi } from '../api/client';
 import { ADS_ENABLED, ADS_FIRST_ELIGIBLE_LEVEL, ADSGRAM_BLOCK_IDS } from '../config/constants';
 import { isValidRewardedBlockId } from '../services/adsgram';
+import { clearPendingRewardIntent, rememberPendingRewardIntent } from '../services/rewardReconciler';
 import {
-  PENDING_RETRY_TIMEOUT_MS,
   getRewardedFlowMessage,
-  pollRewardIntent,
   runRewardedFlow,
 } from '../services/rewardedAds';
 
@@ -53,6 +53,9 @@ function formatResetTime(resetsAt: string, now: number): string {
 function DailyCoinsCard({ currentLevel }: { currentLevel: number }) {
   const updateUser = useAppStore((s) => s.updateUser);
   const setUser = useAppStore((s) => s.setUser);
+  const trackedIntent = useRewardStore((s) => s.activeIntents.reward_daily_coins ?? null);
+  const resolvedIntent = useRewardStore((s) => s.lastResolved.reward_daily_coins ?? null);
+  const clearResolved = useRewardStore((s) => s.clearResolved);
   const [eligible, setEligible] = useState(false);
   const [used, setUsed] = useState(0);
   const [limit, setLimit] = useState(3);
@@ -117,44 +120,114 @@ function DailyCoinsCard({ currentLevel }: { currentLevel: number }) {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (!trackedIntent) {
+      return;
+    }
+    if (pendingIntentId !== trackedIntent.intentId) {
+      setPendingIntentId(trackedIntent.intentId);
+    }
+    setError(null);
+    setInfoMessage('Проверяем награду...');
+  }, [pendingIntentId, trackedIntent]);
+
+  useEffect(() => {
+    if (!resolvedIntent) {
+      return;
+    }
+
+    const applyResolved = async () => {
+      if (resolvedIntent.status === 'granted') {
+        setPendingIntentId(null);
+        setInfoMessage(null);
+        setError(null);
+        setUsed(resolvedIntent.usedToday ?? used);
+        setLimit(resolvedIntent.limitToday ?? limit);
+        if (resolvedIntent.resetsAt) {
+          setResetsAt(resolvedIntent.resetsAt);
+        }
+        if (resolvedIntent.coins != null) {
+          updateUser({ coins: resolvedIntent.coins });
+        } else {
+          await syncCoins();
+        }
+        await loadStatus();
+      } else if (resolvedIntent.status === 'rejected' || resolvedIntent.status === 'expired') {
+        setPendingIntentId(null);
+        setInfoMessage(null);
+        setError(getRewardedFlowMessage('reward_daily_coins', {
+          outcome: 'rejected',
+          failureCode: resolvedIntent.failureCode,
+        }));
+        await loadStatus();
+      }
+
+      clearResolved('reward_daily_coins', resolvedIntent.intentId);
+    };
+
+    void applyResolved();
+  }, [clearResolved, limit, loadStatus, resolvedIntent, syncCoins, updateUser, used]);
+
   const handleWatch = useCallback(async () => {
-    if (loading || used >= limit) return;
+    if (loading || pendingIntentId || used >= limit) return;
     setLoading(true);
     setError(null);
     setInfoMessage(null);
 
     try {
-      const result = pendingIntentId
-        ? await pollRewardIntent(pendingIntentId, PENDING_RETRY_TIMEOUT_MS)
-        : await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardDailyCoins, {
-            placement: 'reward_daily_coins',
-          });
+      const result = await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardDailyCoins, {
+        placement: 'reward_daily_coins',
+      });
 
       if (result.outcome === 'timeout') {
         setPendingIntentId(result.intentId);
+        rememberPendingRewardIntent({
+          intentId: result.intentId!,
+          placement: 'reward_daily_coins',
+        });
         setInfoMessage(getRewardedFlowMessage('reward_daily_coins', result));
         return;
       }
 
-      if (result.outcome === 'ad_failed') {
+      if (result.outcome === 'provider_error' && result.intentId) {
+        setPendingIntentId(result.intentId);
+        rememberPendingRewardIntent({
+          intentId: result.intentId,
+          placement: 'reward_daily_coins',
+        });
+        setInfoMessage(getRewardedFlowMessage('reward_daily_coins', result));
+        return;
+      }
+
+      if (result.outcome === 'unavailable' || result.outcome === 'not_completed') {
         setPendingIntentId(null);
         setError(getRewardedFlowMessage('reward_daily_coins', result));
         return;
       }
       if (result.outcome === 'error') {
-        setPendingIntentId(result.intentId);
-        setError(getRewardedFlowMessage('reward_daily_coins', result));
+        if (result.intentId) {
+          setPendingIntentId(result.intentId);
+          rememberPendingRewardIntent({
+            intentId: result.intentId,
+            placement: 'reward_daily_coins',
+          });
+          setInfoMessage('Связь с сервером прервалась. Мы продолжим проверку автоматически.');
+        } else {
+          setError(getRewardedFlowMessage('reward_daily_coins', result));
+        }
         return;
       }
 
       if (result.outcome === 'rejected') {
         setPendingIntentId(null);
+        clearPendingRewardIntent('reward_daily_coins', result.intentId ?? undefined);
         setError(getRewardedFlowMessage('reward_daily_coins', result));
         await loadStatus();
         return;
       }
 
       setPendingIntentId(null);
+      clearPendingRewardIntent('reward_daily_coins', result.intentId ?? undefined);
       setUsed(result.status?.usedToday ?? used);
       setLimit(result.status?.limitToday ?? limit);
       if (result.status?.resetsAt) setResetsAt(result.status.resetsAt);
@@ -204,7 +277,7 @@ function DailyCoinsCard({ currentLevel }: { currentLevel: number }) {
       </div>
       <button
         onClick={handleWatch}
-        disabled={loading || limitReached}
+        disabled={loading || waitingForReward || limitReached}
         className="shrink-0 px-4 py-2.5 bg-gradient-to-b from-amber-500 to-orange-600 rounded-xl text-white font-bold text-sm flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <Play size={14} />

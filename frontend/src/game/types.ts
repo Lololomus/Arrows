@@ -418,6 +418,10 @@ export interface RewardIntentStatusResponse {
   placement: RewardPlacement;
   status: RewardIntentStatus;
   failureCode?: string;
+  expiresAt?: string;
+  createdAt?: string;
+  level?: number;
+  sessionId?: string;
   coins?: number;
   hintBalance?: number;
   reviveGranted: boolean;
@@ -427,6 +431,8 @@ export interface RewardIntentStatusResponse {
   limitToday?: number;
   resetsAt?: string;
 }
+
+export interface ActiveRewardIntentResponse extends RewardIntentStatusResponse {}
 
 export interface ReviveStatusResponse {
   eligible: boolean;

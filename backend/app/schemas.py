@@ -411,6 +411,10 @@ class RewardIntentStatusResponse(BaseModel):
     placement: RewardPlacement
     status: RewardIntentStatus
     failure_code: Optional[str] = None
+    expires_at: Optional[str] = None
+    created_at: Optional[str] = None
+    level: Optional[int] = None
+    session_id: Optional[str] = None
     coins: Optional[int] = None
     hint_balance: Optional[int] = None
     revive_granted: bool = False
@@ -419,6 +423,10 @@ class RewardIntentStatusResponse(BaseModel):
     used_today: Optional[int] = None
     limit_today: Optional[int] = None
     resets_at: Optional[str] = None
+
+
+class ActiveRewardIntentResponse(RewardIntentStatusResponse):
+    """Активный unresolved reward intent для resume и диагностики."""
 
 
 class ReviveStatusResponse(BaseModel):

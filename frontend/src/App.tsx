@@ -4,6 +4,7 @@ import '@fontsource/bungee-inline';
 import { useAppStore } from './stores/store';
 import { authApi, socialApi } from './api/client';
 import { UI_ANIMATIONS } from './config/constants';
+import { RewardToastHost } from './components/ui/RewardToastHost';
 import { SmartLoader } from './components/ui/SmartLoader';
 import { AuthExpiredScreen } from './components/AuthExpiredScreen';
 import { BottomNav, type TabId } from './components/BottomNav';
@@ -11,6 +12,7 @@ import { HomeScreen } from './screens/HomeScreen';
 import { GameScreen } from './screens/GameScreen';
 import nonGameBackgroundUrl from './assets/background.webp?url';
 import { bootstrapAuth, hasUsableTelegramInitData, markAuthExpired } from './services/authSession';
+import { startRewardReconciler, stopRewardReconciler } from './services/rewardReconciler';
 import { extractReferralCode } from './utils/referralLaunch';
 
 const ShopScreen = lazy(() =>
@@ -124,6 +126,13 @@ export default function App() {
   }, [runBootstrap]);
 
   useEffect(() => {
+    startRewardReconciler();
+    return () => {
+      stopRewardReconciler();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!ENABLE_NON_GAME_BACKGROUND) return;
 
     let disposed = false;
@@ -169,6 +178,7 @@ export default function App() {
   if (authStatus === 'booting') {
     return (
       <div className="relative w-full app-viewport overflow-hidden bg-slate-950">
+        <RewardToastHost />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(34,197,94,0.16),transparent_36%),linear-gradient(180deg,#020617_0%,#0f172a_100%)]" />
         <div className="relative z-10 flex h-full items-center justify-center">
           <SmartLoader text="Проверяем сессию..." />
@@ -191,6 +201,7 @@ export default function App() {
   if (screen === 'game') {
     return (
       <div className="relative w-full app-viewport overflow-hidden bg-slate-900 font-sans select-none">
+        <RewardToastHost />
         {ENABLE_NON_GAME_BACKGROUND && (
           <div className="absolute inset-0 pointer-events-none opacity-0" aria-hidden="true">
             <div
@@ -225,6 +236,7 @@ export default function App() {
 
   return (
     <div className="relative w-full app-viewport overflow-hidden bg-slate-900 font-sans select-none">
+      <RewardToastHost />
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap');
         .font-sans { font-family: 'Inter', sans-serif; }
