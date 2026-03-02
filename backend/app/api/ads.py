@@ -33,6 +33,7 @@ from ..services.ad_rewards import (
     FAILURE_HINT_BALANCE_NOT_ZERO,
     FAILURE_REVIVE_ALREADY_USED,
     FAILURE_AD_NOT_COMPLETED,
+    INTENT_STATUS_PENDING,
     REVIVE_LIMIT_PER_LEVEL,
     PLACEMENT_DAILY_COINS,
     PLACEMENT_HINT,
@@ -45,6 +46,7 @@ from ..services.ad_rewards import (
     expire_stale_pending_intents,
     get_intent_by_public_id,
     get_revive_limit_status,
+    grant_intent,
     list_active_pending_intents,
     mark_expired,
     next_reset_iso,
@@ -183,6 +185,49 @@ async def cancel_reward_intent(
         raise HTTPException(status_code=404, detail={"error": "INTENT_NOT_FOUND"})
 
     revive_status = None
+    if intent.placement == PLACEMENT_REVIVE and intent.level_number is not None:
+        revive_status = await get_revive_limit_status(db, user.id, intent.level_number)
+
+    return serialize_intent(
+        intent,
+        revives_used=revive_status["used"] if revive_status else None,
+        revives_limit=revive_status["limit"] if revive_status else None,
+    )
+
+
+@router.post("/reward-intents/{intent_id}/client-complete", response_model=RewardIntentStatusResponse)
+async def client_complete_reward_intent(
+    intent_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    intent = await get_intent_by_public_id(db, user.id, intent_id)
+    if intent is None:
+        raise HTTPException(status_code=404, detail={"error": "INTENT_NOT_FOUND"})
+
+    revive_status = None
+    if intent.placement == PLACEMENT_REVIVE and intent.level_number is not None:
+        revive_status = await get_revive_limit_status(db, user.id, intent.level_number)
+
+    if intent.status != INTENT_STATUS_PENDING:
+        return serialize_intent(
+            intent,
+            revives_used=revive_status["used"] if revive_status else None,
+            revives_limit=revive_status["limit"] if revive_status else None,
+        )
+
+    if intent.expires_at <= utcnow():
+        mark_expired(intent)
+        await db.commit()
+        await db.refresh(intent)
+        return serialize_intent(
+            intent,
+            revives_used=revive_status["used"] if revive_status else None,
+            revives_limit=revive_status["limit"] if revive_status else None,
+        )
+
+    intent = await grant_intent(db, user, intent)
+
     if intent.placement == PLACEMENT_REVIVE and intent.level_number is not None:
         revive_status = await get_revive_limit_status(db, user.id, intent.level_number)
 

@@ -307,8 +307,6 @@ async def _grant_daily_coins(
     ad_reference: str | None,
 ) -> AdRewardIntent:
     used_today = await count_daily_coins_used(db, user.id)
-    if used_today >= settings.AD_DAILY_COINS_LIMIT:
-        return await reject_intent(db, intent, FAILURE_DAILY_LIMIT_REACHED)
 
     reward = settings.AD_DAILY_COINS_REWARD
     user.coins += reward
@@ -355,14 +353,11 @@ async def _grant_hint(
 ) -> AdRewardIntent:
     result = await db.execute(
         update(User)
-        .where(User.id == user.id, User.hint_balance == 0)
+        .where(User.id == user.id)
         .values(hint_balance=User.hint_balance + 1)
         .returning(User.hint_balance)
     )
     row = result.first()
-    if row is None:
-        await db.rollback()
-        return await reject_intent(db, intent, FAILURE_HINT_BALANCE_NOT_ZERO)
 
     new_balance = int(row[0])
     claim = AdRewardClaim(
@@ -393,10 +388,6 @@ async def _grant_revive(
 ) -> AdRewardIntent:
     if intent.level_number is None:
         return await reject_intent(db, intent, "SESSION_AND_LEVEL_REQUIRED")
-
-    revives_used = await count_revives_used_for_level(db, user.id, intent.level_number)
-    if revives_used >= REVIVE_LIMIT_PER_LEVEL:
-        return await reject_intent(db, intent, FAILURE_REVIVE_LIMIT_REACHED)
 
     claim = AdRewardClaim(
         user_id=user.id,
@@ -430,8 +421,6 @@ async def grant_intent(
     *,
     ad_reference: str | None = None,
 ) -> AdRewardIntent:
-    ensure_eligible(user)
-
     await db.execute(select(User.id).where(User.id == user.id).with_for_update())
 
     if is_expired(intent):

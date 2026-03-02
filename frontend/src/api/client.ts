@@ -663,6 +663,51 @@ export const adsApi = {
     };
   },
 
+  clientCompleteRewardIntent: async (intentId: string): Promise<RewardIntentStatusResponse> => {
+    const raw = await request<Record<string, unknown>>(
+      `${API_ENDPOINTS.ads.rewardIntents}/${intentId}/client-complete`,
+      { method: 'POST' },
+    );
+    return {
+      intentId: (raw.intent_id ?? raw.intentId ?? intentId) as string,
+      placement: raw.placement as RewardIntentStatusResponse['placement'],
+      status: (raw.status ?? 'pending') as RewardIntentStatusResponse['status'],
+      failureCode: (raw.failure_code ?? raw.failureCode) as string | undefined,
+      expiresAt: (raw.expires_at ?? raw.expiresAt) as string | undefined,
+      createdAt: (raw.created_at ?? raw.createdAt) as string | undefined,
+      level: raw.level != null ? Number(raw.level) : undefined,
+      sessionId: (raw.session_id ?? raw.sessionId) as string | undefined,
+      coins: raw.coins != null ? Number(raw.coins) : undefined,
+      hintBalance: raw.hint_balance != null
+        ? Number(raw.hint_balance)
+        : raw.hintBalance != null
+          ? Number(raw.hintBalance)
+          : undefined,
+      reviveGranted: Boolean(raw.revive_granted ?? raw.reviveGranted),
+      revivesUsed: raw.revives_used != null
+        ? Number(raw.revives_used)
+        : raw.revivesUsed != null
+          ? Number(raw.revivesUsed)
+          : undefined,
+      revivesLimit: raw.revives_limit != null
+        ? Number(raw.revives_limit)
+        : raw.revivesLimit != null
+          ? Number(raw.revivesLimit)
+          : undefined,
+      usedToday: raw.used_today != null
+        ? Number(raw.used_today)
+        : raw.usedToday != null
+          ? Number(raw.usedToday)
+          : undefined,
+      limitToday: raw.limit_today != null
+        ? Number(raw.limit_today)
+        : raw.limitToday != null
+          ? Number(raw.limitToday)
+          : undefined,
+      resetsAt: (raw.resets_at ?? raw.resetsAt) as string | undefined,
+    };
+  },
+
   getReviveStatus: async (level: number): Promise<ReviveStatusResponse> => {
     const raw = await request<Record<string, unknown>>(`${API_ENDPOINTS.ads.reviveStatus}?level=${level}`);
     return {

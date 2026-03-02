@@ -146,7 +146,24 @@ export async function runRewardedFlow(
 
   const adResult = await showRewardedAd(blockId);
   if (adResult.success) {
-    return pollRewardIntent(intent.intentId);
+    try {
+      const status = await adsApi.clientCompleteRewardIntent(intent.intentId);
+      if (status.status === 'granted') {
+        return { outcome: 'granted', intentId: intent.intentId, status };
+      }
+      return {
+        outcome: 'rejected',
+        intentId: intent.intentId,
+        status,
+        failureCode: status.failureCode,
+      };
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        throw error;
+      }
+      // Fallback to polling if client-complete fails (webhook may still grant)
+      return pollRewardIntent(intent.intentId);
+    }
   }
 
   if (adResult.outcome === 'not_completed') {
