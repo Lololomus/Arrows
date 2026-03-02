@@ -100,14 +100,20 @@ async def cmd_start(message: types.Message):
         logger.info(f"User {message.from_user.id} has referral: {start_param}")
         referral_code = extract_referral_code(start_param)
         if referral_code:
-            try:
-                await store_pending_referral_code(
-                    message.from_user.id,
-                    referral_code,
-                    source="polling-bot",
-                )
-            except Exception as exc:
-                logger.warning(f"Referral fallback save failed for {message.from_user.id}: {exc}")
+            for attempt in range(3):
+                try:
+                    await store_pending_referral_code(
+                        message.from_user.id,
+                        referral_code,
+                        source="polling-bot",
+                    )
+                    break
+                except Exception as exc:
+                    if attempt == 2:
+                        logger.error(f"Referral save FAILED after 3 attempts for {message.from_user.id}: {exc}")
+                    else:
+                        logger.warning(f"Referral save attempt {attempt + 1} failed for {message.from_user.id}: {exc}")
+                        await asyncio.sleep(0.5 * (attempt + 1))
 
     webapp_url = settings.WEBAPP_URL
     if start_param:

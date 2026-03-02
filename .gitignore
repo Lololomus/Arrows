@@ -30,6 +30,9 @@ ENV/
 # IDEs
 .vscode/
 .idea/
+.claude/
+claude.md
+CLAUDE.md
 *.swp
 *.swo
 *~

@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:docs.adsgram.ai)"
+      "WebFetch(domain:docs.adsgram.ai)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app/api/auth.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''auth.py OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app/api/social.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''social.py OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''bot.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''bot.py OK''\\)\")",
+      "Bash(npx tsc --noEmit --pretty)",
+      "Bash(redis-cli ping)"
     ]
   }
 }

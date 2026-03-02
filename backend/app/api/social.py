@@ -4,9 +4,10 @@ Arrow Puzzle - Social API
 Социальные функции: рефералы, лидерборды, подписки на каналы.
 """
 
+import json
 import secrets
-from datetime import datetime, timedelta
-from typing import List
+from datetime import datetime
+from typing import List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, asc, and_, or_
@@ -28,6 +29,9 @@ from .auth import get_current_user
 
 router = APIRouter(prefix="/social", tags=["social"])
 
+# TTL кэша лидербордов (секунды)
+_LB_CACHE_TTL = 30
+
 
 # ============================================
 # REFERRALS
@@ -42,9 +46,9 @@ async def get_referral_code(
     if not user.referral_code:
         user.referral_code = secrets.token_urlsafe(6).upper()[:8]
         await db.commit()
-    
+
     link = f"https://t.me/{settings.TELEGRAM_BOT_USERNAME}?start=ref_{user.referral_code}"
-    
+
     return ReferralCodeResponse(code=user.referral_code, link=link)
 
 
@@ -56,42 +60,48 @@ async def apply_referral(
 ):
     """
     Применить реферальный код.
-    
+
+    Только для НОВЫХ пользователей (current_level <= 1).
     Invitee получает +100 монет СРАЗУ.
     Inviter получит +200 монет, когда invitee достигнет уровня подтверждения.
-    
+
     Edge cases:
       - already_referred: уже есть реферер
-      - account_too_old: аккаунту > 72 часов
+      - account_too_old: юзер уже начал играть (current_level > 1)
       - invalid_code: код не найден
       - self_referral: свой собственный код
     """
+    # Lock user row to prevent race condition with apply_redis_referral
+    locked = await db.execute(
+        select(User).where(User.id == user.id).with_for_update()
+    )
+    user = locked.scalar_one()
+
     # EC-3: Уже есть реферер
     if user.referred_by_id is not None:
         print(f"ℹ️ [Referral] User {user.id} already has referrer")
         return ReferralApplyResponse(success=False, reason="already_referred")
-    
-    # EC-18: Grace period для существующих аккаунтов
-    account_age = datetime.utcnow() - user.created_at
-    if account_age > timedelta(hours=settings.REFERRAL_GRACE_PERIOD_HOURS):
-        print(f"ℹ️ [Referral] User {user.id} is too old for referral apply")
+
+    # EC-18: Рефералка только для новых пользователей
+    if user.current_level > 1:
+        print(f"ℹ️ [Referral] User {user.id} is not new (level={user.current_level})")
         return ReferralApplyResponse(success=False, reason="account_too_old")
-    
+
     # EC-5: Ищем владельца кода
     result = await db.execute(
         select(User).where(User.referral_code == request.code.upper())
     )
     referrer = result.scalar_one_or_none()
-    
+
     if not referrer:
         print(f"ℹ️ [Referral] Invalid code used by user {user.id}")
         return ReferralApplyResponse(success=False, reason="invalid_code")
-    
+
     # EC-4: Самореферал
     if referrer.id == user.id:
         print(f"ℹ️ [Referral] Self-referral blocked for user {user.id}")
         return ReferralApplyResponse(success=False, reason="self_referral")
-    
+
     # EC-11: Создаём Referral (UNIQUE на invitee_id защитит от race condition)
     try:
         referral = Referral(
@@ -101,20 +111,20 @@ async def apply_referral(
             invitee_bonus_paid=True,  # invitee получает бонус прямо сейчас
         )
         db.add(referral)
-        
+
         user.referred_by_id = referrer.id
         user.coins += settings.REFERRAL_REWARD_INVITEE  # +100 монет СРАЗУ invitee
-        
+
         referrer.referrals_pending += 1
         # inviter НЕ получает бонус сейчас — только когда invitee достигнет уровня подтверждения
-        
+
         await db.commit()
         print(f"✅ [Referral] Pending created: invitee={user.id}, inviter={referrer.id}")
     except IntegrityError:
         await db.rollback()
         print(f"ℹ️ [Referral] Duplicate apply ignored for user {user.id}")
         return ReferralApplyResponse(success=False, reason="already_referred")
-    
+
     return ReferralApplyResponse(success=True, bonus=settings.REFERRAL_REWARD_INVITEE)
 
 
@@ -128,9 +138,9 @@ async def get_referral_stats(
     if not user.referral_code:
         user.referral_code = secrets.token_urlsafe(6).upper()[:8]
         await db.commit()
-    
+
     link = f"https://t.me/{settings.TELEGRAM_BOT_USERNAME}?start=ref_{user.referral_code}"
-    
+
     return ReferralStatsResponse(
         referrals_count=user.referrals_count,
         referrals_pending=user.referrals_pending,
@@ -161,7 +171,7 @@ async def get_referral_list(
         )
     )
     rows = result.all()
-    
+
     referrals = [
         ReferralInfo(
             id=invitee.id,
@@ -175,8 +185,75 @@ async def get_referral_list(
         )
         for ref, invitee in rows
     ]
-    
+
     return ReferralListResponse(referrals=referrals)
+
+
+# ============================================
+# REFERRAL LEADERBOARD (с Redis-кэшем)
+# ============================================
+
+async def _fetch_referral_leaderboard_top(db: AsyncSession, limit: int) -> Tuple[list, int]:
+    """Загрузить топ рефоводов и total из БД."""
+    _FAR_FUTURE = datetime(9999, 1, 1)
+    base_filter = [User.referrals_count > 0, User.is_banned == False]
+    confirmed_at_safe = func.coalesce(User.last_referral_confirmed_at, _FAR_FUTURE)
+
+    result = await db.execute(
+        select(User)
+        .where(*base_filter)
+        .order_by(desc(User.referrals_count), asc(confirmed_at_safe), asc(User.id))
+        .limit(limit)
+    )
+    users = result.scalars().all()
+
+    leaders = [
+        {
+            "rank": i + 1,
+            "user_id": u.id,
+            "username": u.username,
+            "first_name": u.first_name,
+            "photo_url": u.photo_url,
+            "score": u.referrals_count,
+        }
+        for i, u in enumerate(users)
+    ]
+
+    total_result = await db.execute(
+        select(func.count()).select_from(User).where(*base_filter)
+    )
+    total_participants = total_result.scalar()
+
+    return leaders, total_participants
+
+
+async def _fetch_referral_position(db: AsyncSession, user: User) -> Optional[int]:
+    """Вычислить позицию юзера в реферальном лидерборде."""
+    _FAR_FUTURE = datetime(9999, 1, 1)
+    base_filter = [User.referrals_count > 0, User.is_banned == False]
+    confirmed_at_safe = func.coalesce(User.last_referral_confirmed_at, _FAR_FUTURE)
+    my_confirmed = user.last_referral_confirmed_at or _FAR_FUTURE
+
+    count_above = await db.execute(
+        select(func.count())
+        .select_from(User)
+        .where(
+            *base_filter,
+            or_(
+                User.referrals_count > user.referrals_count,
+                and_(
+                    User.referrals_count == user.referrals_count,
+                    confirmed_at_safe < my_confirmed,
+                ),
+                and_(
+                    User.referrals_count == user.referrals_count,
+                    confirmed_at_safe == my_confirmed,
+                    User.id < user.id,
+                ),
+            )
+        )
+    )
+    return count_above.scalar() + 1
 
 
 @router.get("/referral/leaderboard", response_model=ReferralLeaderboardResponse)
@@ -190,78 +267,46 @@ async def get_referral_leaderboard(
     Ранжирование: referrals_count DESC, last_referral_confirmed_at ASC, id ASC.
     Tiebreaker: кто набрал N рефералов раньше — тот выше.
     NULL last_referral_confirmed_at трактуется как «бесконечно далёкое будущее» (внизу группы).
+
+    Кэшируется в Redis (TTL 30 сек).
     """
-    # Sentinel для COALESCE: NULL → далёкое будущее → внизу при ASC
-    _FAR_FUTURE = datetime(9999, 1, 1)
+    redis = await get_redis()
+    cache_key = "lb:referral:top"
 
-    base_filter = [
-        User.referrals_count > 0,
-        User.is_banned == False,
-    ]
+    # Пробуем взять топ из кэша
+    cached = await redis.get(cache_key)
+    if cached:
+        data = json.loads(cached)
+        leaders_raw = data["leaders"]
+        total_participants = data["total"]
+    else:
+        leaders_raw, total_participants = await _fetch_referral_leaderboard_top(db, limit)
+        await redis.set(cache_key, json.dumps({"leaders": leaders_raw, "total": total_participants}), ex=_LB_CACHE_TTL)
 
-    # NULL-safe выражение для сортировки
-    confirmed_at_safe = func.coalesce(User.last_referral_confirmed_at, _FAR_FUTURE)
+    leaders = [ReferralLeaderboardEntry(**entry) for entry in leaders_raw]
 
-    # Топ рефоводов (детерминированная сортировка)
-    result = await db.execute(
-        select(User)
-        .where(*base_filter)
-        .order_by(
-            desc(User.referrals_count),
-            asc(confirmed_at_safe),
-            asc(User.id),
-        )
-        .limit(limit)
-    )
-    users = result.scalars().all()
-
-    leaders = [
-        ReferralLeaderboardEntry(
-            rank=i + 1,
-            user_id=u.id,
-            username=u.username,
-            first_name=u.first_name,
-            photo_url=u.photo_url,
-            score=u.referrals_count,
-        )
-        for i, u in enumerate(users)
-    ]
-
-    # Общее кол-во участников
-    total_result = await db.execute(
-        select(func.count()).select_from(User).where(*base_filter)
-    )
-    total_participants = total_result.scalar()
-
-    # Позиция текущего пользователя (той же сортировкой, NULL-safe)
+    # Позиция текущего пользователя
     my_position = None
     my_in_top = False
     my_score = user.referrals_count
 
     if my_score > 0 and not user.is_banned:
-        my_confirmed = user.last_referral_confirmed_at or _FAR_FUTURE
+        # Проверяем, есть ли юзер в топ-100
+        for entry in leaders_raw:
+            if entry["user_id"] == user.id:
+                my_position = entry["rank"]
+                my_in_top = True
+                break
 
-        count_above = await db.execute(
-            select(func.count())
-            .select_from(User)
-            .where(
-                *base_filter,
-                or_(
-                    User.referrals_count > user.referrals_count,
-                    and_(
-                        User.referrals_count == user.referrals_count,
-                        confirmed_at_safe < my_confirmed,
-                    ),
-                    and_(
-                        User.referrals_count == user.referrals_count,
-                        confirmed_at_safe == my_confirmed,
-                        User.id < user.id,
-                    ),
-                )
-            )
-        )
-        my_position = count_above.scalar() + 1
-        my_in_top = any(l.user_id == user.id for l in leaders)
+        if not my_in_top:
+            # Юзера нет в топ — считаем позицию (кэш per-user)
+            pos_key = f"lb:referral:pos:{user.id}"
+            cached_pos = await redis.get(pos_key)
+            if cached_pos:
+                my_position = int(cached_pos)
+            else:
+                my_position = await _fetch_referral_position(db, user)
+                await redis.set(pos_key, str(my_position), ex=_LB_CACHE_TTL)
 
     return ReferralLeaderboardResponse(
         leaders=leaders,
@@ -273,8 +318,144 @@ async def get_referral_leaderboard(
 
 
 # ============================================
-# LEADERBOARDS
+# LEADERBOARDS (с Redis-кэшем)
 # ============================================
+
+async def _fetch_global_top(db: AsyncSession, limit: int) -> Tuple[list, int]:
+    """Загрузить global leaderboard из БД."""
+    base_filter = [User.current_level > 1, User.is_banned == False]
+
+    result = await db.execute(
+        select(User)
+        .where(*base_filter)
+        .order_by(desc(User.current_level), desc(User.total_stars), asc(User.id))
+        .limit(limit)
+    )
+    users = result.scalars().all()
+
+    leaders = [
+        {
+            "rank": i + 1,
+            "user_id": u.id,
+            "username": u.username,
+            "first_name": u.first_name,
+            "photo_url": u.photo_url,
+            "score": u.current_level - 1,
+        }
+        for i, u in enumerate(users)
+    ]
+
+    total_result = await db.execute(
+        select(func.count()).select_from(User).where(*base_filter)
+    )
+    total_participants = total_result.scalar()
+
+    return leaders, total_participants
+
+
+async def _fetch_global_position(db: AsyncSession, user: User) -> int:
+    """Вычислить позицию юзера в global leaderboard."""
+    base_filter = [User.current_level > 1, User.is_banned == False]
+
+    count_above = await db.execute(
+        select(func.count())
+        .select_from(User)
+        .where(
+            *base_filter,
+            or_(
+                User.current_level > user.current_level,
+                and_(
+                    User.current_level == user.current_level,
+                    User.total_stars > user.total_stars,
+                ),
+                and_(
+                    User.current_level == user.current_level,
+                    User.total_stars == user.total_stars,
+                    User.id < user.id,
+                ),
+            )
+        )
+    )
+    return count_above.scalar() + 1
+
+
+async def _fetch_board_top(db: AsyncSession, board_type: str, limit: int) -> Tuple[list, int]:
+    """Загрузить weekly/arcade leaderboard из БД."""
+    result = await db.execute(
+        select(Leaderboard, User)
+        .join(User, Leaderboard.user_id == User.id)
+        .where(
+            Leaderboard.board_type == board_type,
+            Leaderboard.score > 0,
+            User.is_banned == False,
+        )
+        .order_by(desc(Leaderboard.score), asc(Leaderboard.updated_at), asc(User.id))
+        .limit(limit)
+    )
+    rows = result.all()
+
+    leaders = [
+        {
+            "rank": i + 1,
+            "user_id": lb.user_id,
+            "username": u.username,
+            "first_name": u.first_name,
+            "photo_url": u.photo_url,
+            "score": lb.score,
+        }
+        for i, (lb, u) in enumerate(rows)
+    ]
+
+    total_result = await db.execute(
+        select(func.count())
+        .select_from(Leaderboard)
+        .join(User, Leaderboard.user_id == User.id)
+        .where(
+            Leaderboard.board_type == board_type,
+            Leaderboard.score > 0,
+            User.is_banned == False,
+        )
+    )
+    total_participants = total_result.scalar()
+
+    return leaders, total_participants
+
+
+async def _fetch_board_position(db: AsyncSession, user: User, board_type: str) -> Optional[int]:
+    """Вычислить позицию юзера в weekly/arcade leaderboard."""
+    my_lb = await db.execute(
+        select(Leaderboard)
+        .where(Leaderboard.user_id == user.id, Leaderboard.board_type == board_type)
+    )
+    my_entry = my_lb.scalar_one_or_none()
+
+    if not my_entry or my_entry.score <= 0 or user.is_banned:
+        return None, 0
+
+    count_above = await db.execute(
+        select(func.count())
+        .select_from(Leaderboard)
+        .join(User, Leaderboard.user_id == User.id)
+        .where(
+            Leaderboard.board_type == board_type,
+            Leaderboard.score > 0,
+            User.is_banned == False,
+            or_(
+                Leaderboard.score > my_entry.score,
+                and_(
+                    Leaderboard.score == my_entry.score,
+                    Leaderboard.updated_at < my_entry.updated_at,
+                ),
+                and_(
+                    Leaderboard.score == my_entry.score,
+                    Leaderboard.updated_at == my_entry.updated_at,
+                    User.id < user.id,
+                ),
+            )
+        )
+    )
+    return count_above.scalar() + 1, my_entry.score
+
 
 @router.get("/leaderboard/{board_type}", response_model=LeaderboardResponse)
 async def get_leaderboard(
@@ -288,219 +469,72 @@ async def get_leaderboard(
     board_type: 'global' | 'weekly' | 'arcade'
     Score для global = current_level - 1 (кол-во пройдённых уровней).
     Только юзеры с score > 0 попадают в борд.
+
+    Кэшируется в Redis (TTL 30 сек).
     """
     if board_type not in ["global", "weekly", "arcade"]:
         raise HTTPException(status_code=400, detail="Invalid leaderboard type")
 
+    redis = await get_redis()
+    cache_key = f"lb:{board_type}:top"
+
+    # Пробуем взять топ из кэша
+    cached = await redis.get(cache_key)
+    if cached:
+        data = json.loads(cached)
+        leaders_raw = data["leaders"]
+        total_participants = data["total"]
+    else:
+        if board_type == "global":
+            leaders_raw, total_participants = await _fetch_global_top(db, limit)
+        else:
+            leaders_raw, total_participants = await _fetch_board_top(db, board_type, limit)
+        await redis.set(cache_key, json.dumps({"leaders": leaders_raw, "total": total_participants}), ex=_LB_CACHE_TTL)
+
+    leaders = [LeaderboardEntry(**entry) for entry in leaders_raw]
+
+    # Позиция текущего пользователя
+    my_position = None
+    my_in_top = False
+
     if board_type == "global":
-        # Фильтр: хотя бы 1 пройденный уровень, не забанен
-        base_filter = [
-            User.current_level > 1,
-            User.is_banned == False,
-        ]
-
-        # Сортировка: уровень DESC, звёзды DESC, id ASC (tiebreaker)
-        result = await db.execute(
-            select(User)
-            .where(*base_filter)
-            .order_by(desc(User.current_level), desc(User.total_stars), asc(User.id))
-            .limit(limit)
-        )
-        users = result.scalars().all()
-
-        leaders = [
-            LeaderboardEntry(
-                rank=i + 1,
-                user_id=u.id,
-                username=u.username,
-                first_name=u.first_name,
-                photo_url=u.photo_url,
-                score=u.current_level - 1,  # пройдённые уровни
-            )
-            for i, u in enumerate(users)
-        ]
-
-        # Общее кол-во участников
-        total_result = await db.execute(
-            select(func.count()).select_from(User).where(*base_filter)
-        )
-        total_participants = total_result.scalar()
-
-        # Позиция текущего пользователя
-        my_position = None
-        my_in_top = False
         my_score = max(0, user.current_level - 1)
+        eligible = my_score > 0 and not user.is_banned
+    else:
+        # Для weekly/arcade score берём из кэшированного топа или из БД
+        my_score = 0
+        eligible = not user.is_banned
 
-        if my_score > 0 and not user.is_banned:
-            count_above = await db.execute(
-                select(func.count())
-                .select_from(User)
-                .where(
-                    *base_filter,
-                    or_(
-                        User.current_level > user.current_level,
-                        and_(
-                            User.current_level == user.current_level,
-                            User.total_stars > user.total_stars,
-                        ),
-                        and_(
-                            User.current_level == user.current_level,
-                            User.total_stars == user.total_stars,
-                            User.id < user.id,
-                        ),
-                    )
-                )
-            )
-            my_position = count_above.scalar() + 1
-            my_in_top = any(l.user_id == user.id for l in leaders)
+    if eligible:
+        # Проверяем, есть ли юзер в топ-100
+        for entry in leaders_raw:
+            if entry["user_id"] == user.id:
+                my_position = entry["rank"]
+                my_in_top = True
+                if board_type != "global":
+                    my_score = entry["score"]
+                break
 
-    elif board_type == "weekly":
-        result = await db.execute(
-            select(Leaderboard, User)
-            .join(User, Leaderboard.user_id == User.id)
-            .where(
-                Leaderboard.board_type == "weekly",
-                Leaderboard.score > 0,
-                User.is_banned == False,
-            )
-            .order_by(desc(Leaderboard.score), asc(Leaderboard.updated_at), asc(User.id))
-            .limit(limit)
-        )
-        rows = result.all()
-
-        leaders = [
-            LeaderboardEntry(
-                rank=i + 1,
-                user_id=lb.user_id,
-                username=u.username,
-                first_name=u.first_name,
-                photo_url=u.photo_url,
-                score=lb.score,
-            )
-            for i, (lb, u) in enumerate(rows)
-        ]
-
-        total_result = await db.execute(
-            select(func.count())
-            .select_from(Leaderboard)
-            .join(User, Leaderboard.user_id == User.id)
-            .where(
-                Leaderboard.board_type == "weekly",
-                Leaderboard.score > 0,
-                User.is_banned == False,
-            )
-        )
-        total_participants = total_result.scalar()
-
-        my_lb = await db.execute(
-            select(Leaderboard)
-            .where(Leaderboard.user_id == user.id, Leaderboard.board_type == "weekly")
-        )
-        my_entry = my_lb.scalar_one_or_none()
-
-        my_position = None
-        my_in_top = False
-        my_score = my_entry.score if my_entry else 0
-
-        if my_entry and my_entry.score > 0 and not user.is_banned:
-            count_above = await db.execute(
-                select(func.count())
-                .select_from(Leaderboard)
-                .join(User, Leaderboard.user_id == User.id)
-                .where(
-                    Leaderboard.board_type == "weekly",
-                    Leaderboard.score > 0,
-                    User.is_banned == False,
-                    or_(
-                        Leaderboard.score > my_entry.score,
-                        and_(
-                            Leaderboard.score == my_entry.score,
-                            Leaderboard.updated_at < my_entry.updated_at,
-                        ),
-                        and_(
-                            Leaderboard.score == my_entry.score,
-                            Leaderboard.updated_at == my_entry.updated_at,
-                            User.id < user.id,
-                        ),
-                    )
-                )
-            )
-            my_position = count_above.scalar() + 1
-            my_in_top = any(l.user_id == user.id for l in leaders)
-
-    else:  # arcade
-        result = await db.execute(
-            select(Leaderboard, User)
-            .join(User, Leaderboard.user_id == User.id)
-            .where(
-                Leaderboard.board_type == "arcade",
-                Leaderboard.score > 0,
-                User.is_banned == False,
-            )
-            .order_by(desc(Leaderboard.score), asc(Leaderboard.updated_at), asc(User.id))
-            .limit(limit)
-        )
-        rows = result.all()
-
-        leaders = [
-            LeaderboardEntry(
-                rank=i + 1,
-                user_id=lb.user_id,
-                username=u.username,
-                first_name=u.first_name,
-                photo_url=u.photo_url,
-                score=lb.score,
-            )
-            for i, (lb, u) in enumerate(rows)
-        ]
-
-        total_result = await db.execute(
-            select(func.count())
-            .select_from(Leaderboard)
-            .join(User, Leaderboard.user_id == User.id)
-            .where(
-                Leaderboard.board_type == "arcade",
-                Leaderboard.score > 0,
-                User.is_banned == False,
-            )
-        )
-        total_participants = total_result.scalar()
-
-        my_lb = await db.execute(
-            select(Leaderboard)
-            .where(Leaderboard.user_id == user.id, Leaderboard.board_type == "arcade")
-        )
-        my_entry = my_lb.scalar_one_or_none()
-
-        my_position = None
-        my_in_top = False
-        my_score = my_entry.score if my_entry else 0
-
-        if my_entry and my_entry.score > 0 and not user.is_banned:
-            count_above = await db.execute(
-                select(func.count())
-                .select_from(Leaderboard)
-                .join(User, Leaderboard.user_id == User.id)
-                .where(
-                    Leaderboard.board_type == "arcade",
-                    Leaderboard.score > 0,
-                    User.is_banned == False,
-                    or_(
-                        Leaderboard.score > my_entry.score,
-                        and_(
-                            Leaderboard.score == my_entry.score,
-                            Leaderboard.updated_at < my_entry.updated_at,
-                        ),
-                        and_(
-                            Leaderboard.score == my_entry.score,
-                            Leaderboard.updated_at == my_entry.updated_at,
-                            User.id < user.id,
-                        ),
-                    )
-                )
-            )
-            my_position = count_above.scalar() + 1
-            my_in_top = any(l.user_id == user.id for l in leaders)
+        if not my_in_top:
+            # Юзера нет в топ — считаем позицию (кэш per-user)
+            pos_key = f"lb:{board_type}:pos:{user.id}"
+            cached_pos = await redis.get(pos_key)
+            if cached_pos:
+                pos_data = json.loads(cached_pos)
+                my_position = pos_data["pos"]
+                if board_type != "global":
+                    my_score = pos_data["score"]
+            else:
+                if board_type == "global":
+                    if my_score > 0:
+                        my_position = await _fetch_global_position(db, user)
+                        await redis.set(pos_key, json.dumps({"pos": my_position, "score": my_score}), ex=_LB_CACHE_TTL)
+                else:
+                    result = await _fetch_board_position(db, user, board_type)
+                    if result[0] is not None:
+                        my_position = result[0]
+                        my_score = result[1]
+                        await redis.set(pos_key, json.dumps({"pos": my_position, "score": my_score}), ex=_LB_CACHE_TTL)
 
     return LeaderboardResponse(
         leaders=leaders,

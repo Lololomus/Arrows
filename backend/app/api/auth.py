@@ -195,43 +195,46 @@ async def get_current_user(
 async def apply_redis_referral(user: User, db: AsyncSession):
     """
     Проверяет Redis на сохранённый реферальный код (EC-16).
-    
+
+    Вызывается ТОЛЬКО для новых пользователей (при первой регистрации).
     Когда пользователь кликает ссылку t.me/bot?start=ref_CODE, но НЕ открывает
-    Mini App сразу, бот-вебхук сохраняет код в Redis. При последующей авторизации
-    в Mini App (даже без start_param) этот код подхватывается и применяется.
+    Mini App сразу, бот сохраняет код в Redis. При создании аккаунта код подхватывается.
     """
     if user.referred_by_id is not None:
         return  # уже есть реферер
-    
+
     try:
         redis = await get_redis()
         key = f"ref_pending:{user.telegram_id}"
         code = await redis.get(key)
-        
+
         if not code:
             return
 
         print(f"📥 [Auth] Found pending referral for telegram_id={user.telegram_id}")
-        
+
         if isinstance(code, bytes):
             code = code.decode("utf-8")
-        
-        # Grace period
-        account_age = datetime.utcnow() - user.created_at
-        if account_age > timedelta(hours=settings.REFERRAL_GRACE_PERIOD_HOURS):
+
+        # Lock user row to prevent race condition with POST /referral/apply
+        locked = await db.execute(
+            select(User).where(User.id == user.id).with_for_update()
+        )
+        user = locked.scalar_one()
+        if user.referred_by_id is not None:
             await redis.delete(key)
             return
-        
+
         # Ищем инвайтера
         result = await db.execute(
             select(User).where(User.referral_code == code.upper())
         )
         referrer = result.scalar_one_or_none()
-        
+
         if not referrer or referrer.id == user.id:
             await redis.delete(key)
             return
-        
+
         # Создаём реферал
         try:
             referral = Referral(
@@ -241,19 +244,19 @@ async def apply_redis_referral(user: User, db: AsyncSession):
                 invitee_bonus_paid=True,
             )
             db.add(referral)
-            
+
             user.referred_by_id = referrer.id
             user.coins += settings.REFERRAL_REWARD_INVITEE  # +100 СРАЗУ
             referrer.referrals_pending += 1
-            
+
             await db.commit()
             print(f"✅ [Auth] Redis referral applied: {user.id} → inviter {referrer.id}")
         except IntegrityError:
             await db.rollback()
             print(f"ℹ️ [Auth] Redis referral already applied for user={user.id}")
-        
+
         await redis.delete(key)
-        
+
     except Exception as e:
         # Redis недоступен — не критично
         print(f"⚠️ [Auth] Redis referral check failed: {e}")
@@ -315,8 +318,12 @@ async def auth_telegram(
         
         await db.commit()
         await db.refresh(user)
-        
+
         print(f"🆕 [Auth] New user created: {user.id}")
+
+        # EC-16: Redis fallback — только для новых пользователей
+        await apply_redis_referral(user, db)
+        await db.refresh(user)
     else:
         # Обновляем данные если изменились
         updated = False
@@ -336,10 +343,6 @@ async def auth_telegram(
         if updated:
             await db.commit()
             print(f"🔄 [Auth] User {user.id} data updated")
-    
-    # EC-16: Проверяем Redis на сохранённый реферальный код
-    # (если пользователь кликнул ссылку бота, но Mini App открыл позже без start_param)
-    await apply_redis_referral(user, db)
     
     # Создаём JWT токен
     return build_auth_response(user)

@@ -13,7 +13,7 @@ import { GameScreen } from './screens/GameScreen';
 import nonGameBackgroundUrl from './assets/background.webp?url';
 import { bootstrapAuth, hasUsableTelegramInitData, markAuthExpired } from './services/authSession';
 import { startRewardReconciler, stopRewardReconciler } from './services/rewardReconciler';
-import { extractReferralCode } from './utils/referralLaunch';
+import { extractReferralCode, getSavedReferralCode, clearSavedReferralCode } from './utils/referralLaunch';
 
 const ShopScreen = lazy(() =>
   import('./screens/ShopScreen').then((module) => ({ default: module.ShopScreen }))
@@ -46,7 +46,8 @@ export default function App() {
   const handleTabChange = useCallback((id: TabId) => setActiveTab(id), []);
 
   const applyReferralIfPresent = useCallback(async (context: string, isCancelled?: () => boolean) => {
-    const referralCode = extractReferralCode();
+    // Try live extraction first, then fall back to localStorage
+    const referralCode = extractReferralCode() ?? getSavedReferralCode();
     if (!referralCode) {
       return;
     }
@@ -61,6 +62,11 @@ export default function App() {
         + (result.reason ? ` reason=${result.reason}` : '')
       );
 
+      // Clear localStorage on definitive outcomes (no point retrying)
+      if (result.success || result.reason === 'already_referred' || result.reason === 'account_too_old') {
+        clearSavedReferralCode();
+      }
+
       if (!result.success && result.reason !== 'already_referred') {
         return;
       }
@@ -69,6 +75,7 @@ export default function App() {
       if (isCancelled?.()) return;
       setUser(syncedUser);
     } catch (error) {
+      // Network error — keep code in localStorage for retry on next launch
       console.error('[Referral] Auto-apply failed:', error);
     }
   }, [setUser]);

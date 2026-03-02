@@ -49,13 +49,40 @@ function extractFromLocation(): string | null {
   );
 }
 
+const LS_KEY = 'pending_referral_code';
+
 export function extractReferralCode(): string | null {
   const tg = (window as TelegramWindow).Telegram?.WebApp;
 
-  return (
+  const code =
     normalizeReferralCode(tg?.initDataUnsafe?.start_param)
     ?? normalizeReferralCode(tg?.initDataUnsafe?.startapp)
     ?? extractFromInitData(tg?.initData)
-    ?? extractFromLocation()
-  );
+    ?? extractFromLocation();
+
+  if (code) {
+    saveReferralCode(code);
+  }
+
+  return code;
+}
+
+export function saveReferralCode(code: string): void {
+  try {
+    localStorage.setItem(LS_KEY, code);
+  } catch { /* quota / private mode */ }
+}
+
+export function getSavedReferralCode(): string | null {
+  try {
+    return localStorage.getItem(LS_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function clearSavedReferralCode(): void {
+  try {
+    localStorage.removeItem(LS_KEY);
+  } catch { /* ignore */ }
 }

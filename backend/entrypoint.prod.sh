@@ -29,5 +29,12 @@ if [[ -z "$(ls -A "$LEVELS_DIR" 2>/dev/null)" ]]; then
   fi
 fi
 
-echo "==> Starting backend"
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+echo "==> Starting backend (gunicorn + uvicorn workers)"
+exec gunicorn app.main:app \
+  -k uvicorn.workers.UvicornWorker \
+  --workers "${GUNICORN_WORKERS:-2}" \
+  --bind 0.0.0.0:8000 \
+  --timeout 60 \
+  --keepalive 5 \
+  --max-requests 2000 \
+  --max-requests-jitter 200
