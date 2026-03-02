@@ -1,15 +1,84 @@
-import { useState, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { ClipboardList, Trophy, Users, Share2, Youtube, Send, CheckCircle2, Lock, Puzzle, Coins, Sparkles } from 'lucide-react';
-import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import {
+  CheckCircle2,
+  ClipboardList,
+  Coins,
+  Lock,
+  Puzzle,
+  Send,
+  Sparkles,
+  Trophy,
+  Users,
+} from 'lucide-react';
 
-// ==========================================
-// TELEGRAM HAPTICS HELPER
-// ==========================================
+import { handleApiError, tasksApi } from '../api/client';
+import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
+import type { TaskDto } from '../game/types';
+import { useAppStore } from '../stores/store';
+
+type TaskScreenTab = 'tasks' | 'fragments';
+type TaskUiConfig = {
+  icon: typeof Send;
+  iconColor: string;
+  iconBg: string;
+};
+type FlyingCoin = {
+  id: string;
+  startX: number;
+  startY: number;
+  midX: number;
+  midY: number;
+  endX: number;
+  endY: number;
+  rotation: number;
+  delay: number;
+};
+
+const TASK_UI: Record<TaskDto['id'], TaskUiConfig> = {
+  official_channel: {
+    icon: Send,
+    iconColor: 'text-green-400',
+    iconBg: 'bg-green-500/20',
+  },
+  arcade_levels: {
+    icon: Trophy,
+    iconColor: 'text-blue-400',
+    iconBg: 'bg-blue-500/20',
+  },
+  friends_confirmed: {
+    icon: Users,
+    iconColor: 'text-purple-400',
+    iconBg: 'bg-purple-500/20',
+  },
+};
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.08,
+      delayChildren: 0.05,
+    },
+  },
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, x: -30 },
+  visible: {
+    opacity: 1,
+    x: 0,
+    transition: { duration: 0.35, ease: 'easeOut' },
+  },
+};
+
+const TASKS_PLACEHOLDER_ENABLED = false;
+
 const triggerHaptic = (style: 'light' | 'medium' | 'heavy' | 'selection' | 'success') => {
-  const tg = (window as any).Telegram?.WebApp;
+  const tg = (window as Window & { Telegram?: any }).Telegram?.WebApp;
   if (!tg?.HapticFeedback) return;
-  
+
   if (style === 'selection') {
     tg.HapticFeedback.selectionChanged();
   } else if (style === 'success') {
@@ -19,50 +88,42 @@ const triggerHaptic = (style: 'light' | 'medium' | 'heavy' | 'selection' | 'succ
   }
 };
 
-// ==========================================
-// COMPONENTS
-// ==========================================
-
-function BottomCoinStash({ balance, isPulsing }: { balance: number, isPulsing: boolean }) {
+function BottomCoinStash({ balance, isPulsing }: { balance: number; isPulsing: boolean }) {
   return (
-    <motion.div 
+    <motion.div
       animate={isPulsing ? { scale: [1, 1.02, 1], y: [0, 4, 0] } : { scale: 1, y: 0 }}
-      transition={{ duration: 0.4, type: "spring", stiffness: 350, damping: 18 }}
-      className="relative overflow-hidden rounded-3xl border border-yellow-300/30 bg-[#14162a]/80 backdrop-blur-2xl shadow-[0_16px_40px_rgba(0,0,0,0.8)] w-full pointer-events-auto"
+      transition={{ duration: 0.3, ease: 'easeOut' }}
+      className="relative flex h-[80px] w-full items-center overflow-hidden rounded-3xl border border-yellow-300/30 bg-[#14162a]/95 shadow-[0_16px_40px_rgba(0,0,0,0.8)] backdrop-blur-xl pointer-events-auto"
     >
       <div className="absolute inset-0 bg-gradient-to-r from-amber-500/10 via-yellow-300/10 to-amber-500/10" />
-      
-      {/* Вспышка-удар при зачислении */}
-      <motion.div 
-        animate={isPulsing ? { opacity: [0, 0.6, 0], scale: [1, 1.1, 1] } : { opacity: 0, scale: 1 }}
-        transition={{ duration: 0.5, ease: "easeOut" }}
-        className="absolute inset-0 bg-yellow-300/30 blur-xl mix-blend-overlay pointer-events-none" 
+      <motion.div
+        animate={isPulsing ? { opacity: [0, 0.15, 0] } : { opacity: 0 }}
+        transition={{ duration: 0.4, ease: 'easeOut' }}
+        className="absolute inset-0 rounded-3xl bg-white pointer-events-none"
       />
-      
-      <div className="relative flex items-center justify-between px-5 py-4">
+      <div className="relative flex w-full items-center justify-between px-5">
         <div className="flex items-center gap-4">
-          <motion.div 
+          <motion.div
             animate={isPulsing ? { rotate: [0, -15, 10, 0], scale: [1, 1.1, 1] } : { rotate: 0, scale: 1 }}
-            transition={{ duration: 0.6, type: "spring" }}
-            className="flex h-12 w-12 items-center justify-center rounded-xl border border-yellow-200/40 bg-gradient-to-br from-yellow-300/20 to-amber-500/10 text-yellow-300 shadow-[0_0_20px_rgba(250,204,21,0.3)]"
+            transition={{ duration: 0.5, ease: 'easeOut' }}
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-yellow-200/40 bg-gradient-to-br from-yellow-300/20 to-amber-500/10 text-yellow-300 shadow-[0_0_20px_rgba(250,204,21,0.3)]"
           >
             <Coins size={24} strokeWidth={2.5} className="drop-shadow-lg" />
           </motion.div>
           <div className="leading-tight">
-            <p className="text-[12px] font-bold uppercase tracking-[0.25em] text-yellow-200/60 mb-0.5">Баланс</p>
-            {/* Сами цифры вспыхивают белым и увеличиваются */}
-            <motion.p 
+            <p className="mb-0.5 text-[12px] font-bold uppercase tracking-[0.25em] text-yellow-200/60">Баланс</p>
+            <motion.p
               key={balance}
-              initial={{ scale: 1.4, color: '#ffffff', textShadow: '0 0 20px rgba(250,204,21,0.8)' }}
-              animate={{ scale: 1, color: '#fef08a', textShadow: '0 0 0px rgba(250,204,21,0)' }}
-              transition={{ type: 'spring', stiffness: 350, damping: 20 }}
-              className="text-3xl font-black text-yellow-300 drop-shadow-[0_0_12px_rgba(250,204,21,0.4)] tabular-nums tracking-tight origin-left"
+              initial={{ scale: 1.3, color: '#ffffff' }}
+              animate={{ scale: 1, color: '#fef08a' }}
+              transition={{ duration: 0.4, ease: 'easeOut' }}
+              className="origin-left text-3xl font-black tracking-tight text-yellow-300 drop-shadow-[0_0_12px_rgba(250,204,21,0.4)] tabular-nums"
             >
               {balance.toLocaleString()}
             </motion.p>
           </div>
         </div>
-        <div className="flex flex-col items-end">
+        <div className="flex shrink-0 flex-col items-end">
           <span className="rounded-full border border-yellow-300/40 bg-yellow-300/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-yellow-100/90 shadow-inner">
             Wallet
           </span>
@@ -72,88 +133,55 @@ function BottomCoinStash({ balance, isPulsing }: { balance: number, isPulsing: b
   );
 }
 
-interface Task {
-  id: number;
-  title: string;
-  description: string;
-  reward: number;
-  icon: any;
-  completed: boolean;
-  locked: boolean;
+function TaskScreenLoader() {
+  return (
+    <div className="flex items-center justify-center py-16">
+      <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-white animate-spin" />
+    </div>
+  );
 }
 
-const TASKS_PLACEHOLDER_ENABLED = true;
-
 export function TasksScreen() {
-  const containerRef = useRef<HTMLDivElement>(null);
-  
-  const [activeTab, setActiveTab] = useState<'tasks' | 'fragments'>('tasks');
-  const [tasks, setTasks] = useState<Task[]>([
-    {
-      id: 1,
-      title: 'Подпишись на канал',
-      description: 'Подпишись на наш Telegram канал',
-      reward: 100,
-      icon: Send,
-      completed: true,
-      locked: false,
-    },
-    {
-      id: 2,
-      title: 'Пригласи 3 друзей',
-      description: 'Пригласи друзей по реферальной ссылке',
-      reward: 500,
-      icon: Users,
-      completed: false,
-      locked: false,
-    },
-    {
-      id: 3,
-      title: 'Пройди 10 уровней',
-      description: 'Завершите первые 10 уровней',
-      reward: 200,
-      icon: Trophy,
-      completed: false,
-      locked: false,
-    },
-    {
-      id: 4,
-      title: 'Поделись игрой',
-      description: 'Поделись игрой в своей истории',
-      reward: 150,
-      icon: Share2,
-      completed: false,
-      locked: false,
-    },
-    {
-      id: 5,
-      title: 'Посмотри видео',
-      description: 'Посмотри наш обучающий ролик',
-      reward: 50,
-      icon: Youtube,
-      completed: false,
-      locked: false,
-    },
-    {
-      id: 6,
-      title: 'VIP задание',
-      description: 'Доступно только для VIP',
-      reward: 1000,
-      icon: Lock,
-      completed: false,
-      locked: true,
-    },
-  ]);
+  const { user, updateUser } = useAppStore();
 
-  // Анимации и стейт для JIT Кошелька и Монет
-  const [flyingCoins, setFlyingCoins] = useState<any[]>([]);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const coinTargetAnchorRef = useRef<HTMLDivElement>(null);
+  const stashHideTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const [activeTab, setActiveTab] = useState<TaskScreenTab>('tasks');
+  const [tasks, setTasks] = useState<TaskDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [screenError, setScreenError] = useState<string | null>(null);
+  const [taskErrors, setTaskErrors] = useState<Record<string, string>>({});
+  const [loadingTaskIds, setLoadingTaskIds] = useState<Set<string>>(new Set());
+  const [openedChannelTaskIds, setOpenedChannelTaskIds] = useState<Set<string>>(new Set());
+  const [flyingCoins, setFlyingCoins] = useState<FlyingCoin[]>([]);
   const [isStashVisible, setIsStashVisible] = useState(false);
   const [isStashPulsing, setIsStashPulsing] = useState(false);
-  const stashHideTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const coinTargetAnchorRef = useRef<HTMLDivElement>(null);
-  
-  // Моковый баланс для демонстрации стэша (в проде забирай из стора)
-  const [userCoins, setUserCoins] = useState(1250);
+
+  const userCoins = user?.coins ?? 0;
+
+  const fetchTasks = useCallback(async (showLoader = false) => {
+    if (showLoader) setLoading(true);
+
+    try {
+      const data = await tasksApi.getTasks();
+      setTasks(data.tasks);
+      setScreenError(null);
+    } catch (error) {
+      setScreenError(handleApiError(error));
+    } finally {
+      if (showLoader) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchTasks(true);
+  }, [fetchTasks]);
+
+  useEffect(() => () => {
+    if (stashHideTimerRef.current) clearTimeout(stashHideTimerRef.current);
+  }, []);
 
   const showStashWithTimer = useCallback(() => {
     setIsStashVisible(true);
@@ -161,109 +189,244 @@ export function TasksScreen() {
     stashHideTimerRef.current = setTimeout(() => setIsStashVisible(false), 3500);
   }, []);
 
-  const triggerStashPulse = () => {
+  const triggerStashPulse = useCallback(() => {
     setIsStashPulsing(true);
-    setTimeout(() => setIsStashPulsing(false), 400);
-  };
+    setTimeout(() => setIsStashPulsing(false), 300);
+  }, []);
 
-  const handleTaskClick = (task: Task, event: React.MouseEvent) => {
-    if (task.locked || task.completed) return;
-
-    // Мощный тактильный старт
-    triggerHaptic('heavy');
-    showStashWithTimer();
-
-    // 1. Координаты старта (Центр кнопки)
+  const runRewardAnimation = useCallback((rewardAmount: number, triggerElement: HTMLElement) => {
     const containerRect = containerRef.current?.getBoundingClientRect();
-    const buttonRect = event.currentTarget.getBoundingClientRect();
-    
+    const buttonRect = triggerElement.getBoundingClientRect();
     if (!containerRect) return;
 
     const startX = buttonRect.left - containerRect.left + buttonRect.width / 2;
     const startY = buttonRect.top - containerRect.top + buttonRect.height / 2;
 
-    // 2. Координаты финиша (Точно в якорь цифр)
     const targetRect = coinTargetAnchorRef.current?.getBoundingClientRect();
-    const targetCenterX = targetRect ? targetRect.left - containerRect.left + targetRect.width / 2 : containerRect.width / 2;
-    const targetCenterY = targetRect ? targetRect.top - containerRect.top + targetRect.height / 2 : containerRect.height - 80;
+    const targetCenterX = targetRect ? targetRect.left - containerRect.left : containerRect.width / 2;
+    const targetCenterY = targetRect ? targetRect.top - containerRect.top : containerRect.height - 130;
 
-    // 3. Генерация частиц (монеток)
-    const coinsToSpawn = Math.min(12, Math.max(6, Math.floor(task.reward / 10)));
-    const newCoins = Array.from({ length: coinsToSpawn }).map((_, i) => {
-      const jumpX = (Math.random() - 0.5) * 80;  
-      const jumpY = -(Math.random() * 50 + 20);  
-      
-      const endSpreadX = (Math.random() - 0.5) * 30;
-      const endSpreadY = (Math.random() - 0.5) * 15;
+    const coinsToSpawn = Math.min(10, Math.max(5, Math.floor(rewardAmount / 15)));
+    const spawnedCoins = Array.from({ length: coinsToSpawn }).map((_, index) => ({
+      id: `${Date.now()}-${index}`,
+      startX,
+      startY,
+      midX: startX + (Math.random() - 0.5) * 80,
+      midY: startY - (Math.random() * 50 + 20),
+      endX: targetCenterX + (Math.random() - 0.5) * 20,
+      endY: targetCenterY + (Math.random() - 0.5) * 10,
+      rotation: Math.random() > 0.5 ? 360 : -360,
+      delay: index * 0.05,
+    }));
 
-      return {
-        id: Date.now() + '-' + i,
-        startX, startY,
-        midX: startX + jumpX,
-        midY: startY + jumpY,
-        endX: targetCenterX + endSpreadX,
-        endY: targetCenterY + endSpreadY,
-        rotation: Math.random() > 0.5 ? 360 : -360,
-        delay: i * 0.04, 
-      };
-    });
+    showStashWithTimer();
+    setFlyingCoins((prev) => [...prev, ...spawnedCoins]);
 
-    setFlyingCoins(prev => [...prev, ...newCoins]);
-
-    // Обновляем статус задания
-    setTasks(prev => prev.map(t =>
-      t.id === task.id ? { ...t, completed: true } : t,
-    ));
-
-    // Haptic Rhythm
-    newCoins.forEach((c) => {
-      const hitTime = 800 + (c.delay * 1000);
+    spawnedCoins.forEach((coin) => {
+      const hitTime = 800 + coin.delay * 1000;
       setTimeout(() => {
         triggerHaptic('light');
         triggerStashPulse();
       }, hitTime);
     });
 
-    // Обновление баланса (Когда приземляется ПЕРВАЯ монетка)
     setTimeout(() => {
-      setUserCoins(prev => prev + task.reward);
       triggerHaptic('success');
       showStashWithTimer();
-    }, 900);
+    }, 850);
 
-    // Очистка DOM
     setTimeout(() => {
-      setFlyingCoins(prev => prev.filter(c => !newCoins.map(nc => nc.id).includes(c.id)));
-    }, 1600);
-  };
+      setFlyingCoins((prev) => prev.filter((coin) => !spawnedCoins.some((item) => item.id === coin.id)));
+    }, 1800);
+  }, [showStashWithTimer, triggerStashPulse]);
 
-  const completedTasks = tasks.filter((task) => task.completed);
-  const pendingTasks = tasks.filter((task) => !task.completed);
+  const setTaskLoading = useCallback((taskId: string, isLoading: boolean) => {
+    setLoadingTaskIds((prev) => {
+      const next = new Set(prev);
+      if (isLoading) {
+        next.add(taskId);
+      } else {
+        next.delete(taskId);
+      }
+      return next;
+    });
+  }, []);
 
-  const itemVariant = {
-    hidden: { opacity: 0, x: -20 },
-    visible: (i: number) => ({
-      opacity: 1,
-      x: 0,
-      transition: {
-        delay: i * 0.05,
-        duration: 0.3,
-        type: 'spring',
-        stiffness: 350,
-        damping: 25,
-      },
-    }),
-  };
+  const clearTaskError = useCallback((taskId: string) => {
+    setTaskErrors((prev) => {
+      if (!(taskId in prev)) return prev;
+      const next = { ...prev };
+      delete next[taskId];
+      return next;
+    });
+  }, []);
 
-  const tabTransition = {
-    initial: { opacity: 0, x: -10 },
-    animate: { opacity: 1, x: 0 },
-    exit: { opacity: 0, x: 10 },
-    transition: { duration: 0.2 },
+  const handleOpenChannel = useCallback((task: TaskDto) => {
+    const url = task.channel?.url ?? (task.channel?.username ? `https://t.me/${task.channel.username}` : null);
+    if (!url) {
+      setTaskErrors((prev) => ({ ...prev, [task.id]: 'Канал пока не настроен на сервере' }));
+      return;
+    }
+
+    triggerHaptic('light');
+    clearTaskError(task.id);
+
+    const tg = (window as Window & { Telegram?: any }).Telegram?.WebApp;
+    if (tg?.openTelegramLink) {
+      tg.openTelegramLink(url);
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+
+    setOpenedChannelTaskIds((prev) => new Set(prev).add(task.id));
+  }, [clearTaskError]);
+
+  const handleClaim = useCallback(async (task: TaskDto, triggerElement: HTMLElement) => {
+    const tierIndex = task.nextTierIndex;
+    const tier = tierIndex != null ? task.tiers[tierIndex] : null;
+    if (!tier) return;
+
+    setTaskLoading(task.id, true);
+    clearTaskError(task.id);
+    triggerHaptic('heavy');
+
+    try {
+      const result = await tasksApi.claimTask(tier.claimId);
+      updateUser({ coins: result.coins });
+      runRewardAnimation(result.rewardCoins, triggerElement);
+      await fetchTasks(false);
+    } catch (error) {
+      setTaskErrors((prev) => ({ ...prev, [task.id]: handleApiError(error) }));
+    } finally {
+      setTaskLoading(task.id, false);
+    }
+  }, [clearTaskError, fetchTasks, runRewardAnimation, setTaskLoading, updateUser]);
+
+  const handleTaskAction = useCallback(async (task: TaskDto, event?: MouseEvent<HTMLElement>) => {
+    const triggerElement = event?.currentTarget as HTMLElement | undefined;
+
+    if (task.kind === 'single') {
+      if (task.status === 'completed') return;
+      if (!openedChannelTaskIds.has(task.id)) {
+        handleOpenChannel(task);
+        return;
+      }
+      if (triggerElement) {
+        await handleClaim(task, triggerElement);
+      }
+      return;
+    }
+
+    if (task.status !== 'claimable' || !triggerElement) return;
+    await handleClaim(task, triggerElement);
+  }, [handleClaim, handleOpenChannel, openedChannelTaskIds]);
+
+  const renderTaskCard = (task: TaskDto) => {
+    const ui = TASK_UI[task.id];
+    const nextTier = task.nextTierIndex != null ? task.tiers[task.nextTierIndex] : null;
+    const lastTier = task.tiers.length > 0 ? task.tiers[task.tiers.length - 1] : null;
+    const target = nextTier?.target ?? 1;
+    const reward = nextTier?.rewardCoins ?? lastTier?.rewardCoins ?? 0;
+    const progress = task.kind === 'stepped' ? task.progress : task.status === 'completed' ? 1 : 0;
+    const progressPercent = Math.min(100, (progress / target) * 100);
+    const isLoadingTask = loadingTaskIds.has(task.id);
+    const isCompleted = task.status === 'completed';
+    const displayTitle = nextTier?.title ?? task.baseTitle;
+    const taskError = taskErrors[task.id];
+
+    let actionLabel = '';
+    if (task.kind === 'single') {
+      actionLabel = isLoadingTask ? 'Проверяем...' : openedChannelTaskIds.has(task.id) ? 'Проверить' : 'Подписаться';
+    } else if (task.status === 'claimable') {
+      actionLabel = isLoadingTask ? 'Загрузка...' : `ЗАБРАТЬ ${reward}`;
+    }
+
+    return (
+      <motion.div
+        key={task.id}
+        variants={itemVariants}
+        className={`
+          relative overflow-hidden rounded-2xl border p-4
+          ${isCompleted ? 'border-white/5 bg-white/5 opacity-60' : 'border-white/10 bg-white/5'}
+        `}
+      >
+        <div className="relative z-10 flex items-center gap-4">
+          <div
+            className={`
+              flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl
+              ${isCompleted ? 'bg-white/10 text-white/50' : `${ui.iconBg} ${ui.iconColor}`}
+            `}
+          >
+            {isCompleted ? <CheckCircle2 size={24} /> : <ui.icon size={24} />}
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <h3 className={`mb-0.5 truncate text-[15px] font-bold ${isCompleted ? 'text-white/60' : 'text-white'}`}>
+              {displayTitle}
+            </h3>
+
+            {isCompleted ? (
+              <p className="truncate text-[11px] text-white/40">Задание выполнено</p>
+            ) : (
+              <>
+                <p className="pr-2 text-[11px] leading-tight text-white/50 line-clamp-2">
+                  {taskError ?? task.baseDescription}
+                </p>
+                {task.kind === 'stepped' ? (
+                  <div className="mt-2">
+                    <div className="mb-1 flex items-center justify-between text-[10px] font-semibold text-white/45">
+                      <span>{Math.min(progress, target)}/{target}</span>
+                      <span>+{reward}</span>
+                    </div>
+                    <div className="relative h-1 w-full overflow-hidden rounded-full bg-white/10">
+                      <motion.div
+                        className={`absolute inset-y-0 left-0 rounded-full ${task.status === 'claimable' ? 'bg-amber-400' : 'bg-yellow-400'}`}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${progressPercent}%` }}
+                        transition={{ duration: 0.5, ease: 'easeOut' }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+
+          <div className="flex shrink-0 flex-col items-end justify-center pl-1">
+            {isCompleted ? (
+              <div className="rounded-xl bg-white/10 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-white/50">
+                ВЫПОЛНЕНО
+              </div>
+            ) : task.kind === 'single' || task.status === 'claimable' ? (
+              <motion.button
+                whileTap={{ scale: 0.92 }}
+                disabled={isLoadingTask}
+                onClick={(event) => void handleTaskAction(task, event)}
+                className={`
+                  flex items-center gap-1.5 rounded-xl px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-white
+                  ${task.kind === 'single'
+                    ? 'bg-white/10 active:bg-white/20'
+                    : 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-[0_4px_15px_rgba(245,158,11,0.3)]'}
+                  ${isLoadingTask ? 'opacity-70' : ''}
+                `}
+              >
+                {task.kind === 'single' ? <Send size={14} /> : <Sparkles size={14} />}
+                {actionLabel}
+              </motion.button>
+            ) : (
+              <div className="flex flex-col items-end">
+                <div className="text-[16px] font-bold leading-none text-amber-400">+{reward}</div>
+                <div className="mt-1 text-[9px] font-bold uppercase tracking-widest text-amber-400/60">монет</div>
+              </div>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    );
   };
 
   return (
-    <div ref={containerRef} className="px-4 pb-nav pt-6 h-full flex flex-col relative overflow-hidden">
+    <div ref={containerRef} className="relative flex h-full flex-col overflow-hidden px-4 pb-nav pt-6">
       <AdaptiveParticles
         variant="bg"
         tone="neutral"
@@ -272,40 +435,36 @@ export function TasksScreen() {
         className="z-0 opacity-30"
       />
 
-      {/* АНИМАЦИОННЫЙ СЛОЙ ФИЗИКИ МОНЕТ (GPU Accelerated) */}
-      <div className="absolute inset-0 pointer-events-none z-[150] overflow-hidden">
+      <div className="pointer-events-none absolute inset-0 z-[150] overflow-hidden">
         <AnimatePresence>
           {flyingCoins.map((coin) => (
             <motion.div
               key={coin.id}
-              style={{ willChange: "transform" }}
-              initial={{ x: coin.startX, y: coin.startY, scale: 0, opacity: 0, rotate: 0 }}
-              animate={{ 
-                x: [coin.startX, coin.midX, coin.endX], 
-                y: [coin.startY, coin.midY, coin.endY], 
-                scale: [0, 1.2, 0.5], 
-                scaleY: [0, 1.2, 0.8], // Motion Stretch
+              initial={{ x: coin.startX, y: coin.startY, scale: 0, opacity: 0 }}
+              animate={{
+                x: [coin.startX, coin.midX, coin.endX],
+                y: [coin.startY, coin.midY, coin.endY],
+                scale: [0, 1.2, 0.5],
                 opacity: [0, 1, 1, 0],
-                rotate: [0, coin.rotation, coin.rotation * 1.2]
+                rotate: [0, coin.rotation, coin.rotation * 1.5],
               }}
-              transition={{ 
-                duration: 0.9, 
-                delay: coin.delay, 
-                times: [0, 0.45, 1], 
-                ease: ["easeOut", "easeInOut"] 
+              transition={{
+                duration: 0.8,
+                delay: coin.delay,
+                times: [0, 0.45, 1],
+                ease: ['easeOut', 'easeIn'],
               }}
-              className="absolute -ml-4 -mt-4 text-amber-400 drop-shadow-[0_0_15px_rgba(245,158,11,0.8)]"
+              className="absolute -ml-3 -mt-3 text-amber-400 drop-shadow-[0_0_12px_rgba(245,158,11,0.8)]"
             >
-              <Coins size={36} fill="#f59e0b" className="text-yellow-100" />
+              <Coins size={28} fill="#f59e0b" className="text-amber-200" />
             </motion.div>
           ))}
         </AnimatePresence>
       </div>
 
-      {/* TABS (Оригинал) */}
-      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-1 mt-2 mb-6 flex relative border border-white/10 shrink-0">
+      <div className="relative mt-2 mb-6 flex shrink-0 rounded-2xl border border-white/10 bg-white/5 p-1 backdrop-blur-lg">
         <motion.div
-          className="absolute top-1 bottom-1 bg-white/10 rounded-xl shadow-sm"
+          className="absolute top-1 bottom-1 rounded-xl bg-white/10 shadow-sm"
           initial={false}
           animate={{
             left: activeTab === 'tasks' ? '4px' : '50%',
@@ -315,151 +474,54 @@ export function TasksScreen() {
         />
         <button
           onClick={() => setActiveTab('tasks')}
-          className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${activeTab === 'tasks' ? 'text-white' : 'text-white/50'}`}
+          className={`z-10 flex-1 py-3 text-sm font-bold transition-colors ${activeTab === 'tasks' ? 'text-white' : 'text-white/50'}`}
         >
-          <ClipboardList size={16} className="inline mr-1 mb-1" /> Задания
+          <ClipboardList size={16} className="mr-1 mb-1 inline" /> Задания
         </button>
         <button
           onClick={() => setActiveTab('fragments')}
-          className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${activeTab === 'fragments' ? 'text-white' : 'text-white/50'}`}
+          className={`z-10 flex-1 py-3 text-sm font-bold transition-colors ${activeTab === 'fragments' ? 'text-white' : 'text-white/50'}`}
         >
-          <Puzzle size={16} className="inline mr-1 mb-1" /> Фрагменты
+          <Puzzle size={16} className="mr-1 mb-1 inline" /> Фрагменты
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar relative pb-32">
+      <div className="relative flex-1 overflow-y-auto custom-scrollbar pb-32">
         <AnimatePresence mode="wait">
           {activeTab === 'tasks' ? (
-            <motion.div key="tasks" {...tabTransition} className="space-y-3.5 pb-2">
-              <AnimatePresence mode="popLayout">
-                {/* ВЫПОЛНЕННЫЕ ЗАДАНИЯ (Улучшенные тени) */}
-                {completedTasks.length > 0 && (
-                  <div className="relative space-y-3.5 mb-6">
-                    <AdaptiveParticles
-                      variant="accent"
-                      tone="green"
-                      baseCount={14}
-                      baseSpeed={0.15}
-                      className="z-0 opacity-55"
-                    />
-                    <div className="relative z-10 space-y-3.5">
-                      {completedTasks.map((task, i) => (
-                        <motion.div
-                          key={task.id}
-                          layout
-                          custom={i}
-                          variants={itemVariant}
-                          initial="hidden"
-                          animate="visible"
-                          className="relative border rounded-3xl p-4 bg-emerald-500/10 border-emerald-500/30 shadow-[inset_0_0_20px_rgba(16,185,129,0.05)] transition-colors overflow-hidden group"
-                        >
-                          <div className="flex items-center gap-4 relative z-10">
-                            <div className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 bg-emerald-500/20 text-emerald-400 p-[1px]">
-                              <div className="w-full h-full bg-[#111322] rounded-2xl flex items-center justify-center shadow-inner">
-                                <CheckCircle2 size={26} className="drop-shadow-md text-emerald-400" />
-                              </div>
-                            </div>
-
-                            <div className="flex-1 min-w-0 py-0.5">
-                              <h3 className="font-extrabold text-[16px] mb-1 truncate text-emerald-400">
-                                {task.title}
-                              </h3>
-                              <p className="text-emerald-400/60 text-xs truncate font-medium">Выполнено</p>
-                            </div>
-
-                            <div className="text-right flex-shrink-0">
-                              <div className="flex flex-col items-end px-2">
-                                <div className="text-emerald-400/50 font-black text-xl leading-none">+{task.reward}</div>
-                                <div className="text-emerald-500/40 text-[10px] font-bold uppercase mt-1 tracking-widest">монет</div>
-                              </div>
-                            </div>
-                          </div>
-                        </motion.div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* АКТИВНЫЕ ЗАДАНИЯ (GLASS-Стиль + Кнопка) */}
-                {pendingTasks.map((task, i) => (
-                  <motion.div
-                    key={task.id}
-                    layout
-                    custom={i + completedTasks.length}
-                    variants={itemVariant}
-                    initial="hidden"
-                    animate="visible"
-                    className={`
-                      relative border rounded-3xl p-4 overflow-hidden group transition-all duration-300
-                      ${task.locked
-                        ? 'bg-white/5 border-white/5 opacity-50 cursor-not-allowed'
-                        : 'bg-[#1e2341]/80 border-amber-500/40 backdrop-blur-xl shadow-[0_8px_32px_rgba(245,158,11,0.15),inset_0_2px_20px_rgba(255,255,255,0.05)] hover:border-amber-400/60'
-                      }
-                    `}
+            <motion.div
+              key="tasks"
+              variants={containerVariants}
+              initial="hidden"
+              animate="visible"
+              className="space-y-3 pb-2"
+            >
+              {screenError ? (
+                <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
+                  <div className="font-bold">Не удалось загрузить задания</div>
+                  <div className="mt-1 text-red-200/80">{screenError}</div>
+                  <button
+                    onClick={() => void fetchTasks(true)}
+                    className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold uppercase tracking-wider text-white"
                   >
-                    {!task.locked && (
-                      <>
-                        <div className="absolute inset-0 bg-gradient-to-br from-amber-500/10 to-orange-600/5 animate-pulse" />
-                        <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-amber-400/50 to-transparent" />
-                      </>
-                    )}
-
-                    <div className="flex items-center gap-4 relative z-10">
-                      <div className={`
-                        w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 p-[1px]
-                        ${task.locked
-                          ? 'bg-gray-500/20 text-gray-400'
-                          : 'bg-gradient-to-br from-purple-500/20 to-blue-500/20 text-purple-400'
-                        }
-                      `}>
-                        <div className="w-full h-full bg-[#111322] rounded-2xl flex items-center justify-center shadow-inner">
-                          <task.icon size={26} className="drop-shadow-md" />
-                        </div>
-                      </div>
-
-                      <div className="flex-1 min-w-0 py-0.5">
-                        <h3 className="font-extrabold text-[16px] mb-1 truncate text-white">
-                          {task.title}
-                        </h3>
-                        <p className="text-white/50 text-xs truncate">{task.description}</p>
-                        {!task.locked && (
-                          <div className="text-amber-400 font-bold text-sm mt-1.5 drop-shadow-[0_0_5px_rgba(251,191,36,0.5)]">
-                            +{task.reward} монет
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="shrink-0 flex flex-col items-end justify-center">
-                        {task.locked ? (
-                          <div className="flex flex-col items-end px-2">
-                            <div className="text-yellow-400/50 font-black text-xl leading-none">+{task.reward}</div>
-                            <div className="text-yellow-500/40 text-[10px] font-bold uppercase mt-1 tracking-widest">монет</div>
-                          </div>
-                        ) : (
-                          <motion.button
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.9 }} 
-                            onClick={(e) => handleTaskClick(task, e)}
-                            className="relative overflow-hidden bg-gradient-to-b from-amber-400 to-orange-600 text-white font-black text-[12px] uppercase tracking-wider px-5 py-3.5 rounded-xl shadow-[0_8px_20px_rgba(245,158,11,0.5),inset_0_2px_0_rgba(255,255,255,0.4)] flex items-center gap-1.5 min-w-[100px] justify-center"
-                          >
-                            <motion.div 
-                              animate={{ x: ["-100%", "200%"] }}
-                              transition={{ duration: 1.5, repeat: Infinity, ease: "linear", repeatDelay: 1 }}
-                              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent skew-x-12"
-                            />
-                            <Sparkles size={16} className="relative z-10 text-yellow-100" />
-                            <span className="relative z-10 drop-shadow-md">ЗАБРАТЬ</span>
-                          </motion.button>
-                        )}
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
+                    Повторить
+                  </button>
+                </div>
+              ) : loading ? (
+                <TaskScreenLoader />
+              ) : (
+                tasks.map((task) => renderTaskCard(task))
+              )}
             </motion.div>
           ) : (
-            <motion.div key="fragments" {...tabTransition} className="h-full flex items-center justify-center px-2">
-              <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#1e2341]/40 backdrop-blur-2xl p-8 text-center relative overflow-hidden shadow-2xl">
+            <motion.div
+              key="fragments"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex h-full items-center justify-center px-2"
+            >
+              <div className="relative w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
                 <AdaptiveParticles
                   variant="accent"
                   tone="neutral"
@@ -467,26 +529,20 @@ export function TasksScreen() {
                   baseSpeed={0.14}
                   className="z-0 opacity-55"
                 />
-                <Puzzle size={56} className="mx-auto text-white/20 mb-4 relative z-10 drop-shadow-lg" />
-                <h3 className="text-white text-2xl font-black mb-2 relative z-10 tracking-wide">Фрагменты</h3>
-                <p className="text-white/50 text-sm relative z-10 max-w-[200px] mx-auto leading-relaxed">
-                  Скоро появятся кусочки мозаики для уникальных скинов!
-                </p>
+                <Puzzle size={42} className="relative z-10 mx-auto mb-3 text-white/50" />
+                <h3 className="relative z-10 mb-2 text-xl font-bold text-white">Фрагменты</h3>
+                <p className="relative z-10 text-sm text-white/60">Скоро появится</p>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
 
-      {/* ЯКОРЬ ДЛЯ ЦИФР (Служит мишенью для монеток) */}
-      <div className="absolute bottom-[110px] left-4 right-4 z-0 pointer-events-none flex justify-center h-[80px]">
-        <div className="w-full relative">
-          <div ref={coinTargetAnchorRef} className="absolute left-[84px] top-[32px] w-[80px] h-[36px]" />
-        </div>
+      <div className="pointer-events-none absolute bottom-[130px] left-4 right-4 z-0 flex h-[80px] items-center">
+        <div ref={coinTargetAnchorRef} className="absolute left-[44px]" />
       </div>
 
-      {/* ВСПЛЫВАЮЩИЙ КОШЕЛЕК */}
-      <div className="absolute bottom-6 left-4 right-4 z-[120] pointer-events-none flex justify-center">
+      <div className="pointer-events-none absolute bottom-[130px] left-4 right-4 z-[120] flex justify-center">
         <AnimatePresence>
           {isStashVisible && (
             <motion.div
@@ -494,7 +550,7 @@ export function TasksScreen() {
               animate={{ y: 0, opacity: 1, scale: 1 }}
               exit={{ y: 100, opacity: 0, scale: 0.9 }}
               transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-              className="w-full relative pointer-events-auto"
+              className="relative w-full pointer-events-auto"
             >
               <BottomCoinStash balance={userCoins} isPulsing={isStashPulsing} />
             </motion.div>
@@ -503,7 +559,7 @@ export function TasksScreen() {
       </div>
 
       {TASKS_PLACEHOLDER_ENABLED && (
-        <div className="absolute inset-0 z-[220] flex items-center justify-center bg-[#080b16]/72 backdrop-blur-md px-6">
+        <div className="absolute inset-0 z-[220] flex items-center justify-center bg-[#080b16]/72 px-6 backdrop-blur-md">
           <div className="w-full max-w-sm rounded-3xl border border-white/12 bg-[#14192b]/92 p-6 text-center shadow-[0_24px_80px_rgba(0,0,0,0.55)]">
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-400/25 bg-amber-500/10 text-amber-300">
               <Lock size={28} />

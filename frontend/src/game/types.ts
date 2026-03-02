@@ -246,6 +246,49 @@ export interface RewardChannel {
   claimed: boolean;
 }
 
+export type TaskStatus = 'in_progress' | 'claimable' | 'completed' | 'action_required';
+
+export interface TaskTier {
+  claimId: string;
+  target: number;
+  rewardCoins: number;
+  title: string;
+  claimed: boolean;
+}
+
+export interface TaskChannelMeta {
+  channelId: string;
+  name: string;
+  username: string;
+  url: string;
+}
+
+export interface TaskDto {
+  id: 'arcade_levels' | 'friends_confirmed' | 'official_channel';
+  kind: 'stepped' | 'single';
+  baseTitle: string;
+  baseDescription: string;
+  progress: number;
+  status: TaskStatus;
+  nextTierIndex: number | null;
+  tiers: TaskTier[];
+  channel?: TaskChannelMeta;
+}
+
+export interface TasksResponse {
+  tasks: TaskDto[];
+}
+
+export interface TaskClaimResponse {
+  success: boolean;
+  claimId: string;
+  coins: number;
+  rewardCoins: number;
+  taskId: string;
+  taskStatus: TaskStatus;
+  nextTierIndex: number | null;
+}
+
 /** Ответ применения реферала */
 export interface ReferralApplyResponse {
   success: boolean;

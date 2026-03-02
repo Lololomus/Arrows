@@ -254,6 +254,10 @@ export const API_ENDPOINTS = {
     channels: '/social/channels',
     claimChannel: '/social/channels/claim',
   },
+  tasks: {
+    list: '/tasks',
+    claim: '/tasks/claim',
+  },
 };
 
 // ============================================

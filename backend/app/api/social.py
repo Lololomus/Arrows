@@ -22,6 +22,7 @@ from ..schemas import (
     LeaderboardEntry, LeaderboardResponse,
     RewardChannel, ClaimChannelRequest
 )
+from ..services.tasks import claim_task, get_official_channel_config
 from .auth import get_current_user
 
 
@@ -514,31 +515,30 @@ async def get_leaderboard(
 # CHANNEL SUBSCRIPTIONS
 # ============================================
 
-# Каналы для подписки (конфигурируется)
-REWARD_CHANNELS = []
-
-
 @router.get("/channels", response_model=List[RewardChannel])
 async def get_channels(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Получить список каналов для подписки."""
+    channel = get_official_channel_config()
+    if not channel:
+        return []
+
     # Получаем уже заклейменные
     result = await db.execute(
         select(ChannelSubscription)
         .where(ChannelSubscription.user_id == user.id)
     )
     claimed = {sub.channel_id for sub in result.scalars().all()}
-    
+
     return [
         RewardChannel(
-            id=ch["id"],
-            name=ch["name"],
-            reward_coins=ch["reward_coins"],
-            claimed=ch["id"] in claimed
+            id=channel["channel_id"],
+            name=channel["name"],
+            reward_coins=channel["reward_coins"],
+            claimed=channel["channel_id"] in claimed,
         )
-        for ch in REWARD_CHANNELS
     ]
 
 
@@ -549,40 +549,18 @@ async def claim_channel_reward(
     db: AsyncSession = Depends(get_db)
 ):
     """Получить награду за подписку на канал."""
-    # Ищем канал
-    channel = next((ch for ch in REWARD_CHANNELS if ch["id"] == request.channel_id), None)
-    if not channel:
+    channel = get_official_channel_config()
+    if not channel or request.channel_id != channel["channel_id"]:
         raise HTTPException(status_code=404, detail="Channel not found")
-    
-    # Проверяем что ещё не получал
-    result = await db.execute(
-        select(ChannelSubscription)
-        .where(
-            ChannelSubscription.user_id == user.id,
-            ChannelSubscription.channel_id == request.channel_id
-        )
-    )
-    if result.scalar_one_or_none():
-        return {"success": False, "error": "Already claimed"}
-    
-    # TODO: Проверить подписку через Telegram Bot API
-    # chat_member = await bot.get_chat_member(f"@{channel['username']}", user.telegram_id)
-    # if chat_member.status not in ['member', 'administrator', 'creator']:
-    #     return {"success": False, "error": "Not subscribed"}
-    
-    # Даём награду
-    user.coins += channel["reward_coins"]
-    
-    sub = ChannelSubscription(
-        user_id=user.id,
-        channel_id=request.channel_id,
-        channel_username=channel["username"]
-    )
-    db.add(sub)
-    
+
+    locked_user_result = await db.execute(select(User).where(User.id == user.id).with_for_update())
+    locked_user = locked_user_result.scalar_one_or_none()
+    if not locked_user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    result = await claim_task(locked_user, "official_channel_subscribe", db)
     await db.commit()
-    
-    return {"success": True, "coins": user.coins, "bonus": channel["reward_coins"]}
+    return {"success": True, "coins": result.coins, "bonus": result.reward_coins}
 
 
 # ============================================

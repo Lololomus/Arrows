@@ -275,8 +275,31 @@ class ChannelSubscription(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     
     channel_id = Column(String(64), nullable=False)
+    channel_username = Column(String(128), nullable=True)
     subscribed_at = Column(DateTime, default=datetime.utcnow)
     reward_claimed = Column(Boolean, default=False)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "channel_id", name="uq_channel_subscription_user_channel"),
+    )
+
+
+class TaskClaim(Base):
+    """Факт успешного клейма задачи."""
+
+    __tablename__ = "task_claims"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    claim_id = Column(String(128), nullable=False)
+    task_group = Column(String(64), nullable=False)
+    reward_coins = Column(Integer, nullable=False)
+    claimed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "claim_id", name="uq_task_claim_user_claim"),
+    )
 
 
 # ============================================

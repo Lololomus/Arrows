@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_BOT_USERNAME: str = "ArrowReward_bot"
     WEBAPP_URL: str = "https://arrowreward.ru.tuna.am/"
+    OFFICIAL_CHANNEL_ID: str = ""
+    OFFICIAL_CHANNEL_USERNAME: str = ""
+    OFFICIAL_CHANNEL_NAME: str = "Официальный канал"
+    OFFICIAL_CHANNEL_REWARD: int = 50
     
     # TON
     TON_API_KEY: str = ""

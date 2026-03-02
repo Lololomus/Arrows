@@ -23,6 +23,9 @@ import type {
   PurchaseCoinsResponse,
   LeaderboardResponse,
   RewardChannel,
+  TaskDto,
+  TasksResponse,
+  TaskClaimResponse,
   User,
   ReferralApplyResponse,
   ReferralStatsResponse,
@@ -79,6 +82,66 @@ interface RawLeaderboardResponse {
   total_participants?: number;
 }
 
+interface RawRewardChannel {
+  id: string;
+  name: string;
+  reward_coins?: number;
+  rewardCoins?: number;
+  claimed: boolean;
+}
+
+interface RawTaskTier {
+  claim_id?: string;
+  claimId?: string;
+  target: number;
+  reward_coins?: number;
+  rewardCoins?: number;
+  title: string;
+  claimed: boolean;
+}
+
+interface RawTaskChannelMeta {
+  channel_id?: string;
+  channelId?: string;
+  name: string;
+  username: string;
+  url: string;
+}
+
+interface RawTaskDto {
+  id: TaskDto['id'];
+  kind: TaskDto['kind'];
+  base_title?: string;
+  baseTitle?: string;
+  base_description?: string;
+  baseDescription?: string;
+  progress: number;
+  status: TaskDto['status'];
+  next_tier_index?: number | null;
+  nextTierIndex?: number | null;
+  tiers: RawTaskTier[];
+  channel?: RawTaskChannelMeta | null;
+}
+
+interface RawTasksResponse {
+  tasks: RawTaskDto[];
+}
+
+interface RawTaskClaimResponse {
+  success: boolean;
+  claim_id?: string;
+  claimId?: string;
+  coins: number;
+  reward_coins?: number;
+  rewardCoins?: number;
+  task_id?: string;
+  taskId?: string;
+  task_status?: TaskDto['status'];
+  taskStatus?: TaskDto['status'];
+  next_tier_index?: number | null;
+  nextTierIndex?: number | null;
+}
+
 function normalizeLeaderboardResponse(raw: RawLeaderboardResponse): LeaderboardResponse {
   return {
     leaders: raw.leaders.map(e => ({
@@ -93,6 +156,60 @@ function normalizeLeaderboardResponse(raw: RawLeaderboardResponse): LeaderboardR
     myScore: raw.my_score ?? null,
     myInTop: raw.my_in_top ?? false,
     totalParticipants: raw.total_participants ?? 0,
+  };
+}
+
+function normalizeRewardChannel(raw: RawRewardChannel): RewardChannel {
+  return {
+    id: raw.id,
+    name: raw.name,
+    rewardCoins: raw.rewardCoins ?? raw.reward_coins ?? 0,
+    claimed: raw.claimed,
+  };
+}
+
+function normalizeTask(raw: RawTaskDto): TaskDto {
+  return {
+    id: raw.id,
+    kind: raw.kind,
+    baseTitle: raw.baseTitle ?? raw.base_title ?? '',
+    baseDescription: raw.baseDescription ?? raw.base_description ?? '',
+    progress: raw.progress,
+    status: raw.status,
+    nextTierIndex: raw.nextTierIndex ?? raw.next_tier_index ?? null,
+    tiers: raw.tiers.map((tier) => ({
+      claimId: tier.claimId ?? tier.claim_id ?? '',
+      target: tier.target,
+      rewardCoins: tier.rewardCoins ?? tier.reward_coins ?? 0,
+      title: tier.title,
+      claimed: tier.claimed,
+    })),
+    channel: raw.channel
+      ? {
+          channelId: raw.channel.channelId ?? raw.channel.channel_id ?? '',
+          name: raw.channel.name,
+          username: raw.channel.username,
+          url: raw.channel.url,
+        }
+      : undefined,
+  };
+}
+
+function normalizeTasksResponse(raw: RawTasksResponse): TasksResponse {
+  return {
+    tasks: raw.tasks.map(normalizeTask),
+  };
+}
+
+function normalizeTaskClaimResponse(raw: RawTaskClaimResponse): TaskClaimResponse {
+  return {
+    success: raw.success,
+    claimId: raw.claimId ?? raw.claim_id ?? '',
+    coins: raw.coins,
+    rewardCoins: raw.rewardCoins ?? raw.reward_coins ?? 0,
+    taskId: raw.taskId ?? raw.task_id ?? 'official_channel',
+    taskStatus: raw.taskStatus ?? raw.task_status ?? 'completed',
+    nextTierIndex: raw.nextTierIndex ?? raw.next_tier_index ?? null,
   };
 }
 
@@ -811,13 +928,24 @@ export const socialApi = {
   },
 
   getChannels: (): Promise<RewardChannel[]> =>
-    request<RewardChannel[]>(API_ENDPOINTS.social.channels),
+    request<RawRewardChannel[]>(API_ENDPOINTS.social.channels).then((raw) => raw.map(normalizeRewardChannel)),
 
   claimChannel: (channelId: string): Promise<{ success: boolean; coins: number }> =>
     request<{ success: boolean; coins: number }>(API_ENDPOINTS.social.claimChannel, {
       method: 'POST',
       body: JSON.stringify({ channel_id: channelId }),
     }),
+};
+
+export const tasksApi = {
+  getTasks: async (): Promise<TasksResponse> =>
+    normalizeTasksResponse(await request<RawTasksResponse>(API_ENDPOINTS.tasks.list)),
+
+  claimTask: async (claimId: string): Promise<TaskClaimResponse> =>
+    normalizeTaskClaimResponse(await request<RawTaskClaimResponse>(API_ENDPOINTS.tasks.claim, {
+      method: 'POST',
+      body: JSON.stringify({ claim_id: claimId }),
+    })),
 };
 
 // ============================================

@@ -311,6 +311,58 @@ class ClaimChannelRequest(BaseModel):
 
 
 # ============================================
+# TASKS
+# ============================================
+
+TaskStatus = Literal["in_progress", "claimable", "completed", "action_required"]
+
+
+class TaskTierDto(BaseModel):
+    claim_id: str
+    target: int
+    reward_coins: int
+    title: str
+    claimed: bool
+
+
+class ChannelMetaDto(BaseModel):
+    channel_id: str
+    name: str
+    username: str
+    url: str
+
+
+class TaskDto(BaseModel):
+    id: Literal["arcade_levels", "friends_confirmed", "official_channel"]
+    kind: Literal["stepped", "single"]
+    base_title: str
+    base_description: str
+    progress: int
+    status: TaskStatus
+    next_tier_index: Optional[int] = None
+    tiers: List[TaskTierDto]
+    channel: Optional[ChannelMetaDto] = None
+
+
+class TasksResponse(BaseModel):
+    tasks: List[TaskDto]
+
+
+class TaskClaimRequest(BaseModel):
+    claim_id: str
+
+
+class TaskClaimResponse(BaseModel):
+    success: bool
+    claim_id: str
+    coins: int
+    reward_coins: int
+    task_id: str
+    task_status: TaskStatus
+    next_tier_index: Optional[int] = None
+
+
+# ============================================
 # WEBHOOKS
 # ============================================
 
