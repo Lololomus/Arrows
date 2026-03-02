@@ -271,7 +271,7 @@ async def get_referral_leaderboard(
     Кэшируется в Redis (TTL 30 сек).
     """
     redis = await get_redis()
-    cache_key = "lb:referral:top"
+    cache_key = f"lb:referral:top:{limit}"
 
     # Пробуем взять топ из кэша
     cached = await redis.get(cache_key)
@@ -476,7 +476,7 @@ async def get_leaderboard(
         raise HTTPException(status_code=400, detail="Invalid leaderboard type")
 
     redis = await get_redis()
-    cache_key = f"lb:{board_type}:top"
+    cache_key = f"lb:{board_type}:top:{limit}"
 
     # Пробуем взять топ из кэша
     cached = await redis.get(cache_key)

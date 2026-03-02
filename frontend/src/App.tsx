@@ -63,7 +63,8 @@ export default function App() {
       );
 
       // Clear localStorage on definitive outcomes (no point retrying)
-      if (result.success || result.reason === 'already_referred' || result.reason === 'account_too_old') {
+      if (result.success || result.reason === 'already_referred' || result.reason === 'account_too_old'
+          || result.reason === 'invalid_code' || result.reason === 'self_referral') {
         clearSavedReferralCode();
       }
 
