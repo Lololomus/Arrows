@@ -15,6 +15,7 @@ import { useActiveSkin, type GameSkin } from '../game/skins';
 import { DIRECTIONS } from '../config/constants';
 import type { Arrow } from '../game/types';
 import { drainFlyFX, type FlyFXItem } from '../game/fxBridge';
+import type { GameRenderProfile } from '../utils/deviceProfile';
 
 // ============================================
 // CONSTANTS
@@ -50,6 +51,7 @@ export interface FXOverlayProps {
   springY: MotionValue<number>;
   springScale: MotionValue<number>;
   active: boolean;
+  renderProfile: GameRenderProfile;
 }
 
 // ============================================
@@ -79,7 +81,16 @@ export function wakeFXOverlay(): void {
 // COMPONENT
 // ============================================
 
-export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, springScale, active }: FXOverlayProps) {
+export function FXOverlay({
+  containerRef,
+  gridSize,
+  cellSize,
+  springX,
+  springY,
+  springScale,
+  active,
+  renderProfile,
+}: FXOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
   const flyingRef = useRef<FlyingArrow[]>([]);
@@ -157,7 +168,7 @@ export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, renderProfile.boardDprCap);
 
     const resizeCanvas = () => {
       canvas.width = window.innerWidth * dpr;
@@ -244,7 +255,18 @@ export function FXOverlay({ containerRef, gridSize, cellSize, springX, springY, 
       window.removeEventListener('resize', resizeCanvas);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [active, cellSize, gridSize.width, gridSize.height, skin, springScale, springX, springY, containerRef]);
+  }, [
+    active,
+    cellSize,
+    gridSize.width,
+    gridSize.height,
+    skin,
+    springScale,
+    springX,
+    springY,
+    containerRef,
+    renderProfile.boardDprCap,
+  ]);
 
   if (!active) return null;
 

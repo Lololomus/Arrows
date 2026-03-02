@@ -12,6 +12,7 @@ interface UseArrowActionsParams {
   isIntroAnimating: boolean;
   baseCellSize: number;
   cameraScale: MotionValue<number>;
+  enableFlyFxOverlay: boolean;
   focusHintArrow: (arrowId: string, force?: boolean) => boolean;
   triggerLifeHit: () => void;
   setShakingArrow: (arrowId: string | null) => void;
@@ -27,6 +28,7 @@ export function useArrowActions({
   isIntroAnimating,
   baseCellSize,
   cameraScale,
+  enableFlyFxOverlay,
   focusHintArrow,
   triggerLifeHit,
   setShakingArrow,
@@ -81,9 +83,11 @@ export function useArrowActions({
         .map((id) => globalIndex.getArrow(id))
         .filter((a): a is NonNullable<typeof a> => !!a);
 
-      const activeSkin = getSkin(currentState.activeSkinId);
-      emitFlyFX(arrowsToFly, baseCellSize, cameraScale.get(), activeSkin);
-      wakeFXOverlay();
+      if (enableFlyFxOverlay) {
+        const activeSkin = getSkin(currentState.activeSkinId);
+        emitFlyFX(arrowsToFly, baseCellSize, cameraScale.get(), activeSkin);
+        wakeFXOverlay();
+      }
 
       if (idsToRemove.length === 1) removeArrow(arrowId);
       else removeArrows(idsToRemove);
@@ -114,6 +118,7 @@ export function useArrowActions({
     isIntroAnimating,
     baseCellSize,
     cameraScale,
+    enableFlyFxOverlay,
   ]);
 
   const handleHint = useCallback(() => {

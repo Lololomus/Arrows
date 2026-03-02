@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from 'react';
+import { isIOSPlatform } from '../utils/deviceProfile';
 
 interface UseIOSGameFieldSelectionGuardOptions {
   targetRef: RefObject<HTMLElement>;
@@ -7,20 +8,6 @@ interface UseIOSGameFieldSelectionGuardOptions {
 }
 
 const DEFAULT_ALLOW_SELECTOR = '.allow-select, [data-allow-select="true"], input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]';
-
-function isIOSPlatform(): boolean {
-  if (typeof window === 'undefined') return false;
-
-  const tgPlatform = (window as any).Telegram?.WebApp?.platform;
-  if (typeof tgPlatform === 'string' && tgPlatform.toLowerCase() === 'ios') {
-    return true;
-  }
-
-  const ua = window.navigator.userAgent || '';
-  const isIPhoneFamily = /iPad|iPhone|iPod/.test(ua);
-  const isIPadDesktopMode = window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1;
-  return isIPhoneFamily || isIPadDesktopMode;
-}
 
 function toElement(target: EventTarget | null): Element | null {
   if (!(target instanceof Node)) return null;

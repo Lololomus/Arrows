@@ -30,6 +30,7 @@ import { useActiveSkin, type GameSkin } from '../game/skins';
 import type { MotionValue } from 'framer-motion';
 import { globalIndex } from '../game/spatialIndex';
 import { getArrowPath, findCollision } from '../game/engine';
+import type { GameRenderProfile } from '../utils/deviceProfile';
 
 // ============================================
 // TYPES
@@ -78,6 +79,7 @@ export interface CanvasBoardProps {
   springX: MotionValue<number>;
   springY: MotionValue<number>;
   springScale: MotionValue<number>;
+  renderProfile: GameRenderProfile;
 }
 
 // ============================================
@@ -147,6 +149,7 @@ export function CanvasBoard({
   springX,
   springY,
   springScale,
+  renderProfile,
 }: CanvasBoardProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -175,7 +178,7 @@ export function CanvasBoard({
   const bounceRef = useRef<BounceAnim | null>(null);
 
   const containerSizeRef = useRef({ w: window.innerWidth, h: window.innerHeight });
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const dpr = Math.min(window.devicePixelRatio || 1, renderProfile.boardDprCap);
 
   const totalBoardW = (gridSize.width + GRID_PADDING_CELLS) * cellSize;
   const totalBoardH = (gridSize.height + GRID_PADDING_CELLS) * cellSize;
@@ -217,6 +220,13 @@ export function CanvasBoard({
   // Static canvas
   const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const staticDirtyRef = useRef(true);
+
+  useEffect(() => {
+    if (!renderProfile.useStaticCanvas) {
+      staticCanvasRef.current = null;
+    }
+    staticDirtyRef.current = true;
+  }, [renderProfile.useStaticCanvas]);
 
   // ⚡ Static layer dirty ТОЛЬКО при смене уровня (skin или cellSize)
   // НЕ при каждом удалении стрелки
@@ -408,15 +418,32 @@ export function CanvasBoard({
   useEffect(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        containerSizeRef.current = { w: entry.contentRect.width, h: entry.contentRect.height };
-        wakeRenderLoop();
-      }
-    });
-    observer.observe(wrapper);
-    containerSizeRef.current = { w: wrapper.clientWidth, h: wrapper.clientHeight };
-    return () => observer.disconnect();
+    const syncSize = () => {
+      containerSizeRef.current = {
+        w: wrapper.clientWidth || window.innerWidth,
+        h: wrapper.clientHeight || window.innerHeight,
+      };
+      wakeRenderLoop();
+    };
+
+    syncSize();
+
+    const observer = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver((entries) => {
+          for (const entry of entries) {
+            containerSizeRef.current = { w: entry.contentRect.width, h: entry.contentRect.height };
+            wakeRenderLoop();
+          }
+        })
+      : null;
+
+    observer?.observe(wrapper);
+    window.addEventListener('resize', syncSize);
+
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', syncSize);
+    };
   }, [wakeRenderLoop]);
 
   // ============================================
@@ -513,7 +540,7 @@ export function CanvasBoard({
       const gridW = gridSize.width * cellSize;
       const gridH = gridSize.height * cellSize;
 
-      if (staticDirtyRef.current || !staticCanvasRef.current) {
+      if (renderProfile.useStaticCanvas && (staticDirtyRef.current || !staticCanvasRef.current)) {
         let offscreen = staticCanvasRef.current;
         if (!offscreen || offscreen.width !== gridW || offscreen.height !== gridH) {
           offscreen = document.createElement('canvas');
@@ -533,7 +560,7 @@ export function CanvasBoard({
         staticDirtyRef.current = false;
       }
 
-      if (staticCanvasRef.current) {
+      if (renderProfile.useStaticCanvas && staticCanvasRef.current) {
         const halfVpW = cw / 2 / camScale;
         const halfVpH = ch / 2 / camScale;
         const vpCX = -camX / camScale + totalBoardW / 2 - boardPadding;
@@ -554,6 +581,9 @@ export function CanvasBoard({
             ctx.drawImage(staticCanvasRef.current, sx, sy, sw, sh, sx, sy, sw, sh);
           }
         }
+      } else {
+        drawBoardBackground(ctx, cellSize, initialCellsParsed.current);
+        drawGridDotsAll(ctx, cellSize, initialCellsParsed.current, skin);
       }
 
       // Arrows
@@ -627,7 +657,7 @@ export function CanvasBoard({
   }, [
     // ⚡ ТОЛЬКО структурные зависимости (меняются при смене уровня)
     cellSize, gridSize.width, gridSize.height,
-    totalBoardW, totalBoardH, boardPadding, dpr, skin,
+    totalBoardW, totalBoardH, boardPadding, dpr, skin, renderProfile.useStaticCanvas,
     springX, springY, springScale,
   ]);
 
@@ -720,6 +750,27 @@ function getVisibleArrowsFromCamera(
   return result;
 }
 
+function traceRoundedRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
 // ============================================
 // DRAWING: Background
 // ============================================
@@ -732,7 +783,7 @@ function drawBoardBackground(ctx: CanvasRenderingContext2D, cellSize: number, ce
   ctx.beginPath();
   for (let i = 0; i < cells.length; i++) {
     const { x, y } = cells[i];
-    ctx.roundRect(x * cellSize - pad, y * cellSize - pad, cellSize + pad * 2, cellSize + pad * 2, radius);
+    traceRoundedRectPath(ctx, x * cellSize - pad, y * cellSize - pad, cellSize + pad * 2, cellSize + pad * 2, radius);
   }
   ctx.fillStyle = 'rgba(15, 23, 42, 0.65)';
   ctx.fill();

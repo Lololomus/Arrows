@@ -175,6 +175,12 @@ wait_for_service() {
     status="$(container_status "$service" || true)"
     health="$(container_health "$service" || true)"
 
+    if [[ "$require_health" == "true" ]]; then
+      echo "   -> waiting for ${service}: status=${status:-unknown}, health=${health:-unknown} (${elapsed}/${timeout}s)"
+    else
+      echo "   -> waiting for ${service}: status=${status:-unknown} (${elapsed}/${timeout}s)"
+    fi
+
     if [[ "$status" == "running" ]]; then
       if [[ "$require_health" == "true" ]]; then
         if [[ "$health" == "healthy" || "$health" == "none" ]]; then
@@ -183,6 +189,11 @@ wait_for_service() {
       else
         return 0
       fi
+    fi
+
+    if [[ "$require_health" == "true" && "$health" == "unhealthy" ]]; then
+      compose logs --tail=80 "$service" || true
+      die "Service '$service' failed healthcheck"
     fi
 
     if [[ "$status" == "restarting" || "$status" == "exited" || "$status" == "dead" ]]; then

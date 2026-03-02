@@ -48,6 +48,7 @@ import { useArrowActions } from './game-screen/useArrowActions';
 import { getFreeArrows } from '../game/engine';
 import { globalIndex } from '../game/spatialIndex';
 import { useIOSGameFieldSelectionGuard } from '../hooks/useIOSGameFieldSelectionGuard';
+import { getGameRenderProfile } from '../utils/deviceProfile';
 
 import gameBgImage from '../assets/game-bg.webp?url';
 
@@ -332,6 +333,7 @@ export function GameScreen() {
   );
   const containerRef = useRef<HTMLDivElement>(null);
   useIOSGameFieldSelectionGuard({ targetRef: containerRef, enabled: true });
+  const renderProfile = useMemo(() => getGameRenderProfile(), []);
   const [containerSize, setContainerSize] = useState({
     w: window.innerWidth,
     h: window.innerHeight,
@@ -1198,6 +1200,7 @@ export function GameScreen() {
     isIntroAnimating,
     baseCellSize,
     cameraScale,
+    enableFlyFxOverlay: renderProfile.enableFxOverlay,
     focusHintArrow,
     triggerLifeHit,
     setShakingArrow,
@@ -1535,6 +1538,7 @@ export function GameScreen() {
               springX={cameraX}
               springY={cameraY}
               springScale={cameraScale}
+              renderProfile={renderProfile}
             />
           )}
         </div>
@@ -1558,15 +1562,18 @@ export function GameScreen() {
       )}
 
       {/* ===== СЛОЙ ЭФФЕКТОВ (fly-out) ===== */}
-      <FXOverlay
-        containerRef={containerRef}
-        gridSize={gridSize}
-        cellSize={baseCellSize}
-        springX={cameraX}
-        springY={cameraY}
-        springScale={cameraScale}
-        active={true}
-      />
+      {renderProfile.enableFxOverlay && (
+        <FXOverlay
+          containerRef={containerRef}
+          gridSize={gridSize}
+          cellSize={baseCellSize}
+          springX={cameraX}
+          springY={cameraY}
+          springScale={cameraScale}
+          active={true}
+          renderProfile={renderProfile}
+        />
+      )}
 
       <GameMenuModal
         action={confirmAction}
