@@ -188,21 +188,21 @@ const ReferralInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose:
                         <span className="text-2xl drop-shadow-md">🥇</span>
                         <span className="text-white font-medium">1 место</span>
                       </div>
-                      <span className="text-yellow-400 font-black text-lg drop-shadow-glow">150 $</span>
+                      <span className="text-yellow-400 font-black text-lg drop-shadow-glow">$150</span>
                     </div>
                     <div className="flex items-center justify-between bg-black/20 rounded-xl p-3 border border-gray-400/30">
                       <div className="flex items-center gap-3">
                         <span className="text-2xl drop-shadow-md">🥈</span>
                         <span className="text-white font-medium">2 место</span>
                       </div>
-                      <span className="text-gray-300 font-black text-lg">100 $</span>
+                      <span className="text-gray-300 font-black text-lg">$100</span>
                     </div>
                     <div className="flex items-center justify-between bg-black/20 rounded-xl p-3 border border-orange-500/30">
                       <div className="flex items-center gap-3">
                         <span className="text-2xl drop-shadow-md">🥉</span>
                         <span className="text-white font-medium">3 место</span>
                       </div>
-                      <span className="text-orange-400 font-black text-lg">50 $</span>
+                      <span className="text-orange-400 font-black text-lg">$50</span>
                     </div>
                   </div>
                 </div>

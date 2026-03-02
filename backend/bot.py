@@ -59,7 +59,7 @@ def build_start_keyboard(webapp_url: str) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text=f"Запустить {settings.APP_NAME}",
+                    text="Запустить ArrowReward",
                     web_app=WebAppInfo(url=webapp_url),
                 )
             ],

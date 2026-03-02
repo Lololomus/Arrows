@@ -5,7 +5,7 @@ import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { FriendsLeaderboardScreen } from './FriendsLeaderboardScreen';
 import { useReferral } from '../hooks/hooks';
 import type { ReferralInfo } from '../game/types';
-import { PUBLIC_BOT_USERNAME } from '../config/constants';
+import { PUBLIC_BOT_USERNAME, REFERRAL_REWARD_INVITER } from '../config/constants';
 
 type FriendsTab = 'friends' | 'leaderboard';
 
@@ -49,7 +49,7 @@ function ReferralProgressBar({
             <span className="text-green-300/80 flex items-center gap-1">
               <CheckCircle size={10} /> Активен
             </span>
-            <span className="text-green-300/80 font-semibold">{currentLevel}/{confirmLevel}</span>
+            <span className="text-green-300/80 font-semibold">Ур. {currentLevel}</span>
           </>
         ) : (
           <>
@@ -124,9 +124,7 @@ function ReferralCard({
               <CheckCircle size={14} /> Активен
             </div>
             {confirmLevel ? (
-              <div className="mt-1 text-green-300 text-[10px] font-bold">
-                {referral.current_level}/{confirmLevel}
-              </div>
+              <div className="mt-1 text-green-300 text-[10px] font-bold">Ур. {referral.current_level}</div>
             ) : null}
           </div>
         ) : (
@@ -150,7 +148,7 @@ function EmptyReferralList({ onShare }: { onShare: () => void }) {
         </div>
       </div>
       <p className="text-white/60 text-sm mb-1">Пока никого нет</p>
-      <p className="text-white/40 text-xs mb-5">Пригласи друга и получи 200 монет!</p>
+      <p className="text-white/40 text-xs mb-5">Пригласи друга и получи {REFERRAL_REWARD_INVITER} монет!</p>
       <button
         onClick={onShare}
         className="bg-gradient-to-r from-blue-600 to-purple-600 text-white font-bold py-3 px-6 rounded-2xl text-sm"
@@ -201,7 +199,7 @@ function FriendsListContent({
             />
             <div className="relative z-10 bg-gradient-to-br from-yellow-500/20 to-orange-500/20 border border-yellow-500/30 rounded-2xl p-4 text-center">
               <Coins size={28} className="mx-auto mb-2 text-yellow-400" />
-              <div className="text-yellow-400 font-bold text-lg">+200</div>
+              <div className="text-yellow-400 font-bold text-lg">+{REFERRAL_REWARD_INVITER}</div>
               <div className="text-yellow-200/60 text-xs">монет тебе</div>
             </div>
           </div>

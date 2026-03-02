@@ -5,6 +5,7 @@ import {
   ClipboardList,
   Coins,
   Lock,
+  Play,
   Puzzle,
   Send,
   Sparkles,
@@ -12,10 +13,15 @@ import {
   Users,
 } from 'lucide-react';
 
-import { handleApiError, tasksApi } from '../api/client';
+import { adsApi, authApi, handleApiError, tasksApi } from '../api/client';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import type { TaskDto } from '../game/types';
+import { ADS_ENABLED, ADS_FIRST_ELIGIBLE_LEVEL, ADSGRAM_BLOCK_IDS } from '../config/constants';
+import { isValidRewardedBlockId } from '../services/adsgram';
+import { clearPendingRewardIntent, rememberPendingRewardIntent } from '../services/rewardReconciler';
+import { getRewardedFlowMessage, runRewardedFlow } from '../services/rewardedAds';
 import { useAppStore } from '../stores/store';
+import { useRewardStore } from '../stores/rewardStore';
 
 type TaskScreenTab = 'tasks' | 'fragments';
 type TaskUiConfig = {
@@ -72,6 +78,235 @@ const itemVariants = {
     transition: { duration: 0.35, ease: 'easeOut' },
   },
 };
+
+function formatResetTime(resetsAt: string, now: number): string {
+  const resetTimestamp = Date.parse(resetsAt);
+  if (!Number.isFinite(resetTimestamp)) return 'позже';
+  const diffMs = Math.max(0, resetTimestamp - now);
+  const totalMinutes = Math.ceil(diffMs / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours <= 0) return `${Math.max(1, minutes)} мин`;
+  return `${hours}ч ${minutes.toString().padStart(2, '0')}мин`;
+}
+
+interface DailyAdTaskCardProps {
+  currentLevel: number;
+  onReward: (amount: number, triggerElement: HTMLElement) => void;
+}
+
+function DailyAdTaskCard({ currentLevel, onReward }: DailyAdTaskCardProps) {
+  const { updateUser, setUser } = useAppStore();
+  const trackedIntent = useRewardStore((s) => s.activeIntents.reward_daily_coins ?? null);
+  const resolvedIntent = useRewardStore((s) => s.lastResolved.reward_daily_coins ?? null);
+  const clearResolved = useRewardStore((s) => s.clearResolved);
+
+  const [eligible, setEligible] = useState(false);
+  const [used, setUsed] = useState(0);
+  const [limit, setLimit] = useState(3);
+  const [resetsAt, setResetsAt] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [statusLoaded, setStatusLoaded] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const [pendingIntentId, setPendingIntentId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const status = await adsApi.getStatus();
+      setEligible(status.eligible);
+      setUsed(status.dailyCoins.used);
+      setLimit(status.dailyCoins.limit);
+      setResetsAt(status.dailyCoins.resetsAt);
+      setStatusLoaded(true);
+    } catch {
+      setStatusLoaded(false);
+    }
+  }, []);
+
+  const syncCoins = useCallback(async () => {
+    try {
+      const me = await authApi.getMe();
+      setUser(me);
+    } catch { void 0; }
+  }, [setUser]);
+
+  useEffect(() => { void loadStatus(); }, [loadStatus]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void loadStatus();
+    };
+    const handleWindowFocus = () => void loadStatus();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, [loadStatus]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!trackedIntent) return;
+    if (pendingIntentId !== trackedIntent.intentId) setPendingIntentId(trackedIntent.intentId);
+    setError(null);
+    setInfoMessage('Проверяем награду...');
+  }, [pendingIntentId, trackedIntent]);
+
+  useEffect(() => {
+    if (!resolvedIntent) return;
+    const applyResolved = async () => {
+      if (resolvedIntent.status === 'granted') {
+        setPendingIntentId(null);
+        setInfoMessage(null);
+        setError(null);
+        setUsed(resolvedIntent.usedToday ?? used);
+        setLimit(resolvedIntent.limitToday ?? limit);
+        if (resolvedIntent.resetsAt) setResetsAt(resolvedIntent.resetsAt);
+        if (resolvedIntent.coins != null) {
+          updateUser({ coins: resolvedIntent.coins });
+        } else {
+          await syncCoins();
+        }
+        await loadStatus();
+      } else if (resolvedIntent.status === 'rejected' || resolvedIntent.status === 'expired') {
+        setPendingIntentId(null);
+        setInfoMessage(null);
+        setError(getRewardedFlowMessage('reward_daily_coins', {
+          outcome: 'rejected',
+          failureCode: resolvedIntent.failureCode,
+        }));
+        await loadStatus();
+      }
+      clearResolved('reward_daily_coins', resolvedIntent.intentId);
+    };
+    void applyResolved();
+  }, [clearResolved, limit, loadStatus, resolvedIntent, syncCoins, updateUser, used]);
+
+  const handleWatch = useCallback(async (triggerEl: HTMLElement) => {
+    if (loading || pendingIntentId || used >= limit) return;
+    setLoading(true);
+    setError(null);
+    setInfoMessage(null);
+
+    try {
+      const result = await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardDailyCoins, {
+        placement: 'reward_daily_coins',
+      });
+
+      if (result.outcome === 'timeout') {
+        setPendingIntentId(result.intentId);
+        rememberPendingRewardIntent({ intentId: result.intentId!, placement: 'reward_daily_coins' });
+        setInfoMessage(getRewardedFlowMessage('reward_daily_coins', result));
+        return;
+      }
+      if (result.outcome === 'provider_error' && result.intentId) {
+        setPendingIntentId(result.intentId);
+        rememberPendingRewardIntent({ intentId: result.intentId, placement: 'reward_daily_coins' });
+        setInfoMessage(getRewardedFlowMessage('reward_daily_coins', result));
+        return;
+      }
+      if (result.outcome === 'unavailable' || result.outcome === 'not_completed') {
+        setPendingIntentId(null);
+        setError(getRewardedFlowMessage('reward_daily_coins', result));
+        return;
+      }
+      if (result.outcome === 'error') {
+        if (result.intentId) {
+          setPendingIntentId(result.intentId);
+          rememberPendingRewardIntent({ intentId: result.intentId, placement: 'reward_daily_coins' });
+          setInfoMessage('Связь с сервером прервалась. Мы продолжим проверку автоматически.');
+        } else {
+          setError(getRewardedFlowMessage('reward_daily_coins', result));
+        }
+        return;
+      }
+      if (result.outcome === 'rejected') {
+        setPendingIntentId(null);
+        clearPendingRewardIntent('reward_daily_coins', result.intentId ?? undefined);
+        setError(getRewardedFlowMessage('reward_daily_coins', result));
+        await loadStatus();
+        return;
+      }
+
+      setPendingIntentId(null);
+      clearPendingRewardIntent('reward_daily_coins', result.intentId ?? undefined);
+      setUsed(result.status?.usedToday ?? used + 1);
+      setLimit(result.status?.limitToday ?? limit);
+      if (result.status?.resetsAt) setResetsAt(result.status.resetsAt);
+      if (result.status?.coins != null) {
+        updateUser({ coins: result.status.coins });
+      } else {
+        await syncCoins();
+      }
+      onReward(20, triggerEl);
+    } catch {
+      setError('Не удалось связаться с сервером. Попробуйте еще раз.');
+    } finally {
+      setLoading(false);
+    }
+  }, [limit, loadStatus, loading, onReward, pendingIntentId, syncCoins, updateUser, used]);
+
+  if (!ADS_ENABLED || !isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardDailyCoins)) return null;
+  if (!statusLoaded || !eligible || currentLevel < ADS_FIRST_ELIGIBLE_LEVEL) return null;
+
+  const remaining = Math.max(0, limit - used);
+  const limitReached = used >= limit;
+  const waitingForReward = pendingIntentId !== null;
+  const isDisabled = loading || waitingForReward || limitReached;
+
+  return (
+    <motion.div
+      variants={itemVariants}
+      className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4"
+    >
+      <div className="relative z-10 flex items-center gap-4">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-500/20 text-amber-400">
+          <Play size={24} />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <h3 className="mb-0.5 truncate text-[15px] font-bold text-white">Монеты за рекламу</h3>
+          {limitReached ? (
+            <p className="text-[11px] leading-tight text-white/50">
+              Сброс через {formatResetTime(resetsAt, now)}
+            </p>
+          ) : waitingForReward ? (
+            <p className="text-[11px] leading-tight text-amber-300">{infoMessage ?? 'Проверяем награду...'}</p>
+          ) : (
+            <p className="text-[11px] leading-tight text-white/50">
+              {error ?? `+20 монет за просмотр · осталось ${remaining}/${limit}`}
+            </p>
+          )}
+        </div>
+
+        <div className="flex shrink-0 flex-col items-end justify-center pl-1">
+          {limitReached ? (
+            <div className="rounded-xl bg-white/10 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-white/50">
+              ГОТОВО
+            </div>
+          ) : (
+            <motion.button
+              whileTap={{ scale: 0.92 }}
+              disabled={isDisabled}
+              onClick={(e) => void handleWatch(e.currentTarget as HTMLElement)}
+              className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-white shadow-[0_4px_15px_rgba(245,158,11,0.3)] disabled:opacity-70"
+            >
+              <Play size={14} />
+              {loading ? '...' : waitingForReward ? 'Проверка' : 'Смотреть'}
+            </motion.button>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
 
 const TASKS_PLACEHOLDER_ENABLED = false;
 
@@ -143,6 +378,9 @@ function TaskScreenLoader() {
 
 export function TasksScreen() {
   const { user, updateUser } = useAppStore();
+  const currentLevel = (user as (typeof user & { current_level?: number }) | null)?.currentLevel
+    ?? (user as (typeof user & { current_level?: number }) | null)?.current_level
+    ?? 1;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const coinTargetAnchorRef = useRef<HTMLDivElement>(null);
@@ -510,7 +748,10 @@ export function TasksScreen() {
               ) : loading ? (
                 <TaskScreenLoader />
               ) : (
-                tasks.map((task) => renderTaskCard(task))
+                <>
+                  <DailyAdTaskCard currentLevel={currentLevel} onReward={runRewardAnimation} />
+                  {tasks.map((task) => renderTaskCard(task))}
+                </>
               )}
             </motion.div>
           ) : (

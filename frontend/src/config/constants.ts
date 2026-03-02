@@ -40,7 +40,7 @@ export const COINS_STAR_MULTIPLIER = {
 };
 
 /** Награда за реферала (пригласившему) */
-export const REFERRAL_REWARD_INVITER = 200;
+export const REFERRAL_REWARD_INVITER = 50;
 
 /** Награда за реферала (приглашённому) */
 export const REFERRAL_REWARD_INVITEE = 100;

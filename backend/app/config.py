@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     
     # Rewards
     BASE_COINS_PER_LEVEL: int = 10
-    REFERRAL_REWARD_INVITER: int = 200    # inviter получает, когда invitee достигнет уровня подтверждения
+    REFERRAL_REWARD_INVITER: int = 50     # inviter получает, когда invitee достигнет уровня подтверждения
     REFERRAL_REWARD_INVITEE: int = 100    # invitee получает СРАЗУ при переходе по ссылке
     REFERRAL_CONFIRM_LEVEL: int = 50      # уровень для подтверждения реферала. ВЕРНУТЬ НА 50 НА ПРОДЕ
     REFERRAL_GRACE_PERIOD_HOURS: int = 72 # окно привязки для существующих аккаунтов
