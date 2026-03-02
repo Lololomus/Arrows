@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--start-level",
         type=int,
-        default=37,
+        default=1,
         help="Only process levels with number >= this value.",
     )
     parser.add_argument(

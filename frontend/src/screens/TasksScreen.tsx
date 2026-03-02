@@ -24,303 +24,262 @@ import { useAppStore } from '../stores/store';
 import { useRewardStore } from '../stores/rewardStore';
 
 type TaskScreenTab = 'tasks' | 'fragments';
-type TaskUiConfig = {
-  icon: typeof Send;
-  iconColor: string;
-  iconBg: string;
-};
+type TaskUiConfig = { icon: typeof Send; iconColor: string; iconBg: string };
 type FlyingCoin = {
-  id: string;
-  startX: number;
-  startY: number;
-  midX: number;
-  midY: number;
-  endX: number;
-  endY: number;
-  rotation: number;
-  delay: number;
+  id: string; startX: number; startY: number;
+  midX: number; midY: number; endX: number; endY: number;
+  rotation: number; delay: number;
 };
+
+const STAGGER = 0.07;
 
 const TASK_UI: Record<TaskDto['id'], TaskUiConfig> = {
-  official_channel: {
-    icon: Send,
-    iconColor: 'text-green-400',
-    iconBg: 'bg-green-500/20',
-  },
-  arcade_levels: {
-    icon: Trophy,
-    iconColor: 'text-blue-400',
-    iconBg: 'bg-blue-500/20',
-  },
-  friends_confirmed: {
-    icon: Users,
-    iconColor: 'text-purple-400',
-    iconBg: 'bg-purple-500/20',
-  },
+  official_channel: { icon: Send,   iconColor: 'text-green-400',  iconBg: 'bg-green-500/20'  },
+  arcade_levels:    { icon: Trophy, iconColor: 'text-blue-400',   iconBg: 'bg-blue-500/20'   },
+  friends_confirmed:{ icon: Users,  iconColor: 'text-purple-400', iconBg: 'bg-purple-500/20' },
 };
 
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: {
-      staggerChildren: 0.08,
-      delayChildren: 0.05,
-    },
-  },
-};
+// ─── Section divider ─────────────────────────────────────────────────────────
 
-const itemVariants = {
-  hidden: { opacity: 0, x: -30 },
-  visible: {
-    opacity: 1,
-    x: 0,
-    transition: { duration: 0.35, ease: 'easeOut' },
-  },
-};
+function SectionDivider({
+  label, icon, lineClass = 'via-white/12', delay = 0,
+}: {
+  label: string; icon?: React.ReactNode; lineClass?: string; delay?: number;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.22, delay, ease: 'easeOut' }}
+      className="flex items-center gap-3 py-2"
+    >
+      <div className={`h-px flex-1 bg-gradient-to-r from-transparent ${lineClass}`} />
+      <div className="flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1">
+        {icon}
+        <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">{label}</span>
+      </div>
+      <div className={`h-px flex-1 bg-gradient-to-l from-transparent ${lineClass}`} />
+    </motion.div>
+  );
+}
+
+// ─── Green "done" badge ───────────────────────────────────────────────────────
+
+function DoneBadge({ label = 'Готово', size = 'md' }: { label?: string; size?: 'sm' | 'md' }) {
+  const cls = size === 'sm'
+    ? 'px-2.5 py-1.5 text-[10px] gap-1'
+    : 'px-3 py-2 text-[10px] gap-1';
+  return (
+    <div className={`shrink-0 flex items-center rounded-xl border border-green-500/25 bg-green-500/10 font-bold text-green-400 ${cls}`}>
+      <CheckCircle2 size={11} />
+      {label}
+    </div>
+  );
+}
+
+// ─── Ad task helper ───────────────────────────────────────────────────────────
 
 function formatResetTime(resetsAt: string, now: number): string {
-  const resetTimestamp = Date.parse(resetsAt);
-  if (!Number.isFinite(resetTimestamp)) return 'позже';
-  const diffMs = Math.max(0, resetTimestamp - now);
-  const totalMinutes = Math.ceil(diffMs / 60_000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours <= 0) return `${Math.max(1, minutes)} мин`;
-  return `${hours}ч ${minutes.toString().padStart(2, '0')}мин`;
+  const ts = Date.parse(resetsAt);
+  if (!Number.isFinite(ts)) return 'позже';
+  const mins = Math.ceil(Math.max(0, ts - now) / 60_000);
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h <= 0 ? `${Math.max(1, m)} мин` : `${h}ч ${String(m).padStart(2, '0')}мин`;
 }
+
+// ─── DailyAdTaskCard ──────────────────────────────────────────────────────────
 
 interface DailyAdTaskCardProps {
   currentLevel: number;
-  onReward: (amount: number, triggerElement: HTMLElement) => void;
+  animDelay?: number;
+  onReward: (amount: number, el: HTMLElement) => void;
+  onEligible?: (v: boolean) => void;
 }
 
-function DailyAdTaskCard({ currentLevel, onReward }: DailyAdTaskCardProps) {
+function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: DailyAdTaskCardProps) {
   const { updateUser, setUser } = useAppStore();
-  const trackedIntent = useRewardStore((s) => s.activeIntents.reward_daily_coins ?? null);
+  const trackedIntent  = useRewardStore((s) => s.activeIntents.reward_daily_coins ?? null);
   const resolvedIntent = useRewardStore((s) => s.lastResolved.reward_daily_coins ?? null);
-  const clearResolved = useRewardStore((s) => s.clearResolved);
+  const clearResolved  = useRewardStore((s) => s.clearResolved);
 
-  const [eligible, setEligible] = useState(false);
-  const [used, setUsed] = useState(0);
-  const [limit, setLimit] = useState(3);
-  const [resetsAt, setResetsAt] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [eligible,     setEligible]     = useState(false);
+  const [used,         setUsed]         = useState(0);
+  const [limit,        setLimit]        = useState(3);
+  const [resetsAt,     setResetsAt]     = useState('');
+  const [loading,      setLoading]      = useState(false);
   const [statusLoaded, setStatusLoaded] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
-  const [pendingIntentId, setPendingIntentId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [now,          setNow]          = useState(() => Date.now());
+  const [pendingId,    setPendingId]    = useState<string | null>(null);
+  const [error,        setError]        = useState<string | null>(null);
+  const [infoMsg,      setInfoMsg]      = useState<string | null>(null);
 
   const loadStatus = useCallback(async () => {
     try {
-      const status = await adsApi.getStatus();
-      setEligible(status.eligible);
-      setUsed(status.dailyCoins.used);
-      setLimit(status.dailyCoins.limit);
-      setResetsAt(status.dailyCoins.resetsAt);
+      const s = await adsApi.getStatus();
+      setEligible(s.eligible);
+      setUsed(s.dailyCoins.used);
+      setLimit(s.dailyCoins.limit);
+      setResetsAt(s.dailyCoins.resetsAt);
       setStatusLoaded(true);
-    } catch {
-      setStatusLoaded(false);
-    }
+    } catch { setStatusLoaded(false); }
   }, []);
 
   const syncCoins = useCallback(async () => {
-    try {
-      const me = await authApi.getMe();
-      setUser(me);
-    } catch { void 0; }
+    try { setUser(await authApi.getMe()); } catch { void 0; }
   }, [setUser]);
 
   useEffect(() => { void loadStatus(); }, [loadStatus]);
 
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') void loadStatus();
-    };
-    const handleWindowFocus = () => void loadStatus();
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', handleWindowFocus);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleWindowFocus);
-    };
+    const onVis = () => { if (document.visibilityState === 'visible') void loadStatus(); };
+    const onFocus = () => void loadStatus();
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', onFocus);
+    return () => { document.removeEventListener('visibilitychange', onVis); window.removeEventListener('focus', onFocus); };
   }, [loadStatus]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => window.clearInterval(timer);
+    const t = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(t);
   }, []);
+
+  // Сообщаем родителю об eligible статусе
+  useEffect(() => {
+    if (statusLoaded && eligible && currentLevel >= ADS_FIRST_ELIGIBLE_LEVEL) {
+      onEligible?.(true);
+    }
+  }, [statusLoaded, eligible, currentLevel, onEligible]);
 
   useEffect(() => {
     if (!trackedIntent) return;
-    if (pendingIntentId !== trackedIntent.intentId) setPendingIntentId(trackedIntent.intentId);
-    setError(null);
-    setInfoMessage('Проверяем награду...');
-  }, [pendingIntentId, trackedIntent]);
+    if (pendingId !== trackedIntent.intentId) setPendingId(trackedIntent.intentId);
+    setError(null); setInfoMsg('Проверяем награду...');
+  }, [pendingId, trackedIntent]);
 
   useEffect(() => {
     if (!resolvedIntent) return;
-    const applyResolved = async () => {
+    const apply = async () => {
       if (resolvedIntent.status === 'granted') {
-        setPendingIntentId(null);
-        setInfoMessage(null);
-        setError(null);
+        setPendingId(null); setInfoMsg(null); setError(null);
         setUsed(resolvedIntent.usedToday ?? used);
         setLimit(resolvedIntent.limitToday ?? limit);
         if (resolvedIntent.resetsAt) setResetsAt(resolvedIntent.resetsAt);
-        if (resolvedIntent.coins != null) {
-          updateUser({ coins: resolvedIntent.coins });
-        } else {
-          await syncCoins();
-        }
+        if (resolvedIntent.coins != null) updateUser({ coins: resolvedIntent.coins });
+        else await syncCoins();
         await loadStatus();
       } else if (resolvedIntent.status === 'rejected' || resolvedIntent.status === 'expired') {
-        setPendingIntentId(null);
-        setInfoMessage(null);
-        setError(getRewardedFlowMessage('reward_daily_coins', {
-          outcome: 'rejected',
-          failureCode: resolvedIntent.failureCode,
-        }));
+        setPendingId(null); setInfoMsg(null);
+        setError(getRewardedFlowMessage('reward_daily_coins', { outcome: 'rejected', failureCode: resolvedIntent.failureCode }));
         await loadStatus();
       }
       clearResolved('reward_daily_coins', resolvedIntent.intentId);
     };
-    void applyResolved();
+    void apply();
   }, [clearResolved, limit, loadStatus, resolvedIntent, syncCoins, updateUser, used]);
 
   const handleWatch = useCallback(async (triggerEl: HTMLElement) => {
-    if (loading || pendingIntentId || used >= limit) return;
-    setLoading(true);
-    setError(null);
-    setInfoMessage(null);
-
+    if (loading || pendingId || used >= limit) return;
+    setLoading(true); setError(null); setInfoMsg(null);
     try {
-      const result = await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardDailyCoins, {
-        placement: 'reward_daily_coins',
-      });
+      const result = await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardDailyCoins, { placement: 'reward_daily_coins' });
 
-      if (result.outcome === 'timeout') {
-        setPendingIntentId(result.intentId);
+      if (result.outcome === 'timeout' || (result.outcome === 'provider_error' && result.intentId)) {
+        setPendingId(result.intentId!);
         rememberPendingRewardIntent({ intentId: result.intentId!, placement: 'reward_daily_coins' });
-        setInfoMessage(getRewardedFlowMessage('reward_daily_coins', result));
-        return;
-      }
-      if (result.outcome === 'provider_error' && result.intentId) {
-        setPendingIntentId(result.intentId);
-        rememberPendingRewardIntent({ intentId: result.intentId, placement: 'reward_daily_coins' });
-        setInfoMessage(getRewardedFlowMessage('reward_daily_coins', result));
+        setInfoMsg(getRewardedFlowMessage('reward_daily_coins', result));
         return;
       }
       if (result.outcome === 'unavailable' || result.outcome === 'not_completed') {
-        setPendingIntentId(null);
-        setError(getRewardedFlowMessage('reward_daily_coins', result));
-        return;
+        setPendingId(null); setError(getRewardedFlowMessage('reward_daily_coins', result)); return;
       }
       if (result.outcome === 'error') {
         if (result.intentId) {
-          setPendingIntentId(result.intentId);
+          setPendingId(result.intentId);
           rememberPendingRewardIntent({ intentId: result.intentId, placement: 'reward_daily_coins' });
-          setInfoMessage('Связь с сервером прервалась. Мы продолжим проверку автоматически.');
-        } else {
-          setError(getRewardedFlowMessage('reward_daily_coins', result));
-        }
+          setInfoMsg('Связь прервалась, проверяем автоматически...');
+        } else { setError(getRewardedFlowMessage('reward_daily_coins', result)); }
         return;
       }
       if (result.outcome === 'rejected') {
-        setPendingIntentId(null);
+        setPendingId(null);
         clearPendingRewardIntent('reward_daily_coins', result.intentId ?? undefined);
         setError(getRewardedFlowMessage('reward_daily_coins', result));
-        await loadStatus();
-        return;
+        await loadStatus(); return;
       }
 
-      setPendingIntentId(null);
+      setPendingId(null);
       clearPendingRewardIntent('reward_daily_coins', result.intentId ?? undefined);
       setUsed(result.status?.usedToday ?? used + 1);
       setLimit(result.status?.limitToday ?? limit);
       if (result.status?.resetsAt) setResetsAt(result.status.resetsAt);
-      if (result.status?.coins != null) {
-        updateUser({ coins: result.status.coins });
-      } else {
-        await syncCoins();
-      }
+      if (result.status?.coins != null) updateUser({ coins: result.status.coins });
+      else await syncCoins();
       onReward(20, triggerEl);
-    } catch {
-      setError('Не удалось связаться с сервером. Попробуйте еще раз.');
-    } finally {
-      setLoading(false);
-    }
-  }, [limit, loadStatus, loading, onReward, pendingIntentId, syncCoins, updateUser, used]);
+    } catch { setError('Не удалось связаться с сервером.'); }
+    finally { setLoading(false); }
+  }, [limit, loadStatus, loading, onReward, pendingId, syncCoins, updateUser, used]);
 
   if (!ADS_ENABLED || !isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardDailyCoins)) return null;
   if (!statusLoaded || !eligible || currentLevel < ADS_FIRST_ELIGIBLE_LEVEL) return null;
 
-  const remaining = Math.max(0, limit - used);
+  const remaining    = Math.max(0, limit - used);
   const limitReached = used >= limit;
-  const waitingForReward = pendingIntentId !== null;
-  const isDisabled = loading || waitingForReward || limitReached;
+  const waiting      = pendingId !== null;
+  const isDisabled   = loading || waiting || limitReached;
+
+  const subtitle = limitReached
+    ? `Сброс через ${formatResetTime(resetsAt, now)}`
+    : waiting ? (infoMsg ?? 'Проверяем награду...')
+    : (error ?? `+20 монет · осталось ${remaining} из ${limit}`);
 
   return (
     <motion.div
-      variants={itemVariants}
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.25, delay: animDelay, ease: [0.25, 0.1, 0.25, 1] as const }}
       className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4"
     >
-      <div className="relative z-10 flex items-center gap-4">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-500/20 text-amber-400">
-          <Play size={24} />
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-500/20 text-amber-400">
+          <Play size={22} />
         </div>
-
         <div className="min-w-0 flex-1">
-          <h3 className="mb-0.5 truncate text-[15px] font-bold text-white">Монеты за рекламу</h3>
-          {limitReached ? (
-            <p className="text-[11px] leading-tight text-white/50">
-              Сброс через {formatResetTime(resetsAt, now)}
-            </p>
-          ) : waitingForReward ? (
-            <p className="text-[11px] leading-tight text-amber-300">{infoMessage ?? 'Проверяем награду...'}</p>
-          ) : (
-            <p className="text-[11px] leading-tight text-white/50">
-              {error ?? `+20 монет за просмотр · осталось ${remaining}/${limit}`}
-            </p>
-          )}
-        </div>
-
-        <div className="flex shrink-0 flex-col items-end justify-center pl-1">
-          {limitReached ? (
-            <div className="rounded-xl bg-white/10 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-white/50">
-              ГОТОВО
-            </div>
-          ) : (
-            <motion.button
-              whileTap={{ scale: 0.92 }}
-              disabled={isDisabled}
-              onClick={(e) => void handleWatch(e.currentTarget as HTMLElement)}
-              className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-white shadow-[0_4px_15px_rgba(245,158,11,0.3)] disabled:opacity-70"
-            >
-              <Play size={14} />
-              {loading ? '...' : waitingForReward ? 'Проверка' : 'Смотреть'}
-            </motion.button>
-          )}
+          <div className="mb-1 flex items-center gap-2">
+            <h3 className="min-w-0 flex-1 truncate text-[14px] font-bold text-white">Монеты за рекламу</h3>
+            {limitReached
+              ? <DoneBadge label="Готово" />
+              : (
+                <motion.button
+                  whileTap={{ scale: 0.92 }}
+                  disabled={isDisabled}
+                  onClick={(e) => void handleWatch(e.currentTarget as HTMLElement)}
+                  className="shrink-0 flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white shadow-[0_4px_15px_rgba(245,158,11,0.3)] disabled:opacity-70"
+                >
+                  <Play size={13} />
+                  {loading ? '...' : waiting ? 'Проверка' : 'Смотреть'}
+                </motion.button>
+              )
+            }
+          </div>
+          <p className={`text-[11px] leading-tight line-clamp-1 ${waiting ? 'text-amber-300' : 'text-white/50'}`}>
+            {subtitle}
+          </p>
         </div>
       </div>
     </motion.div>
   );
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 const TASKS_PLACEHOLDER_ENABLED = false;
 
 const triggerHaptic = (style: 'light' | 'medium' | 'heavy' | 'selection' | 'success') => {
   const tg = (window as Window & { Telegram?: any }).Telegram?.WebApp;
   if (!tg?.HapticFeedback) return;
-
-  if (style === 'selection') {
-    tg.HapticFeedback.selectionChanged();
-  } else if (style === 'success') {
-    tg.HapticFeedback.notificationOccurred('success');
-  } else {
-    tg.HapticFeedback.impactOccurred(style);
-  }
+  if (style === 'selection') tg.HapticFeedback.selectionChanged();
+  else if (style === 'success') tg.HapticFeedback.notificationOccurred('success');
+  else tg.HapticFeedback.impactOccurred(style);
 };
 
 function BottomCoinStash({ balance, isPulsing }: { balance: number; isPulsing: boolean }) {
@@ -376,50 +335,44 @@ function TaskScreenLoader() {
   );
 }
 
+// ─── Main screen ──────────────────────────────────────────────────────────────
+
 export function TasksScreen() {
   const { user, updateUser } = useAppStore();
   const currentLevel = (user as (typeof user & { current_level?: number }) | null)?.currentLevel
     ?? (user as (typeof user & { current_level?: number }) | null)?.current_level
     ?? 1;
 
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef       = useRef<HTMLDivElement>(null);
   const coinTargetAnchorRef = useRef<HTMLDivElement>(null);
-  const stashHideTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const stashHideTimerRef  = useRef<NodeJS.Timeout | null>(null);
 
-  const [activeTab, setActiveTab] = useState<TaskScreenTab>('tasks');
-  const [tasks, setTasks] = useState<TaskDto[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [screenError, setScreenError] = useState<string | null>(null);
-  const [taskErrors, setTaskErrors] = useState<Record<string, string>>({});
-  const [loadingTaskIds, setLoadingTaskIds] = useState<Set<string>>(new Set());
-  const [openedChannelTaskIds, setOpenedChannelTaskIds] = useState<Set<string>>(new Set());
-  const [flyingCoins, setFlyingCoins] = useState<FlyingCoin[]>([]);
-  const [isStashVisible, setIsStashVisible] = useState(false);
-  const [isStashPulsing, setIsStashPulsing] = useState(false);
+  const [activeTab,          setActiveTab]          = useState<TaskScreenTab>('tasks');
+  const [tasks,              setTasks]              = useState<TaskDto[]>([]);
+  const [loading,            setLoading]            = useState(true);
+  const [screenError,        setScreenError]        = useState<string | null>(null);
+  const [taskErrors,         setTaskErrors]         = useState<Record<string, string>>({});
+  const [loadingTaskIds,     setLoadingTaskIds]     = useState<Set<string>>(new Set());
+  const [openedChannelIds,   setOpenedChannelIds]   = useState<Set<string>>(new Set());
+  const [flyingCoins,        setFlyingCoins]        = useState<FlyingCoin[]>([]);
+  const [isStashVisible,     setIsStashVisible]     = useState(false);
+  const [isStashPulsing,     setIsStashPulsing]     = useState(false);
+  const [adEligible,         setAdEligible]         = useState(false);
 
   const userCoins = user?.coins ?? 0;
 
   const fetchTasks = useCallback(async (showLoader = false) => {
     if (showLoader) setLoading(true);
-
     try {
       const data = await tasksApi.getTasks();
       setTasks(data.tasks);
       setScreenError(null);
-    } catch (error) {
-      setScreenError(handleApiError(error));
-    } finally {
-      if (showLoader) setLoading(false);
-    }
+    } catch (err) { setScreenError(handleApiError(err)); }
+    finally { if (showLoader) setLoading(false); }
   }, []);
 
-  useEffect(() => {
-    void fetchTasks(true);
-  }, [fetchTasks]);
-
-  useEffect(() => () => {
-    if (stashHideTimerRef.current) clearTimeout(stashHideTimerRef.current);
-  }, []);
+  useEffect(() => { void fetchTasks(true); }, [fetchTasks]);
+  useEffect(() => () => { if (stashHideTimerRef.current) clearTimeout(stashHideTimerRef.current); }, []);
 
   const showStashWithTimer = useCallback(() => {
     setIsStashVisible(true);
@@ -433,229 +386,182 @@ export function TasksScreen() {
   }, []);
 
   const runRewardAnimation = useCallback((rewardAmount: number, triggerElement: HTMLElement) => {
-    const containerRect = containerRef.current?.getBoundingClientRect();
-    const buttonRect = triggerElement.getBoundingClientRect();
-    if (!containerRect) return;
+    const cRect = containerRef.current?.getBoundingClientRect();
+    const bRect = triggerElement.getBoundingClientRect();
+    if (!cRect) return;
 
-    const startX = buttonRect.left - containerRect.left + buttonRect.width / 2;
-    const startY = buttonRect.top - containerRect.top + buttonRect.height / 2;
+    const sx = bRect.left - cRect.left + bRect.width / 2;
+    const sy = bRect.top  - cRect.top  + bRect.height / 2;
+    const tRect = coinTargetAnchorRef.current?.getBoundingClientRect();
+    const tx = tRect ? tRect.left - cRect.left : cRect.width / 2;
+    const ty = tRect ? tRect.top  - cRect.top  : cRect.height - 130;
 
-    const targetRect = coinTargetAnchorRef.current?.getBoundingClientRect();
-    const targetCenterX = targetRect ? targetRect.left - containerRect.left : containerRect.width / 2;
-    const targetCenterY = targetRect ? targetRect.top - containerRect.top : containerRect.height - 130;
-
-    const coinsToSpawn = Math.min(10, Math.max(5, Math.floor(rewardAmount / 15)));
-    const spawnedCoins = Array.from({ length: coinsToSpawn }).map((_, index) => ({
-      id: `${Date.now()}-${index}`,
-      startX,
-      startY,
-      midX: startX + (Math.random() - 0.5) * 80,
-      midY: startY - (Math.random() * 50 + 20),
-      endX: targetCenterX + (Math.random() - 0.5) * 20,
-      endY: targetCenterY + (Math.random() - 0.5) * 10,
+    const count = Math.min(10, Math.max(5, Math.floor(rewardAmount / 15)));
+    const coins = Array.from({ length: count }).map((_, i) => ({
+      id: `${Date.now()}-${i}`,
+      startX: sx, startY: sy,
+      midX: sx + (Math.random() - 0.5) * 80,
+      midY: sy - (Math.random() * 50 + 20),
+      endX: tx + (Math.random() - 0.5) * 20,
+      endY: ty + (Math.random() - 0.5) * 10,
       rotation: Math.random() > 0.5 ? 360 : -360,
-      delay: index * 0.05,
+      delay: i * 0.05,
     }));
 
     showStashWithTimer();
-    setFlyingCoins((prev) => [...prev, ...spawnedCoins]);
-
-    spawnedCoins.forEach((coin) => {
-      const hitTime = 800 + coin.delay * 1000;
-      setTimeout(() => {
-        triggerHaptic('light');
-        triggerStashPulse();
-      }, hitTime);
-    });
-
-    setTimeout(() => {
-      triggerHaptic('success');
-      showStashWithTimer();
-    }, 850);
-
-    setTimeout(() => {
-      setFlyingCoins((prev) => prev.filter((coin) => !spawnedCoins.some((item) => item.id === coin.id)));
-    }, 1800);
+    setFlyingCoins((p) => [...p, ...coins]);
+    coins.forEach((c) => setTimeout(() => { triggerHaptic('light'); triggerStashPulse(); }, 800 + c.delay * 1000));
+    setTimeout(() => { triggerHaptic('success'); showStashWithTimer(); }, 850);
+    setTimeout(() => setFlyingCoins((p) => p.filter((c) => !coins.some((x) => x.id === c.id))), 1800);
   }, [showStashWithTimer, triggerStashPulse]);
 
-  const setTaskLoading = useCallback((taskId: string, isLoading: boolean) => {
-    setLoadingTaskIds((prev) => {
-      const next = new Set(prev);
-      if (isLoading) {
-        next.add(taskId);
-      } else {
-        next.delete(taskId);
-      }
-      return next;
-    });
+  const setTaskLoading = useCallback((id: string, v: boolean) => {
+    setLoadingTaskIds((p) => { const n = new Set(p); v ? n.add(id) : n.delete(id); return n; });
   }, []);
 
-  const clearTaskError = useCallback((taskId: string) => {
-    setTaskErrors((prev) => {
-      if (!(taskId in prev)) return prev;
-      const next = { ...prev };
-      delete next[taskId];
-      return next;
-    });
+  const clearTaskError = useCallback((id: string) => {
+    setTaskErrors((p) => { if (!(id in p)) return p; const n = { ...p }; delete n[id]; return n; });
   }, []);
 
   const handleOpenChannel = useCallback((task: TaskDto) => {
     const url = task.channel?.url ?? (task.channel?.username ? `https://t.me/${task.channel.username}` : null);
-    if (!url) {
-      setTaskErrors((prev) => ({ ...prev, [task.id]: 'Канал пока не настроен на сервере' }));
-      return;
-    }
-
+    if (!url) { setTaskErrors((p) => ({ ...p, [task.id]: 'Канал пока не настроен' })); return; }
     triggerHaptic('light');
     clearTaskError(task.id);
-
     const tg = (window as Window & { Telegram?: any }).Telegram?.WebApp;
-    if (tg?.openTelegramLink) {
-      tg.openTelegramLink(url);
-    } else {
-      window.open(url, '_blank', 'noopener,noreferrer');
-    }
-
-    setOpenedChannelTaskIds((prev) => new Set(prev).add(task.id));
+    if (tg?.openTelegramLink) tg.openTelegramLink(url);
+    else window.open(url, '_blank', 'noopener,noreferrer');
+    setOpenedChannelIds((p) => new Set(p).add(task.id));
   }, [clearTaskError]);
 
-  const handleClaim = useCallback(async (task: TaskDto, triggerElement: HTMLElement) => {
-    const tierIndex = task.nextTierIndex;
-    const tier = tierIndex != null ? task.tiers[tierIndex] : null;
+  const handleClaim = useCallback(async (task: TaskDto, el: HTMLElement) => {
+    const tier = task.nextTierIndex != null ? task.tiers[task.nextTierIndex] : null;
     if (!tier) return;
-
     setTaskLoading(task.id, true);
     clearTaskError(task.id);
     triggerHaptic('heavy');
-
     try {
       const result = await tasksApi.claimTask(tier.claimId);
       updateUser({ coins: result.coins });
-      runRewardAnimation(result.rewardCoins, triggerElement);
+      runRewardAnimation(result.rewardCoins, el);
       await fetchTasks(false);
-    } catch (error) {
-      setTaskErrors((prev) => ({ ...prev, [task.id]: handleApiError(error) }));
-    } finally {
-      setTaskLoading(task.id, false);
-    }
+    } catch (err) { setTaskErrors((p) => ({ ...p, [task.id]: handleApiError(err) })); }
+    finally { setTaskLoading(task.id, false); }
   }, [clearTaskError, fetchTasks, runRewardAnimation, setTaskLoading, updateUser]);
 
   const handleTaskAction = useCallback(async (task: TaskDto, event?: MouseEvent<HTMLElement>) => {
-    const triggerElement = event?.currentTarget as HTMLElement | undefined;
-
+    const el = event?.currentTarget as HTMLElement | undefined;
     if (task.kind === 'single') {
       if (task.status === 'completed') return;
-      if (!openedChannelTaskIds.has(task.id)) {
-        handleOpenChannel(task);
-        return;
-      }
-      if (triggerElement) {
-        await handleClaim(task, triggerElement);
-      }
+      if (!openedChannelIds.has(task.id)) { handleOpenChannel(task); return; }
+      if (el) await handleClaim(task, el);
       return;
     }
+    if (task.status !== 'claimable' || !el) return;
+    await handleClaim(task, el);
+  }, [handleClaim, handleOpenChannel, openedChannelIds]);
 
-    if (task.status !== 'claimable' || !triggerElement) return;
-    await handleClaim(task, triggerElement);
-  }, [handleClaim, handleOpenChannel, openedChannelTaskIds]);
+  // ─── Task card ───────────────────────────────────────────────────────────────
 
-  const renderTaskCard = (task: TaskDto) => {
-    const ui = TASK_UI[task.id];
+  const renderTaskCard = (task: TaskDto, delay = 0) => {
+    const ui       = TASK_UI[task.id];
     const nextTier = task.nextTierIndex != null ? task.tiers[task.nextTierIndex] : null;
     const lastTier = task.tiers.length > 0 ? task.tiers[task.tiers.length - 1] : null;
-    const target = nextTier?.target ?? 1;
-    const reward = nextTier?.rewardCoins ?? lastTier?.rewardCoins ?? 0;
+    const target   = nextTier?.target ?? 1;
+    const reward   = nextTier?.rewardCoins ?? lastTier?.rewardCoins ?? 0;
     const progress = task.kind === 'stepped' ? task.progress : task.status === 'completed' ? 1 : 0;
-    const progressPercent = Math.min(100, (progress / target) * 100);
+    const pct      = Math.min(100, (progress / target) * 100);
     const isLoadingTask = loadingTaskIds.has(task.id);
-    const isCompleted = task.status === 'completed';
-    const displayTitle = nextTier?.title ?? task.baseTitle;
-    const taskError = taskErrors[task.id];
+    const isCompleted   = task.status === 'completed';
+    const hasAction     = !isCompleted && (task.kind === 'single' || task.status === 'claimable');
+    const displayTitle  = nextTier?.title ?? task.baseTitle;
+    const taskError     = taskErrors[task.id];
 
     let actionLabel = '';
     if (task.kind === 'single') {
-      actionLabel = isLoadingTask ? 'Проверяем...' : openedChannelTaskIds.has(task.id) ? 'Проверить' : 'Подписаться';
+      actionLabel = isLoadingTask ? '...' : openedChannelIds.has(task.id) ? 'Проверить' : 'Подписка';
     } else if (task.status === 'claimable') {
-      actionLabel = isLoadingTask ? 'Загрузка...' : `ЗАБРАТЬ ${reward}`;
+      actionLabel = isLoadingTask ? '...' : `+${reward}`;
     }
 
     return (
       <motion.div
         key={task.id}
-        variants={itemVariants}
-        className={`
-          relative overflow-hidden rounded-2xl border p-4
-          ${isCompleted ? 'border-white/5 bg-white/5 opacity-60' : 'border-white/10 bg-white/5'}
-        `}
+        initial={{ opacity: 0, x: -20 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.25, delay, ease: [0.25, 0.1, 0.25, 1] as const }}
+        className={`relative overflow-hidden rounded-2xl border p-4 ${
+          isCompleted ? 'border-white/5 bg-white/5 opacity-70' : 'border-white/10 bg-white/5'
+        }`}
       >
-        <div className="relative z-10 flex items-center gap-4">
-          <div
-            className={`
-              flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl
-              ${isCompleted ? 'bg-white/10 text-white/50' : `${ui.iconBg} ${ui.iconColor}`}
-            `}
-          >
-            {isCompleted ? <CheckCircle2 size={24} /> : <ui.icon size={24} />}
+        <div className="flex items-start gap-3">
+          {/* Иконка */}
+          <div className={`mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
+            isCompleted ? 'bg-green-500/10 text-green-400' : `${ui.iconBg} ${ui.iconColor}`
+          }`}>
+            {isCompleted ? <CheckCircle2 size={22} /> : <ui.icon size={22} />}
           </div>
 
+          {/* Контент */}
           <div className="min-w-0 flex-1">
-            <h3 className={`mb-0.5 truncate text-[15px] font-bold ${isCompleted ? 'text-white/60' : 'text-white'}`}>
-              {displayTitle}
-            </h3>
+            {/* Заголовок + кнопка */}
+            <div className="mb-1 flex items-center gap-2">
+              <h3 className={`min-w-0 flex-1 truncate text-[14px] font-bold leading-tight ${
+                isCompleted ? 'text-white/60' : 'text-white'
+              }`}>
+                {displayTitle}
+              </h3>
 
+              {isCompleted ? (
+                <DoneBadge label="Готово" size="sm" />
+              ) : hasAction ? (
+                <motion.button
+                  whileTap={{ scale: 0.92 }}
+                  disabled={isLoadingTask}
+                  onClick={(e) => void handleTaskAction(task, e)}
+                  className={`shrink-0 flex items-center gap-1 rounded-xl px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white disabled:opacity-70 ${
+                    task.kind === 'single'
+                      ? 'bg-white/10 active:bg-white/20'
+                      : 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-[0_4px_15px_rgba(245,158,11,0.3)]'
+                  }`}
+                >
+                  {task.kind === 'single' ? <Send size={13} /> : <Sparkles size={13} />}
+                  {actionLabel}
+                </motion.button>
+              ) : (
+                <div className="shrink-0 flex flex-col items-end">
+                  <span className="text-[15px] font-bold leading-none text-amber-400">+{reward}</span>
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-amber-400/60">монет</span>
+                </div>
+              )}
+            </div>
+
+            {/* Описание */}
             {isCompleted ? (
-              <p className="truncate text-[11px] text-white/40">Задание выполнено</p>
+              <p className="text-[11px] leading-tight text-white/35">Задание выполнено</p>
             ) : (
               <>
-                <p className="pr-2 text-[11px] leading-tight text-white/50 line-clamp-2">
+                <p className="text-[11px] leading-tight text-white/50 line-clamp-1">
                   {taskError ?? task.baseDescription}
                 </p>
-                {task.kind === 'stepped' ? (
+                {task.kind === 'stepped' && (
                   <div className="mt-2">
-                    <div className="mb-1 flex items-center justify-between text-[10px] font-semibold text-white/45">
+                    <div className="mb-1 flex items-center justify-between text-[10px] font-semibold text-white/40">
                       <span>{Math.min(progress, target)}/{target}</span>
-                      <span>+{reward}</span>
                     </div>
                     <div className="relative h-1 w-full overflow-hidden rounded-full bg-white/10">
                       <motion.div
-                        className={`absolute inset-y-0 left-0 rounded-full ${task.status === 'claimable' ? 'bg-amber-400' : 'bg-yellow-400'}`}
+                        className={`absolute inset-y-0 left-0 rounded-full ${
+                          task.status === 'claimable' ? 'bg-amber-400' : 'bg-yellow-400'
+                        }`}
                         initial={{ width: 0 }}
-                        animate={{ width: `${progressPercent}%` }}
+                        animate={{ width: `${pct}%` }}
                         transition={{ duration: 0.5, ease: 'easeOut' }}
                       />
                     </div>
                   </div>
-                ) : null}
+                )}
               </>
-            )}
-          </div>
-
-          <div className="flex shrink-0 flex-col items-end justify-center pl-1">
-            {isCompleted ? (
-              <div className="rounded-xl bg-white/10 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-white/50">
-                ВЫПОЛНЕНО
-              </div>
-            ) : task.kind === 'single' || task.status === 'claimable' ? (
-              <motion.button
-                whileTap={{ scale: 0.92 }}
-                disabled={isLoadingTask}
-                onClick={(event) => void handleTaskAction(task, event)}
-                className={`
-                  flex items-center gap-1.5 rounded-xl px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-white
-                  ${task.kind === 'single'
-                    ? 'bg-white/10 active:bg-white/20'
-                    : 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-[0_4px_15px_rgba(245,158,11,0.3)]'}
-                  ${isLoadingTask ? 'opacity-70' : ''}
-                `}
-              >
-                {task.kind === 'single' ? <Send size={14} /> : <Sparkles size={14} />}
-                {actionLabel}
-              </motion.button>
-            ) : (
-              <div className="flex flex-col items-end">
-                <div className="text-[16px] font-bold leading-none text-amber-400">+{reward}</div>
-                <div className="mt-1 text-[9px] font-bold uppercase tracking-widest text-amber-400/60">монет</div>
-              </div>
             )}
           </div>
         </div>
@@ -663,16 +569,66 @@ export function TasksScreen() {
     );
   };
 
+  // ─── Build the task list: completed → daily → active ────────────────────────
+
+  const renderTaskList = () => {
+    const completed = tasks.filter((t) => t.status === 'completed');
+    const active    = tasks.filter((t) => t.status !== 'completed');
+    const showAds   = ADS_ENABLED && isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardDailyCoins);
+
+    const nodes: React.ReactNode[] = [];
+    let i = 0;
+
+    // 1. Выполненные (вверху)
+    for (const task of completed) nodes.push(renderTaskCard(task, i++ * STAGGER));
+
+    // 2. Divider → ежедневные (только если есть выполненные И eligible)
+    if (completed.length > 0 && adEligible) {
+      nodes.push(
+        <SectionDivider key="d-daily" label="Ежедневные"
+          icon={<Coins size={10} className="text-amber-400" />}
+          lineClass="via-amber-400/20" delay={i++ * STAGGER}
+        />
+      );
+    }
+
+    // 3. Ежедневная реклама
+    if (showAds) {
+      nodes.push(
+        <DailyAdTaskCard key="daily-ad"
+          currentLevel={currentLevel}
+          onReward={runRewardAnimation}
+          onEligible={setAdEligible}
+          animDelay={adEligible ? i * STAGGER : 0}
+        />
+      );
+      if (adEligible) i++;
+    }
+
+    // 4. Divider → активные (если что-то есть выше)
+    const anythingAbove = completed.length > 0 || adEligible;
+    if (anythingAbove && active.length > 0) {
+      nodes.push(
+        <SectionDivider key="d-active" label="Задания"
+          icon={<Sparkles size={10} className="text-blue-400" />}
+          lineClass="via-blue-400/20" delay={i++ * STAGGER}
+        />
+      );
+    }
+
+    // 5. Активные задания
+    for (const task of active) nodes.push(renderTaskCard(task, i++ * STAGGER));
+
+    return nodes;
+  };
+
+  // ─── Render ──────────────────────────────────────────────────────────────────
+
   return (
     <div ref={containerRef} className="relative flex h-full flex-col overflow-hidden px-4 pb-nav pt-6">
-      <AdaptiveParticles
-        variant="bg"
-        tone="neutral"
-        baseCount={16}
-        baseSpeed={0.09}
-        className="z-0 opacity-30"
-      />
+      <AdaptiveParticles variant="bg" tone="neutral" baseCount={16} baseSpeed={0.09} className="z-0 opacity-30" />
 
+      {/* Летящие монеты */}
       <div className="pointer-events-none absolute inset-0 z-[150] overflow-hidden">
         <AnimatePresence>
           {flyingCoins.map((coin) => (
@@ -682,16 +638,10 @@ export function TasksScreen() {
               animate={{
                 x: [coin.startX, coin.midX, coin.endX],
                 y: [coin.startY, coin.midY, coin.endY],
-                scale: [0, 1.2, 0.5],
-                opacity: [0, 1, 1, 0],
+                scale: [0, 1.2, 0.5], opacity: [0, 1, 1, 0],
                 rotate: [0, coin.rotation, coin.rotation * 1.5],
               }}
-              transition={{
-                duration: 0.8,
-                delay: coin.delay,
-                times: [0, 0.45, 1],
-                ease: ['easeOut', 'easeIn'],
-              }}
+              transition={{ duration: 0.8, delay: coin.delay, times: [0, 0.45, 1], ease: ['easeOut', 'easeIn'] }}
               className="absolute -ml-3 -mt-3 text-amber-400 drop-shadow-[0_0_12px_rgba(245,158,11,0.8)]"
             >
               <Coins size={28} fill="#f59e0b" className="text-amber-200" />
@@ -700,76 +650,62 @@ export function TasksScreen() {
         </AnimatePresence>
       </div>
 
+      {/* Переключатель вкладок */}
       <div className="relative mt-2 mb-6 flex shrink-0 rounded-2xl border border-white/10 bg-white/5 p-1 backdrop-blur-lg">
         <motion.div
           className="absolute top-1 bottom-1 rounded-xl bg-white/10 shadow-sm"
           initial={false}
-          animate={{
-            left: activeTab === 'tasks' ? '4px' : '50%',
-            width: 'calc(50% - 6px)',
-          }}
+          animate={{ left: activeTab === 'tasks' ? '4px' : '50%', width: 'calc(50% - 6px)' }}
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
         />
-        <button
-          onClick={() => setActiveTab('tasks')}
-          className={`z-10 flex-1 py-3 text-sm font-bold transition-colors ${activeTab === 'tasks' ? 'text-white' : 'text-white/50'}`}
-        >
+        <button onClick={() => setActiveTab('tasks')}
+          className={`z-10 flex-1 py-3 text-sm font-bold transition-colors ${activeTab === 'tasks' ? 'text-white' : 'text-white/50'}`}>
           <ClipboardList size={16} className="mr-1 mb-1 inline" /> Задания
         </button>
-        <button
-          onClick={() => setActiveTab('fragments')}
-          className={`z-10 flex-1 py-3 text-sm font-bold transition-colors ${activeTab === 'fragments' ? 'text-white' : 'text-white/50'}`}
-        >
+        <button onClick={() => setActiveTab('fragments')}
+          className={`z-10 flex-1 py-3 text-sm font-bold transition-colors ${activeTab === 'fragments' ? 'text-white' : 'text-white/50'}`}>
           <Puzzle size={16} className="mr-1 mb-1 inline" /> Фрагменты
         </button>
       </div>
 
+      {/* Контент — AnimatePresence с быстрым exit, чтобы карточки анимировались при каждом входе */}
       <div className="relative flex-1 overflow-y-auto custom-scrollbar pb-32">
         <AnimatePresence mode="wait">
-          {activeTab === 'tasks' ? (
+          {activeTab === 'tasks' && (
             <motion.div
-              key="tasks"
-              variants={containerVariants}
-              initial="hidden"
-              animate="visible"
+              key="tasks-panel"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1, transition: { duration: 0.12 } }}
+              exit={{ opacity: 0, transition: { duration: 0.08 } }}
               className="space-y-3 pb-2"
             >
               {screenError ? (
                 <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
                   <div className="font-bold">Не удалось загрузить задания</div>
                   <div className="mt-1 text-red-200/80">{screenError}</div>
-                  <button
-                    onClick={() => void fetchTasks(true)}
-                    className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold uppercase tracking-wider text-white"
-                  >
+                  <button onClick={() => void fetchTasks(true)}
+                    className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold uppercase tracking-wider text-white">
                     Повторить
                   </button>
                 </div>
               ) : loading ? (
                 <TaskScreenLoader />
               ) : (
-                <>
-                  <DailyAdTaskCard currentLevel={currentLevel} onReward={runRewardAnimation} />
-                  {tasks.map((task) => renderTaskCard(task))}
-                </>
+                renderTaskList()
               )}
             </motion.div>
-          ) : (
+          )}
+
+          {activeTab === 'fragments' && (
             <motion.div
-              key="fragments"
+              key="fragments-panel"
               initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              animate={{ opacity: 1, transition: { duration: 0.15 } }}
+              exit={{ opacity: 0, transition: { duration: 0.08 } }}
               className="flex h-full items-center justify-center px-2"
             >
               <div className="relative w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
-                <AdaptiveParticles
-                  variant="accent"
-                  tone="neutral"
-                  baseCount={12}
-                  baseSpeed={0.14}
-                  className="z-0 opacity-55"
-                />
+                <AdaptiveParticles variant="accent" tone="neutral" baseCount={12} baseSpeed={0.14} className="z-0 opacity-55" />
                 <Puzzle size={42} className="relative z-10 mx-auto mb-3 text-white/50" />
                 <h3 className="relative z-10 mb-2 text-xl font-bold text-white">Фрагменты</h3>
                 <p className="relative z-10 text-sm text-white/60">Скоро появится</p>
@@ -779,10 +715,12 @@ export function TasksScreen() {
         </AnimatePresence>
       </div>
 
+      {/* Якорь монет */}
       <div className="pointer-events-none absolute bottom-[130px] left-4 right-4 z-0 flex h-[80px] items-center">
         <div ref={coinTargetAnchorRef} className="absolute left-[44px]" />
       </div>
 
+      {/* Стэш монет */}
       <div className="pointer-events-none absolute bottom-[130px] left-4 right-4 z-[120] flex justify-center">
         <AnimatePresence>
           {isStashVisible && (
