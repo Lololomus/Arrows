@@ -146,6 +146,58 @@ compose() {
   docker compose "${COMPOSE_FILES[@]}" "$@"
 }
 
+container_id() {
+  compose ps -q "$1"
+}
+
+container_status() {
+  local id
+  id="$(container_id "$1")"
+  [[ -n "$id" ]] || return 1
+  docker inspect -f '{{.State.Status}}' "$id" 2>/dev/null
+}
+
+container_health() {
+  local id
+  id="$(container_id "$1")"
+  [[ -n "$id" ]] || return 1
+  docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$id" 2>/dev/null
+}
+
+wait_for_service() {
+  local service="$1"
+  local timeout="$2"
+  local require_health="$3"
+  local elapsed=0
+
+  while [[ "$elapsed" -lt "$timeout" ]]; do
+    local status health
+    status="$(container_status "$service" || true)"
+    health="$(container_health "$service" || true)"
+
+    if [[ "$status" == "running" ]]; then
+      if [[ "$require_health" == "true" ]]; then
+        if [[ "$health" == "healthy" || "$health" == "none" ]]; then
+          return 0
+        fi
+      else
+        return 0
+      fi
+    fi
+
+    if [[ "$status" == "restarting" || "$status" == "exited" || "$status" == "dead" ]]; then
+      compose logs --tail=80 "$service" || true
+      die "Service '$service' is not healthy enough for deploy (status=${status}, health=${health:-unknown})"
+    fi
+
+    sleep 2
+    elapsed=$((elapsed + 2))
+  done
+
+  compose logs --tail=80 "$service" || true
+  die "Timed out waiting for service '$service' (status=$(container_status "$service" || echo unknown), health=$(container_health "$service" || echo unknown))"
+}
+
 echo "==> Pulling latest code"
 git fetch --all --prune
 git pull --ff-only origin main
@@ -174,6 +226,10 @@ until compose exec -T backend alembic upgrade head; do
   attempt=$((attempt + 1))
   sleep 3
 done
+
+echo "==> Waiting for services to stabilize"
+wait_for_service backend 60 false
+wait_for_service frontend 90 true
 
 echo "==> Deployment status"
 compose ps

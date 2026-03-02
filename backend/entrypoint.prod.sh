@@ -35,6 +35,6 @@ exec gunicorn app.main:app \
   --workers "${GUNICORN_WORKERS:-4}" \
   --bind 0.0.0.0:8000 \
   --timeout 60 \
-  --keepalive 5 \
+  --keep-alive 5 \
   --max-requests 2000 \
   --max-requests-jitter 200
