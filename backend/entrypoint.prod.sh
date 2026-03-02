@@ -32,7 +32,7 @@ fi
 echo "==> Starting backend (gunicorn + uvicorn workers)"
 exec gunicorn app.main:app \
   -k uvicorn.workers.UvicornWorker \
-  --workers "${GUNICORN_WORKERS:-2}" \
+  --workers "${GUNICORN_WORKERS:-4}" \
   --bind 0.0.0.0:8000 \
   --timeout 60 \
   --keepalive 5 \
