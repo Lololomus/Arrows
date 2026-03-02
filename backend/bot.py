@@ -5,6 +5,7 @@ Arrow Puzzle - Telegram Bot
 """
 
 import asyncio
+import html
 import logging
 import os
 import sys
@@ -31,34 +32,50 @@ bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
 
+def get_player_name(user: types.User) -> str:
+    if user.username:
+        return user.username
+    return user.first_name or "игрок"
+
+
+def build_welcome_text(user: types.User) -> str:
+    player_name = html.escape(get_player_name(user))
+    return (
+        f"Привет, <b>{player_name}</b>! 👋\n\n"
+        "ArrowReward – это увлекательная логическая головоломка, "
+        "которая награждает своих игроков. 🏆\n\n"
+        "Как играть: 🕹️\n"
+        "• Нажми на стрелку и она полетит;\n"
+        "• Избегай столкновений;\n"
+        "• Проходи уровни и соревнуйся с друзьями!\n\n"
+        "Получай монеты за игру. 💰\n"
+        "Поднимайся в топ и забирай призы. 🥇\n\n"
+        "Нажми кнопку ниже, чтобы начать! 👇"
+    )
+
+
 def build_start_keyboard(webapp_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text=f"Играть в {settings.APP_NAME}",
+                    text=f"Запустить {settings.APP_NAME}",
                     web_app=WebAppInfo(url=webapp_url),
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="Как играть",
-                    callback_data="help",
+                    text="ℹ️ Инфо",
+                    callback_data="info",
                 )
             ],
         ]
     )
 
 
-def build_help_keyboard() -> InlineKeyboardMarkup:
+def build_info_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="Играть",
-                    web_app=WebAppInfo(url=settings.WEBAPP_URL),
-                )
-            ],
             [
                 InlineKeyboardButton(
                     text="Назад",
@@ -96,59 +113,19 @@ async def cmd_start(message: types.Message):
     if start_param:
         webapp_url += f"?startapp={start_param}"
 
-    welcome_text = (
-        f"Привет, {message.from_user.first_name}!\n\n"
-        f"<b>{settings.APP_NAME}</b> — увлекательная логическая головоломка!\n\n"
-        f"<b>Как играть:</b>\n"
-        f"• Убирай стрелки в правильном порядке\n"
-        f"• Избегай столкновений\n"
-        f"• Используй спецстрелки мудро\n"
-        f"• Соревнуйся с друзьями!\n\n"
-        f"Зарабатывай монеты и открывай новые скины\n"
-        f"Поднимайся в топ лидерборда\n\n"
-        f"Нажми кнопку ниже, чтобы начать!"
-    )
-
-    if start_param:
-        welcome_text += "\n\nУ тебя есть реферальный бонус!"
-
     await message.answer(
-        welcome_text,
+        build_welcome_text(message.from_user),
         reply_markup=build_start_keyboard(webapp_url),
         parse_mode="HTML",
     )
 
 
-@dp.callback_query(lambda c: c.data == "help")
-async def process_help(callback: types.CallbackQuery):
-    """Обработчик кнопки 'Как играть'."""
-    help_text = (
-        f"<b>Как играть в {settings.APP_NAME}</b>\n\n"
-        "<b>Цель:</b>\n"
-        "Убрать все стрелки с поля\n\n"
-        "<b>Правила:</b>\n"
-        "• Стрелка улетает в направлении, куда смотрит\n"
-        "• Нельзя убирать стрелку, если на её пути есть другая\n"
-        "• У тебя есть 3 жизни\n"
-        "• За каждую ошибку теряешь 1 жизнь\n\n"
-        "<b>Спецстрелки:</b>\n"
-        "• Ледяная — сначала разморозить, потом убрать\n"
-        "• Жизнь+ — дарит дополнительную жизнь\n"
-        "• Жизнь- — отнимает 2 жизни при ошибке\n"
-        "• Бомба — взрывает соседние стрелки\n"
-        "• Молния — убирает случайную стрелку\n\n"
-        "<b>Звезды:</b>\n"
-        "3 — без ошибок\n"
-        "2 — 1 ошибка\n"
-        "1 — 2+ ошибки\n\n"
-        "<b>Подсказки:</b>\n"
-        "Используй кнопку подсказки, чтобы увидеть безопасную стрелку\n\n"
-        "Удачи!"
-    )
-
+@dp.callback_query(lambda c: c.data == "info")
+async def process_info(callback: types.CallbackQuery):
+    """Обработчик кнопки 'Инфо'."""
     await callback.message.edit_text(
-        help_text,
-        reply_markup=build_help_keyboard(),
+        "Обратная связь и поддержка:\n\n@ArrowRewardSupport",
+        reply_markup=build_info_keyboard(),
         parse_mode="HTML",
     )
     await callback.answer()
@@ -157,14 +134,8 @@ async def process_help(callback: types.CallbackQuery):
 @dp.callback_query(lambda c: c.data == "back_to_start")
 async def process_back(callback: types.CallbackQuery):
     """Возврат к стартовому сообщению."""
-    welcome_text = (
-        f"Привет, {callback.from_user.first_name}!\n\n"
-        f"<b>{settings.APP_NAME}</b> — увлекательная логическая головоломка!\n\n"
-        f"Нажми кнопку ниже, чтобы начать!"
-    )
-
     await callback.message.edit_text(
-        welcome_text,
+        build_welcome_text(callback.from_user),
         reply_markup=build_start_keyboard(settings.WEBAPP_URL),
         parse_mode="HTML",
     )

@@ -8,6 +8,7 @@ import { socialApi } from '../api/client';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { StarParticles } from '../components/ui/StarParticles';
 import { useParticleRuntimeProfile } from '../components/ui/particleRuntimeProfile';
+import { useCountdown } from '../hooks/useCountdown';
 
 // --- ХЕЛПЕРЫ ДЛЯ TELEGRAM ---
 const triggerHaptic = (style: 'light' | 'medium' | 'heavy' | 'selection') => {
@@ -515,6 +516,7 @@ export function LeaderboardScreen() {
   const [myScore, setMyScore] = useState<number | null>(null);
   const [myInTop, setMyInTop] = useState(false);
   const [totalParticipants, setTotalParticipants] = useState(0);
+  const [seasonEndsAt, setSeasonEndsAt] = useState<string | null>(null);
   
   const { user, screen } = useAppStore();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -528,11 +530,16 @@ export function LeaderboardScreen() {
   const stickyBottomPx = bottomNavHeight + CARD_GAP_PX;
   const shouldAnimateListEnter = listRenderVersion > 0;
 
+  // Подключаем таймер (по умолчанию будет 1 апреля 2026, пока бэк не отдаст реальное)
+  const { days, hours, minutes, isFinished } = useCountdown(seasonEndsAt);
+
   const applyLeaderboardMeta = useCallback((data: Awaited<ReturnType<typeof socialApi.getLeaderboard>>) => {
     setMyPosition(data.myPosition);
     setMyScore(data.myScore);
     setMyInTop(data.myInTop);
     setTotalParticipants(data.totalParticipants);
+    // Берем с бэкенда или используем фоллбэк дату
+    setSeasonEndsAt((data as any).seasonEndsAt || '2026-04-01T00:00:00Z');
   }, []);
 
   const resetLeaderboardMeta = useCallback(() => {
@@ -540,6 +547,7 @@ export function LeaderboardScreen() {
     setMyScore(null);
     setMyInTop(false);
     setTotalParticipants(0);
+    setSeasonEndsAt(null);
   }, []);
 
   // --- API FETCHING ---
@@ -776,10 +784,25 @@ export function LeaderboardScreen() {
 
         <Trophy size={56} className="mx-auto text-yellow-400 mb-2 drop-shadow-glow relative z-10" />
         <h2 className="text-3xl font-black text-white uppercase tracking-wide drop-shadow-md relative z-10">Сезон #1</h2>
-        <div className="inline-flex items-center gap-2 mt-2 bg-black/30 px-3 py-1 rounded-full border border-white/10 relative z-10">
-          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-          <p className="text-yellow-200/80 text-xs font-mono">14д 08ч 15м</p>
-        </div>
+        
+        {/* ДИНАМИЧЕСКИЙ ТАЙМЕР */}
+        {seasonEndsAt && (
+          <div className="inline-flex items-center gap-2 mt-2 bg-black/40 backdrop-blur-md px-4 py-1.5 rounded-full border border-yellow-500/20 relative z-10 shadow-inner">
+            {!isFinished ? (
+              <>
+                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]"></div>
+                <p className="text-yellow-200/90 text-sm font-mono font-medium tracking-wide">
+                  {days}д {hours.toString().padStart(2, '0')}ч {minutes.toString().padStart(2, '0')}м
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_#ef4444]"></div>
+                <p className="text-red-300/90 text-sm font-mono font-medium tracking-wide">Сезон завершен</p>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* List Container */}

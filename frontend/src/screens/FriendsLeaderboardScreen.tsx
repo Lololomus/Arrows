@@ -8,6 +8,7 @@ import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { StarParticles } from '../components/ui/StarParticles';
 import { useParticleRuntimeProfile } from '../components/ui/particleRuntimeProfile';
 import { useReferral } from '../hooks/hooks';
+import { useCountdown } from '../hooks/useCountdown';
 import type { ReferralLeaderboardEntry } from '../game/types';
 
 // --- ХЕЛПЕРЫ ДЛЯ TELEGRAM ---
@@ -178,27 +179,43 @@ const ReferralInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose:
               </h3>
               
               <div className="space-y-4 text-left">
-                <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
-                  <p className="text-white/90 font-medium text-sm leading-relaxed">
-                    Зови друзей и поднимайся в топе.
-                  </p>
+                {/* БЛОК С ПРИЗАМИ */}
+                <div className="bg-gradient-to-br from-cyan-900/40 to-blue-900/20 rounded-2xl p-4 border border-cyan-500/30 shadow-lg">
+                  <h4 className="text-cyan-400 font-bold text-base mb-3 text-center uppercase tracking-wider drop-shadow-sm">Призовой фонд</h4>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between bg-black/20 rounded-xl p-3 border border-yellow-500/30">
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl drop-shadow-md">🥇</span>
+                        <span className="text-white font-medium">1 место</span>
+                      </div>
+                      <span className="text-yellow-400 font-black text-lg drop-shadow-glow">150 $</span>
+                    </div>
+                    <div className="flex items-center justify-between bg-black/20 rounded-xl p-3 border border-gray-400/30">
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl drop-shadow-md">🥈</span>
+                        <span className="text-white font-medium">2 место</span>
+                      </div>
+                      <span className="text-gray-300 font-black text-lg">100 $</span>
+                    </div>
+                    <div className="flex items-center justify-between bg-black/20 rounded-xl p-3 border border-orange-500/30">
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl drop-shadow-md">🥉</span>
+                        <span className="text-white font-medium">3 место</span>
+                      </div>
+                      <span className="text-orange-400 font-black text-lg">50 $</span>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+                <div className="bg-white/5 rounded-2xl p-4 border border-white/5 mt-4">
                   <p className="text-white/90 font-medium text-sm leading-relaxed">
-                    Приглашенным пользователем считается игрок, достигший <span className="text-cyan-400 font-bold">50-го уровня</span> в режиме Arcade.
-                  </p>
-                </div>
-
-                <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
-                  <p className="text-white/90 font-medium text-sm leading-relaxed">
-                    По завершении сезона игроки, пригласившие <span className="text-cyan-400 font-bold">наибольшее количество активных пользователей</span>, получат награды.
+                    Зови друзей и поднимайся в топе. Приглашенным пользователем считается игрок, достигший <span className="text-cyan-400 font-bold">50-го уровня</span> в режиме Arcade.
                   </p>
                 </div>
                 
                 <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
                   <p className="text-white/90 font-medium text-sm leading-relaxed">
-                    Также <span className="text-cyan-400 font-bold">5 случайных пользователей</span>, попавших в топ-1000 получат призы.
+                    Также <span className="text-cyan-400 font-bold">5 случайных пользователей</span>, попавших в топ-1000, получат утешительные призы.
                   </p>
                 </div>
               </div>
@@ -478,6 +495,9 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   
+  // Добавляем состояние для таймера (по умолчанию 1 мая 2026, пока бэк не отдает реальное время)
+  const [seasonEndsAt, setSeasonEndsAt] = useState<string | null>('2026-05-01T00:00:00Z');
+  
   const { user } = useAppStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentUserRowRef = useRef<HTMLDivElement>(null);
@@ -492,6 +512,9 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
     fetchReferralLeaderboard,
   } = useReferral();
 
+  // Подключаем таймер
+  const { days, hours, minutes, isFinished } = useCountdown(seasonEndsAt);
+
   // Маппим API данные → UI формат
   const leaderboard = useMemo(() => mapApiToPlayers(apiLeaders), [apiLeaders]);
 
@@ -503,6 +526,8 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
     const startedAt = performance.now();
     void (async () => {
       await fetchReferralLeaderboard(100);
+      // В будущем, когда хук useReferral будет возвращать дату окончания сезона:
+      // setSeasonEndsAt(apiLeadersData.seasonEndsAt) 
     })();
   }, [fetchReferralLeaderboard]);
 
@@ -632,10 +657,25 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
 
         <Trophy size={56} className="mx-auto text-cyan-400 mb-2 drop-shadow-glow relative z-10" />
         <h2 className="text-3xl font-black text-white uppercase tracking-wide drop-shadow-md relative z-10">Топ рефоводов</h2>
-        <div className="inline-flex items-center gap-2 mt-2 bg-black/30 px-3 py-1 rounded-full border border-white/10 relative z-10">
-          <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></div>
-          <p className="text-cyan-200/80 text-xs font-mono">Сезон 1</p>
-        </div>
+        
+        {/* ДИНАМИЧЕСКИЙ ТАЙМЕР В СТИЛЕ CYAN */}
+        {seasonEndsAt && (
+          <div className="inline-flex items-center gap-2 mt-2 bg-black/40 backdrop-blur-md px-4 py-1.5 rounded-full border border-cyan-500/20 relative z-10 shadow-inner">
+            {!isFinished ? (
+              <>
+                <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_#22d3ee]"></div>
+                <p className="text-cyan-200/90 text-sm font-mono font-medium tracking-wide">
+                  {days}д {hours.toString().padStart(2, '0')}ч {minutes.toString().padStart(2, '0')}м
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_#ef4444]"></div>
+                <p className="text-red-300/90 text-sm font-mono font-medium tracking-wide">Сезон завершен</p>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* List Container */}
