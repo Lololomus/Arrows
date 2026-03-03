@@ -5,42 +5,46 @@
  * - DefeatFX (красное дыхание + пепел + vignette)
  * - HeartCrack иконка с glow (ОПТИМИЗИРОВАНО: радиальный градиент вместо blur)
  * - Плашка «Уровень N — ПРОВАЛЕН»
- * - CTA «Revive» (через рекламу) + «Повторить» + ghost «В меню»
+ * - CTA «Воскреснуть» (из баланса) или «Смотреть рекламу» (1×/уровень) + «Повторить» + ghost «В меню»
  */
 
 import { motion } from 'framer-motion';
-import { RefreshCcw, Play, Heart } from 'lucide-react';
+import { Heart, RefreshCcw, Play, Tv2 } from 'lucide-react';
 
 import { DefeatFX } from './DefeatFX';
 import { DEFEAT_CONFIG } from './difficultyConfig';
 
 interface DefeatScreenProps {
   level: number;
-  reviveAvailable: boolean;
+  balanceReviveAvailable: boolean;
+  balanceReviveCount: number;
+  adReviveAvailable: boolean;
   reviveLoading?: boolean;
   reviveMessage?: string | null;
   revivePending?: boolean;
-  reviveRemaining?: number | null;
-  reviveLimit?: number | null;
-  onRevive: () => void;
+  onBalanceRevive: () => void;
+  onAdRevive: () => void;
   onRetry: () => void;
   onMenu: () => void;
 }
 
 export function DefeatScreen({
   level,
-  reviveAvailable,
+  balanceReviveAvailable,
+  balanceReviveCount,
+  adReviveAvailable,
   reviveLoading,
   reviveMessage,
   revivePending,
-  reviveRemaining,
-  reviveLimit,
-  onRevive,
+  onBalanceRevive,
+  onAdRevive,
   onRetry,
   onMenu,
 }: DefeatScreenProps) {
   const cfg = DEFEAT_CONFIG;
   const IconComponent = cfg.icon;
+
+  const isReviveLoading = reviveLoading || revivePending;
 
   return (
     <motion.div
@@ -120,32 +124,39 @@ export function DefeatScreen({
           transition={{ delay: 0.6, duration: 0.5 }}
           className="w-full flex flex-col items-center gap-4 px-2 mt-8"
         >
-          {reviveLimit != null && reviveRemaining != null && (
-            <p className="text-sm font-semibold text-white/65">
-              Осталось воскрешений: {reviveRemaining}/{reviveLimit}
-            </p>
+          {/* Воскрешение из баланса (приоритетное) */}
+          {balanceReviveAvailable && (
+            <motion.button
+              whileTap={{ scale: 0.96 }}
+              onClick={onBalanceRevive}
+              disabled={isReviveLoading}
+              className="w-full py-5 rounded-[20px] bg-gradient-to-b from-emerald-400 to-emerald-600 text-white font-black text-xl uppercase tracking-widest hover:brightness-110 transition-all border border-emerald-300/30 shadow-xl flex items-center justify-center gap-3 disabled:opacity-50"
+            >
+              <Heart size={22} fill="currentColor" />
+              {isReviveLoading ? 'Воскрешаем...' : `Воскреснуть (${balanceReviveCount})`}
+            </motion.button>
           )}
 
-          {/* Revive через рекламу */}
-          {reviveAvailable && (
+          {/* Воскрешение через рекламу (если нет баланса, 1× за уровень) */}
+          {!balanceReviveAvailable && adReviveAvailable && (
             <>
               <motion.button
                 whileTap={{ scale: 0.96 }}
-                onClick={onRevive}
-                disabled={reviveLoading || revivePending}
+                onClick={onAdRevive}
+                disabled={isReviveLoading}
                 className="w-full py-5 rounded-[20px] bg-gradient-to-b from-emerald-500 to-emerald-700 text-white font-black text-xl uppercase tracking-widest hover:brightness-110 transition-all border border-emerald-400/30 shadow-xl flex items-center justify-center gap-3 disabled:opacity-50"
               >
-                <Heart size={22} fill="currentColor" />
-                {reviveLoading ? 'Загрузка...' : revivePending ? 'Проверить награду' : 'Продолжить'}
-                {!reviveLoading && <Play size={16} className="opacity-70" />}
+                <Tv2 size={22} />
+                {isReviveLoading ? 'Загрузка...' : revivePending ? 'Проверить награду' : 'Смотреть рекламу'}
+                {!isReviveLoading && <Play size={16} className="opacity-70" />}
               </motion.button>
-              {reviveMessage && (
-                <p className="text-center text-sm font-medium text-white/75">{reviveMessage}</p>
-              )}
+              <p className="text-xs font-medium text-white/50 -mt-2">
+                Бесплатное воскрешение — 1 раз за уровень
+              </p>
             </>
           )}
 
-          {!reviveAvailable && reviveMessage && (
+          {reviveMessage && (
             <p className="text-center text-sm font-medium text-white/75">{reviveMessage}</p>
           )}
 

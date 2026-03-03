@@ -42,26 +42,45 @@ function LivesDisplay({
   const prevLevelRef = useRef(currentLevel);
   const prevLifeHitTickRef = useRef(lifeHitTick);
   const [isHit, setIsHit] = useState(false);
+  const hitTimerRef = useRef<number | null>(null);
+
+  const clearHitTimer = () => {
+    if (hitTimerRef.current != null) {
+      window.clearTimeout(hitTimerRef.current);
+      hitTimerRef.current = null;
+    }
+  };
+
+  const triggerHit = () => {
+    clearHitTimer();
+    setIsHit(true);
+    hitTimerRef.current = window.setTimeout(() => {
+      setIsHit(false);
+      hitTimerRef.current = null;
+    }, 600);
+  };
 
   useEffect(() => {
     if (currentLevel !== prevLevelRef.current) {
       prevLevelRef.current = currentLevel;
       prevLivesRef.current = lives;
       prevLifeHitTickRef.current = lifeHitTick;
+      clearHitTimer();
       setIsHit(false);
       return;
     }
 
-    if (lifeHitTick !== prevLifeHitTickRef.current) {
-      prevLifeHitTickRef.current = lifeHitTick;
-      setIsHit(true);
-      const timer = setTimeout(() => setIsHit(false), 600);
-      prevLivesRef.current = lives;
-      return () => clearTimeout(timer);
-    }
-
+    const prevLives = prevLivesRef.current;
     prevLivesRef.current = lives;
+    prevLifeHitTickRef.current = lifeHitTick;
+
+    if (lives < prevLives) {
+      triggerHit();
+      return;
+    }
   }, [currentLevel, lifeHitTick, lives]);
+
+  useEffect(() => clearHitTimer, []);
 
   const isCritical = lives <= 1;
 
@@ -72,7 +91,7 @@ function LivesDisplay({
       : 'text-white';
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2.5">
       <motion.div
         initial={false}
         animate={
@@ -85,13 +104,17 @@ function LivesDisplay({
             ? { duration: 0.5, ease: 'easeOut' }
             : { duration: 0.15 }
         }
-        className="flex items-center"
+        className="relative flex items-center justify-center"
       >
+        <span
+          aria-hidden="true"
+          className="absolute -inset-1 rounded-full bg-red-500/35 blur-md"
+        />
         <Heart
-          size={18}
+          size={22}
           fill="#ef4444"
           stroke="none"
-          className="drop-shadow-[0_0_6px_rgba(239,68,68,0.7)]"
+          className="relative"
         />
       </motion.div>
 
@@ -99,7 +122,7 @@ function LivesDisplay({
         initial={false}
         animate={isHit ? { scale: [1, 1.25, 1] } : { scale: 1 }}
         transition={isHit ? { duration: 0.35, ease: 'easeOut' } : { duration: 0.15 }}
-        className={`text-base font-bold tabular-nums leading-none ${numberColor}`}
+        className={`text-xl font-bold tabular-nums leading-none ${numberColor}`}
       >
         ×{lives}
       </motion.span>

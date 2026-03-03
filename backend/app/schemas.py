@@ -48,6 +48,7 @@ class UserResponse(BaseModel):
     total_stars: int
     coins: int
     hint_balance: int
+    revive_balance: int
     energy: int
     is_premium: bool
     active_arrow_skin: str
@@ -185,6 +186,7 @@ class PurchaseResponse(BaseModel):
     success: bool
     coins: Optional[int] = None
     hint_balance: Optional[int] = None
+    revive_balance: Optional[int] = None
     error: Optional[str] = None
 
 

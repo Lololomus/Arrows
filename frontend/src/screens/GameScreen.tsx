@@ -19,12 +19,9 @@ import { useAppStore, useGameStore } from '../stores/store';
 import { useRewardStore } from '../stores/rewardStore';
 import { CanvasBoard } from '../components/CanvasBoard';
 import { adsApi, gameApi, sendAuthorizedKeepalive, type CompleteAndNextResponse } from '../api/client';
-import { isValidInterstitialBlockId, isValidRewardedBlockId, showInterstitialAd } from '../services/adsgram';
-import {
-  getRewardedFlowMessage,
-  runRewardedFlow,
-} from '../services/rewardedAds';
-import { clearPendingRewardIntent, rememberPendingRewardIntent } from '../services/rewardReconciler';
+import { isValidInterstitialBlockId, isValidRewardedBlockId, showInterstitialAd, showRewardedAd } from '../services/adsgram';
+import { getRewardedFlowMessage } from '../services/rewardedAds';
+import { clearPendingRewardIntent } from '../services/rewardReconciler';
 import {
   API_ENDPOINTS,
   MAX_CELL_SIZE,
@@ -310,6 +307,7 @@ export function GameScreen() {
   const lives = useGameStore(s => s.lives);
   const status = useGameStore(s => s.status);
   const hintBalance = useAppStore(s => s.user?.hintBalance ?? 0);
+  const reviveBalance = useAppStore(s => s.user?.reviveBalance ?? 0);
   const hintedArrowId = useGameStore(s => s.hintedArrowId);
   const removedArrowIds = useGameStore(s => s.removedArrowIds);
   const levelStartTime = useGameStore(s => s.startTime);
@@ -386,8 +384,11 @@ export function GameScreen() {
   const [reviveMessage, setReviveMessage] = useState<string | null>(null);
   const [pendingReviveIntentId, setPendingReviveIntentId] = useState<string | null>(null);
   const [reviveQuota, setReviveQuota] = useState<ReviveStatusResponse | null>(null);
+  const [adReviveUsedThisLevel, setAdReviveUsedThisLevel] = useState(false);
   const revivePending = pendingReviveIntentId !== null || trackedReviveIntent !== null;
-  const reviveAvailable = currentLevel >= ADS_FIRST_ELIGIBLE_LEVEL
+  const balanceReviveAvailable = reviveBalance > 0;
+  const adReviveAvailable = !adReviveUsedThisLevel
+    && currentLevel >= ADS_FIRST_ELIGIBLE_LEVEL
     && ADS_ENABLED
     && isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardRevive)
     && (revivePending || reviveQuota === null || reviveQuota.remaining > 0);
@@ -697,6 +698,7 @@ export function GameScreen() {
     setReviveMessage(null);
     setPendingReviveIntentId(null);
     setReviveQuota(null);
+    setAdReviveUsedThisLevel(false);
     reviveOpportunityIdRef.current = createClientId();
 
     const prefetched = prefetchedNextLevelRef.current;
@@ -1325,94 +1327,59 @@ export function GameScreen() {
   }, [reloadCurrentLevel]);
   const confirmMenu = useCallback(() => { setConfirmAction(null); setScreen('home'); }, [setScreen]);
 
-  // === REVIVE через рекламу ===
-  const handleRevive = useCallback(async () => {
-    if (reviveLoading || pendingReviveIntentId) return;
+  // === REVIVE из баланса (мгновенное) ===
+  const handleBalanceRevive = useCallback(async () => {
+    if (reviveLoading) return;
     setReviveLoading(true);
     setReviveMessage(null);
     try {
-      const result = await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardRevive, {
+      const result = await gameApi.consumeRevive();
+      if (result.success) {
+        useAppStore.getState().updateUser({ reviveBalance: result.revive_balance });
+        useGameStore.getState().revivePlayer();
+      } else {
+        setReviveMessage('Не удалось использовать воскрешение. Попробуйте ещё раз.');
+      }
+    } catch {
+      setReviveMessage('Не удалось связаться с сервером. Попробуйте ещё раз.');
+    } finally {
+      setReviveLoading(false);
+    }
+  }, [reviveLoading]);
+
+  // === REVIVE через рекламу (мгновенное применение после просмотра) ===
+  const handleRevive = useCallback(async () => {
+    if (reviveLoading || adReviveUsedThisLevel || pendingReviveIntentId) return;
+    setReviveLoading(true);
+    setReviveMessage(null);
+    try {
+      const intent = await adsApi.createRewardIntent({
         placement: 'reward_revive',
         level: currentLevel,
         sessionId: reviveOpportunityIdRef.current,
       });
-      if (result.outcome === 'granted') {
+      const adResult = await showRewardedAd(ADSGRAM_BLOCK_IDS.rewardRevive);
+      if (adResult.success) {
+        // Воскрешаем СРАЗУ после просмотра, не ждём подтверждения сервера
+        setAdReviveUsedThisLevel(true);
         useGameStore.getState().revivePlayer();
-        setPendingReviveIntentId(null);
-        clearPendingRewardIntent('reward_revive', result.intentId ?? undefined);
-        setReviveMessage(null);
-        if (!applyReviveQuotaFromStatus(result.status)) {
-          await loadReviveStatus(currentLevel);
-        }
-        return;
-      }
-      if (result.outcome === 'timeout') {
-        setPendingReviveIntentId(result.intentId);
-        rememberPendingRewardIntent({
-          intentId: result.intentId!,
-          placement: 'reward_revive',
-          level: currentLevel,
-          sessionId: reviveOpportunityIdRef.current,
+        // Подтверждаем в фоне (fire-and-forget)
+        void adsApi.clientCompleteRewardIntent(intent.intentId).then((s) => {
+          applyReviveQuotaFromStatus(s);
+        }).catch(() => {
+          void loadReviveStatus(currentLevel);
         });
-        setReviveMessage(getRewardedFlowMessage('reward_revive', result));
         return;
       }
-
-      if (result.outcome === 'provider_error' && result.intentId) {
-        setPendingReviveIntentId(result.intentId);
-        rememberPendingRewardIntent({
-          intentId: result.intentId,
-          placement: 'reward_revive',
-          level: currentLevel,
-          sessionId: reviveOpportunityIdRef.current,
-        });
-        setReviveMessage('Подтверждение продолжения задерживается. Если просмотр подтвердится, продолжение станет доступно автоматически.');
-        return;
-      }
-
-      if (result.outcome === 'unavailable' || result.outcome === 'not_completed') {
-        setPendingReviveIntentId(null);
-        setReviveMessage(getRewardedFlowMessage('reward_revive', result));
-        return;
-      }
-      if (result.outcome === 'error') {
-        if (result.intentId) {
-          setPendingReviveIntentId(result.intentId);
-          rememberPendingRewardIntent({
-            intentId: result.intentId,
-            placement: 'reward_revive',
-            level: currentLevel,
-            sessionId: reviveOpportunityIdRef.current,
-          });
-          setReviveMessage('Подтверждение продолжения задерживается. Если просмотр подтвердится, продолжение станет доступно автоматически.');
-        } else {
-          setReviveMessage(getRewardedFlowMessage('reward_revive', result));
-        }
-        return;
-      }
-      setPendingReviveIntentId(null);
-      clearPendingRewardIntent('reward_revive', result.intentId ?? undefined);
-      if (result.failureCode === 'REVIVE_ALREADY_USED' && useGameStore.getState().status === 'defeat') {
-        useGameStore.getState().revivePlayer();
-        setReviveMessage(null);
-        if (!applyReviveQuotaFromStatus(result.status)) {
-          await loadReviveStatus(currentLevel);
-        }
-        return;
-      }
-      if (result.failureCode === 'REVIVE_LIMIT_REACHED'
-        || result.failureCode === 'INTENT_EXPIRED'
-        || result.failureCode === 'INTENT_SUPERSEDED') {
-        await loadReviveStatus(currentLevel);
-      }
-      setReviveMessage(getRewardedFlowMessage('reward_revive', result));
+      // Реклама не досмотрена — отменяем intent
+      void adsApi.cancelRewardIntent(intent.intentId).catch(() => {});
+      setReviveMessage(getRewardedFlowMessage('reward_revive', { outcome: 'not_completed' }));
     } catch {
-      setPendingReviveIntentId(null);
-      setReviveMessage('Не удалось связаться с сервером. Попробуйте еще раз.');
+      setReviveMessage('Не удалось связаться с сервером. Попробуйте ещё раз.');
     } finally {
       setReviveLoading(false);
     }
-  }, [applyReviveQuotaFromStatus, currentLevel, loadReviveStatus, pendingReviveIntentId, reviveLoading]);
+  }, [adReviveUsedThisLevel, applyReviveQuotaFromStatus, currentLevel, loadReviveStatus, pendingReviveIntentId, reviveLoading]);
 
   const handleNextLevel = useCallback(() => {
     if (status !== 'victory' || noMoreLevels) return;
@@ -1560,6 +1527,20 @@ export function GameScreen() {
               renderProfile={renderProfile}
             />
           )}
+
+          {/* ===== FX слой под HUD (fly-out) ===== */}
+          {renderProfile.enableFxOverlay && (
+            <FXOverlay
+              containerRef={containerRef}
+              gridSize={gridSize}
+              cellSize={baseCellSize}
+              springX={cameraX}
+              springY={cameraY}
+              springScale={cameraScale}
+              active={true}
+              renderProfile={renderProfile}
+            />
+          )}
         </div>
       </GameHUD>
       <ErrorVignette />
@@ -1581,19 +1562,6 @@ export function GameScreen() {
       )}
 
       {/* ===== СЛОЙ ЭФФЕКТОВ (fly-out) ===== */}
-      {renderProfile.enableFxOverlay && (
-        <FXOverlay
-          containerRef={containerRef}
-          gridSize={gridSize}
-          cellSize={baseCellSize}
-          springX={cameraX}
-          springY={cameraY}
-          springScale={cameraScale}
-          active={true}
-          renderProfile={renderProfile}
-        />
-      )}
-
       <GameMenuModal
         action={confirmAction}
         onCancel={() => setConfirmAction(null)}
@@ -1624,13 +1592,14 @@ export function GameScreen() {
         nextButtonState={nextButtonState}
         pendingAction={pendingVictoryAction}
         nextButtonError={saveError}
-        reviveAvailable={reviveAvailable}
+        balanceReviveAvailable={balanceReviveAvailable}
+        balanceReviveCount={reviveBalance}
+        adReviveAvailable={adReviveAvailable}
         reviveLoading={reviveLoading}
         reviveMessage={reviveMessage}
         revivePending={revivePending}
-        reviveRemaining={reviveQuota?.remaining ?? null}
-        reviveLimit={reviveQuota?.limit ?? null}
-        onRevive={handleRevive}
+        onBalanceRevive={handleBalanceRevive}
+        onAdRevive={handleRevive}
         onNextLevel={handleNextLevel}
         onVictoryRetry={handleVictoryRetry}
         onDefeatRetry={confirmRestart}

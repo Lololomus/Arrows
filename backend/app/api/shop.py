@@ -38,7 +38,7 @@ ARROW_SKINS = [
     {"id": "cyber", "name": "Киберпанк", "price_ton": 2.0, "preview": "🤖"},
 ]
 
-BETA_VISIBLE_BOOST_IDS = {"hints_3", "hints_10"}
+BETA_VISIBLE_BOOST_IDS = {"hints_3", "hints_10", "revive_1", "revive_3"}
 
 # Темы оформления
 THEMES = [
@@ -55,6 +55,8 @@ THEMES = [
 BOOSTS = [
     {"id": "hints_3", "name": "+3 подсказки", "price_coins": 50, "preview": "💡"},
     {"id": "hints_10", "name": "+10 подсказок", "price_coins": 150, "preview": "💡"},
+    {"id": "revive_1", "name": "+1 воскрешение", "price_coins": 100, "preview": "💚"},
+    {"id": "revive_3", "name": "+3 воскрешения", "price_coins": 250, "preview": "💚"},
     {"id": "life_1", "name": "+1 жизнь", "price_coins": 100, "preview": "❤️"},
     {"id": "energy_5", "name": "+5 энергии", "price_stars": 20, "preview": "⚡"},
     {"id": "energy_full", "name": "Полная энергия", "price_stars": 40, "preview": "⚡"},
@@ -192,6 +194,7 @@ async def purchase_item(
         success=True,
         coins=user.coins,
         hint_balance=user.hint_balance,
+        revive_balance=user.revive_balance,
     )
 
 
@@ -311,6 +314,10 @@ async def apply_boost(user: User, boost_id: str, db: AsyncSession):
         user.hint_balance += 3
     elif boost_id == "hints_10":
         user.hint_balance += 10
+    elif boost_id == "revive_1":
+        user.revive_balance += 1
+    elif boost_id == "revive_3":
+        user.revive_balance += 3
     elif boost_id == "life_1":
         pass  # lives client-side only
     elif boost_id == "energy_5":

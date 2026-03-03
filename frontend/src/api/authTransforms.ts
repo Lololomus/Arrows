@@ -15,6 +15,8 @@ export interface RawUserResponse {
   coins?: number;
   hint_balance?: number;
   hintBalance?: number;
+  revive_balance?: number;
+  reviveBalance?: number;
   energy?: number;
   energy_updated_at?: string;
   energyUpdatedAt?: string;
@@ -46,6 +48,7 @@ export function normalizeUserResponse(raw: RawUserResponse): User {
     totalStars: raw.totalStars ?? raw.total_stars ?? 0,
     coins: raw.coins ?? 0,
     hintBalance: raw.hintBalance ?? raw.hint_balance ?? 5,
+    reviveBalance: raw.reviveBalance ?? raw.revive_balance ?? 0,
     energy: raw.energy ?? 0,
     energyUpdatedAt: raw.energyUpdatedAt ?? raw.energy_updated_at ?? '',
     activeArrowSkin: raw.activeArrowSkin ?? raw.active_arrow_skin ?? 'default',

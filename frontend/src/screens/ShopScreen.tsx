@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Coins, Lightbulb, RefreshCcw, ShoppingBag } from 'lucide-react';
+import { Coins, Heart, Lightbulb, RefreshCcw, ShoppingBag } from 'lucide-react';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { CoinStashCard } from '../components/ui/CoinStashCard';
 import { shopApi } from '../api/client';
 import { useAppStore } from '../stores/store';
 import type { ShopItem } from '../game/types';
 
-const BETA_ITEM_COPY: Record<string, { title: string; description: string }> = {
+const BETA_ITEM_COPY: Record<string, { title: string; description: string; isRevive?: boolean }> = {
   hints_3: {
     title: '+3 подсказки',
     description: 'Быстрый набор для сложных уровней. Подсказки сохраняются в общем балансе.',
@@ -16,10 +16,24 @@ const BETA_ITEM_COPY: Record<string, { title: string; description: string }> = {
     title: '+10 подсказок',
     description: 'Выгодный запас на серию уровней. Баланс обновляется сразу после покупки.',
   },
+  revive_1: {
+    title: '+1 воскрешение',
+    description: 'Воскреснуть на том же месте с +1 жизнью. Применяется мгновенно при смерти.',
+    isRevive: true,
+  },
+  revive_3: {
+    title: '+3 воскрешения',
+    description: 'Запас воскрешений для сложной серии уровней. Выгоднее поштучно.',
+    isRevive: true,
+  },
 };
 
+const REVIVE_IDS = new Set(['revive_1', 'revive_3']);
+
 function normalizeBoosts(items: ShopItem[]): ShopItem[] {
-  return items.filter((item) => item.id === 'hints_3' || item.id === 'hints_10');
+  return items.filter(
+    (item) => item.id === 'hints_3' || item.id === 'hints_10' || REVIVE_IDS.has(item.id),
+  );
 }
 
 export function ShopScreen() {
@@ -53,6 +67,7 @@ export function ShopScreen() {
 
   const coinBalance = user?.coins ?? 0;
   const hintBalance = user?.hintBalance ?? 0;
+  const reviveBalance = user?.reviveBalance ?? 0;
 
   const sortedItems = useMemo(() => {
     return [...items].sort((a, b) => (a.priceCoins ?? 0) - (b.priceCoins ?? 0));
@@ -74,13 +89,14 @@ export function ShopScreen() {
       updateUser({
         coins: result.coins,
         hintBalance: result.hintBalance ?? hintBalance,
+        reviveBalance: result.reviveBalance ?? reviveBalance,
       });
     } catch {
       setPurchaseError('Покупка не удалась');
     } finally {
       setPurchasingId(null);
     }
-  }, [coinBalance, hintBalance, purchasingId, updateUser]);
+  }, [coinBalance, hintBalance, reviveBalance, purchasingId, updateUser]);
 
   return (
     <div className="relative h-full overflow-hidden px-4 pb-nav pt-6">
@@ -106,15 +122,24 @@ export function ShopScreen() {
               </div>
               <h1 className="text-3xl font-black tracking-tight text-white">Beta Shop</h1>
               <p className="mt-2 max-w-sm text-sm text-white/60">
-                Пока доступна только покупка подсказок за монеты. Всё остальное скрыто до следующей итерации.
+                Подсказки и воскрешения за монеты. Воскрешение восстанавливает игру там, где вы остановились.
               </p>
             </div>
 
-            <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-right">
-              <div className="text-xs font-bold uppercase tracking-[0.18em] text-amber-200/70">Подсказки</div>
-              <div className="mt-1 flex items-center justify-end gap-2 text-2xl font-black text-white">
-                <Lightbulb size={20} className="text-amber-300" />
-                {hintBalance}
+            <div className="flex flex-col gap-2">
+              <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-right">
+                <div className="text-xs font-bold uppercase tracking-[0.18em] text-amber-200/70">Подсказки</div>
+                <div className="mt-1 flex items-center justify-end gap-2 text-2xl font-black text-white">
+                  <Lightbulb size={20} className="text-amber-300" />
+                  {hintBalance}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-right">
+                <div className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-200/70">Ревайвы</div>
+                <div className="mt-1 flex items-center justify-end gap-2 text-2xl font-black text-white">
+                  <Heart size={20} className="text-emerald-400" />
+                  {reviveBalance}
+                </div>
               </div>
             </div>
           </div>
@@ -164,6 +189,7 @@ export function ShopScreen() {
                   title: item.name,
                   description: 'Покупка за монеты.',
                 };
+                const isRevive = REVIVE_IDS.has(item.id);
 
                 return (
                   <motion.div
@@ -171,11 +197,17 @@ export function ShopScreen() {
                     initial={{ opacity: 0, y: 14 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: index * 0.06 }}
-                    className="rounded-3xl border border-white/10 bg-[#111526]/75 p-5 backdrop-blur-xl shadow-[0_18px_50px_rgba(0,0,0,0.35)]"
+                    className={`rounded-3xl border bg-[#111526]/75 p-5 backdrop-blur-xl shadow-[0_18px_50px_rgba(0,0,0,0.35)] ${
+                      isRevive ? 'border-emerald-500/20' : 'border-white/10'
+                    }`}
                   >
                     <div className="flex items-start gap-4">
-                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400/20 to-orange-500/20 text-amber-300 ring-1 ring-amber-300/20">
-                        <Lightbulb size={24} />
+                      <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ring-1 ${
+                        isRevive
+                          ? 'bg-gradient-to-br from-emerald-400/20 to-green-600/20 text-emerald-400 ring-emerald-400/20'
+                          : 'bg-gradient-to-br from-amber-400/20 to-orange-500/20 text-amber-300 ring-amber-300/20'
+                      }`}>
+                        {isRevive ? <Heart size={24} /> : <Lightbulb size={24} />}
                       </div>
 
                       <div className="min-w-0 flex-1">
@@ -185,10 +217,16 @@ export function ShopScreen() {
                             <p className="mt-1 text-sm text-white/60">{copy.description}</p>
                           </div>
 
-                          <div className="rounded-2xl border border-yellow-400/20 bg-yellow-500/10 px-3 py-2 text-right">
-                            <div className="text-xs font-bold uppercase tracking-[0.16em] text-yellow-200/70">Цена</div>
+                          <div className={`rounded-2xl border px-3 py-2 text-right ${
+                            isRevive
+                              ? 'border-emerald-400/20 bg-emerald-500/10'
+                              : 'border-yellow-400/20 bg-yellow-500/10'
+                          }`}>
+                            <div className={`text-xs font-bold uppercase tracking-[0.16em] ${
+                              isRevive ? 'text-emerald-200/70' : 'text-yellow-200/70'
+                            }`}>Цена</div>
                             <div className="mt-1 flex items-center gap-1 text-xl font-black text-white">
-                              <Coins size={16} className="text-yellow-300" />
+                              <Coins size={16} className={isRevive ? 'text-emerald-300' : 'text-yellow-300'} />
                               {price}
                             </div>
                           </div>
@@ -196,13 +234,21 @@ export function ShopScreen() {
 
                         <div className="mt-4 flex items-center justify-between gap-3">
                           <div className="text-xs text-white/45">
-                            {insufficientCoins ? 'Недостаточно монет для покупки' : 'Подсказки добавятся в общий баланс'}
+                            {insufficientCoins
+                              ? 'Недостаточно монет для покупки'
+                              : isRevive
+                                ? 'Воскрешения добавятся в баланс сразу'
+                                : 'Подсказки добавятся в общий баланс'}
                           </div>
 
                           <button
                             onClick={() => void handlePurchase(item)}
                             disabled={insufficientCoins || purchasingId === item.id}
-                            className="rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 px-4 py-3 text-sm font-black text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                            className={`rounded-2xl px-4 py-3 text-sm font-black text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 ${
+                              isRevive
+                                ? 'bg-gradient-to-r from-emerald-500 to-green-600'
+                                : 'bg-gradient-to-r from-amber-500 to-orange-600'
+                            }`}
                           >
                             {purchasingId === item.id ? 'Покупаем...' : 'Купить'}
                           </button>

@@ -567,6 +567,11 @@ export const gameApi = {
       hintBalance: raw.hintBalance ?? raw.hint_balance ?? 0,
     };
   },
+
+  consumeRevive: (): Promise<{ success: boolean; revive_balance: number }> =>
+    request<{ success: boolean; revive_balance: number }>(API_ENDPOINTS.game.revive, {
+      method: 'POST',
+    }),
 };
 
 // ============================================
@@ -859,6 +864,11 @@ export const shopApi = {
         ? Number(raw.hintBalance)
         : raw.hint_balance != null
           ? Number(raw.hint_balance)
+          : undefined,
+      reviveBalance: raw.reviveBalance != null
+        ? Number(raw.reviveBalance)
+        : raw.revive_balance != null
+          ? Number(raw.revive_balance)
           : undefined,
       error: typeof raw.error === 'string' ? raw.error : undefined,
     })),

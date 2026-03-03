@@ -226,6 +226,7 @@ export const API_ENDPOINTS = {
     energy: '/game/energy',
     energyAd: '/game/energy/ad',
     hint: '/game/hint',
+    revive: '/game/revive',
     reset: '/game/reset',
   },
   ads: {

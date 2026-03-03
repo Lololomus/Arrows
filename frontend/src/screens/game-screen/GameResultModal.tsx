@@ -25,13 +25,14 @@ interface GameResultModalProps {
   /** Текст ошибки */
   nextButtonError?: string | null;
   /** Revive */
-  reviveAvailable?: boolean;
+  balanceReviveAvailable?: boolean;
+  balanceReviveCount?: number;
+  adReviveAvailable?: boolean;
   reviveLoading?: boolean;
   reviveMessage?: string | null;
   revivePending?: boolean;
-  reviveRemaining?: number | null;
-  reviveLimit?: number | null;
-  onRevive?: () => void;
+  onBalanceRevive?: () => void;
+  onAdRevive?: () => void;
   onNextLevel: () => void;
   onVictoryRetry: () => void;
   onDefeatRetry: () => void;
@@ -50,13 +51,14 @@ export function GameResultModal({
   nextButtonState,
   pendingAction,
   nextButtonError,
-  reviveAvailable = false,
+  balanceReviveAvailable = false,
+  balanceReviveCount = 0,
+  adReviveAvailable = false,
   reviveLoading = false,
   reviveMessage = null,
   revivePending = false,
-  reviveRemaining = null,
-  reviveLimit = null,
-  onRevive,
+  onBalanceRevive,
+  onAdRevive,
   onNextLevel,
   onVictoryRetry,
   onDefeatRetry,
@@ -86,13 +88,14 @@ export function GameResultModal({
       {showDefeat && (
         <DefeatScreen
           level={currentLevel}
-          reviveAvailable={reviveAvailable}
+          balanceReviveAvailable={balanceReviveAvailable}
+          balanceReviveCount={balanceReviveCount}
+          adReviveAvailable={adReviveAvailable}
           reviveLoading={reviveLoading}
           reviveMessage={reviveMessage}
           revivePending={revivePending}
-          reviveRemaining={reviveRemaining}
-          reviveLimit={reviveLimit}
-          onRevive={onRevive ?? onDefeatRetry}
+          onBalanceRevive={onBalanceRevive ?? onDefeatRetry}
+          onAdRevive={onAdRevive ?? onDefeatRetry}
           onRetry={onDefeatRetry}
           onMenu={onDefeatMenu}
         />

@@ -704,6 +704,26 @@ async def get_hint(
     return HintResponse(arrow_id=hint_arrow_id, hint_balance=new_balance)
 
 
+@router.post("/revive")
+async def consume_revive(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Использовать воскрешение из баланса (атомарный декремент)."""
+    result = await db.execute(
+        update(User)
+        .where(User.id == user.id, User.revive_balance > 0)
+        .values(revive_balance=User.revive_balance - 1)
+        .returning(User.revive_balance)
+    )
+    row = result.first()
+    if row is None:
+        raise HTTPException(status_code=409, detail={"code": "NO_REVIVE_BALANCE"})
+    new_balance = row[0]
+    await db.commit()
+    return {"success": True, "revive_balance": new_balance}
+
+
 @router.post("/reset")
 async def reset_progress(
     user: User = Depends(get_current_user),

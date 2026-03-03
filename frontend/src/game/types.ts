@@ -148,6 +148,7 @@ export interface User {
   // Экономика
   coins: number;
   hintBalance: number;
+  reviveBalance: number;
   energy: number;
   energyUpdatedAt: string;
   
@@ -211,6 +212,7 @@ export interface PurchaseCoinsResponse {
   success: boolean;
   coins: number;
   hintBalance?: number;
+  reviveBalance?: number;
   error?: string;
 }
 
