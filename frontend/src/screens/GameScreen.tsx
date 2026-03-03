@@ -451,14 +451,33 @@ export function GameScreen() {
       });
     };
 
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        updateSize();
+      }
+    };
+
+    const handleFocus = () => {
+      updateSize();
+    };
+
     updateSize();
     const observer = new ResizeObserver(updateSize);
     observer.observe(container);
     window.addEventListener('resize', updateSize);
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener('resize', updateSize);
+    visualViewport?.addEventListener('scroll', updateSize);
 
     return () => {
       observer.disconnect();
       window.removeEventListener('resize', updateSize);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      visualViewport?.removeEventListener('resize', updateSize);
+      visualViewport?.removeEventListener('scroll', updateSize);
     };
   }, []);
 

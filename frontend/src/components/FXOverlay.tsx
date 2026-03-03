@@ -116,11 +116,26 @@ export function FXOverlay({
     ro.observe(el);
     window.addEventListener('scroll', updateRect, { passive: true });
     window.addEventListener('resize', updateRect, { passive: true });
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        updateRect();
+      }
+    };
+    const handleFocus = () => updateRect();
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener('resize', updateRect);
+    visualViewport?.addEventListener('scroll', updateRect);
 
     return () => {
       ro.disconnect();
       window.removeEventListener('scroll', updateRect);
       window.removeEventListener('resize', updateRect);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+      visualViewport?.removeEventListener('resize', updateRect);
+      visualViewport?.removeEventListener('scroll', updateRect);
     };
   }, [containerRef]);
 
@@ -168,14 +183,34 @@ export function FXOverlay({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, renderProfile.boardDprCap);
+    let dpr = Math.min(window.devicePixelRatio || 1, renderProfile.boardDprCap);
 
     const resizeCanvas = () => {
+      dpr = Math.min(window.devicePixelRatio || 1, renderProfile.boardDprCap);
       canvas.width = window.innerWidth * dpr;
       canvas.height = window.innerHeight * dpr;
     };
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        resizeCanvas();
+        if (animFrameRef.current === 0 && flyingRef.current.length > 0) {
+          animFrameRef.current = requestAnimationFrame(render);
+        }
+      }
+    };
+    const handleFocus = () => {
+      resizeCanvas();
+      if (animFrameRef.current === 0 && flyingRef.current.length > 0) {
+        animFrameRef.current = requestAnimationFrame(render);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener('resize', resizeCanvas);
+    visualViewport?.addEventListener('scroll', resizeCanvas);
 
     const totalBoardW = (gridSize.width + GRID_PADDING_CELLS) * cellSize;
     const totalBoardH = (gridSize.height + GRID_PADDING_CELLS) * cellSize;
@@ -253,6 +288,10 @@ export function FXOverlay({
       isRunning = false;
       _wakeFn = null;
       window.removeEventListener('resize', resizeCanvas);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+      visualViewport?.removeEventListener('resize', resizeCanvas);
+      visualViewport?.removeEventListener('scroll', resizeCanvas);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
   }, [
