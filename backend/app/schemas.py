@@ -338,7 +338,7 @@ class ChannelMetaDto(BaseModel):
 
 
 class TaskDto(BaseModel):
-    id: Literal["arcade_levels", "friends_confirmed", "official_channel"]
+    id: Literal["arcade_levels", "daily_levels", "friends_confirmed", "official_channel"]
     kind: Literal["stepped", "single"]
     base_title: str
     base_description: str

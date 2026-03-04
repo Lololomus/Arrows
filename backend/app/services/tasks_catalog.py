@@ -16,6 +16,15 @@ TASKS_CATALOG = [
         ],
     },
     {
+        "id": "daily_levels",
+        "kind": "stepped",
+        "base_title": "Пройти 10 уровней",
+        "base_description": "Ежедневное задание",
+        "tiers": [
+            {"claim_id": "daily_levels_10", "target": 10, "reward_coins": 50, "title": "Пройди 10 уровней"},
+        ],
+    },
+    {
         "id": "arcade_levels",
         "kind": "stepped",
         "base_title": "Пройти уровни",

@@ -69,15 +69,15 @@ const LEADERBOARD_MODES: readonly LeaderboardModeConfig[] = [
     label: 'Arcade',
     icon: '🕹',
     state: 'live',
-    // Current Arcade tab is backed by global progression until Adventure gets its own leaderboard.
+    // Current Arcade tab is backed by global progression until Battle gets its own leaderboard.
     boardType: 'global',
     emptyTitle: 'Лидерборд пока пуст',
     emptySubtitle: 'Играй и попади в топ!',
   },
   {
     id: 'campaign',
-    label: 'Adventure',
-    icon: '⚡️',
+    label: 'Battle',
+    icon: '⚔️',
     state: 'coming_soon',
   },
 ] as const;
@@ -783,7 +783,7 @@ export function LeaderboardScreen() {
         </button>
 
         <Trophy size={56} className="mx-auto text-yellow-400 mb-2 drop-shadow-glow relative z-10" />
-        <h2 className="text-3xl font-black text-white uppercase tracking-wide drop-shadow-md relative z-10">Сезон #1</h2>
+        <h2 className="text-3xl font-black text-white uppercase tracking-wide drop-shadow-md relative z-10">БЕТА сезон</h2>
         
         {/* ДИНАМИЧЕСКИЙ ТАЙМЕР */}
         {seasonEndsAt && (

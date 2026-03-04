@@ -135,13 +135,13 @@ export function HomeScreen() {
             <div className="absolute inset-0 bg-cyan-500 rounded-3xl blur-xl opacity-20" />
             <div className="relative bg-[#0c0e1c]/60 backdrop-blur-xl border border-white/10 border-t-white/20 p-8 rounded-3xl text-center shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden">
               <div className="absolute top-0 right-0 p-4 opacity-20">
-                <span className="text-7xl leading-none">⚡</span>
+                <span className="text-7xl leading-none">⚔️</span>
               </div>
               <h2
                 style={displayTitleFont}
                 className="relative z-10 text-4xl text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-blue-300 tracking-wider uppercase mb-2"
               >
-                Adventure
+                Battle
               </h2>
               <p className="relative z-10 text-blue-100/70 text-sm font-medium">Скоро</p>
             </div>

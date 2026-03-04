@@ -266,7 +266,7 @@ export interface TaskChannelMeta {
 }
 
 export interface TaskDto {
-  id: 'arcade_levels' | 'friends_confirmed' | 'official_channel';
+  id: 'arcade_levels' | 'daily_levels' | 'friends_confirmed' | 'official_channel';
   kind: 'stepped' | 'single';
   baseTitle: string;
   baseDescription: string;

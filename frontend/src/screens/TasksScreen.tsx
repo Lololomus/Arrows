@@ -35,9 +35,12 @@ const STAGGER = 0.07;
 
 const TASK_UI: Record<TaskDto['id'], TaskUiConfig> = {
   official_channel: { icon: Send,   iconColor: 'text-green-400',  iconBg: 'bg-green-500/20'  },
+  daily_levels:     { icon: Trophy, iconColor: 'text-amber-400',  iconBg: 'bg-amber-500/20'  },
   arcade_levels:    { icon: Trophy, iconColor: 'text-blue-400',   iconBg: 'bg-blue-500/20'   },
   friends_confirmed:{ icon: Users,  iconColor: 'text-purple-400', iconBg: 'bg-purple-500/20' },
 };
+
+const isDailyTask = (task: TaskDto) => task.id.startsWith('daily_');
 
 // ─── Section divider ─────────────────────────────────────────────────────────
 
@@ -104,7 +107,7 @@ function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: 
 
   const [eligible,     setEligible]     = useState(false);
   const [used,         setUsed]         = useState(0);
-  const [limit,        setLimit]        = useState(3);
+  const [limit,        setLimit]        = useState(5);
   const [resetsAt,     setResetsAt]     = useState('');
   const [loading,      setLoading]      = useState(false);
   const [statusLoaded, setStatusLoaded] = useState(false);
@@ -572,8 +575,12 @@ export function TasksScreen() {
   // ─── Build the task list: completed → daily → active ────────────────────────
 
   const renderTaskList = () => {
-    const completed = tasks.filter((t) => t.status === 'completed');
-    const active    = tasks.filter((t) => t.status !== 'completed');
+    const dailyTasks    = tasks.filter(isDailyTask);
+    const nonDailyTasks = tasks.filter((t) => !isDailyTask(t));
+    const completed = nonDailyTasks.filter((t) => t.status === 'completed');
+    const active    = nonDailyTasks.filter((t) => t.status !== 'completed');
+    const dailyActive    = dailyTasks.filter((t) => t.status !== 'completed');
+    const dailyCompleted = dailyTasks.filter((t) => t.status === 'completed');
     const showAds   = ADS_ENABLED && isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardDailyCoins);
 
     const nodes: React.ReactNode[] = [];
@@ -582,8 +589,10 @@ export function TasksScreen() {
     // 1. Выполненные (вверху)
     for (const task of completed) nodes.push(renderTaskCard(task, i++ * STAGGER));
 
-    // 2. Divider → ежедневные (только если есть выполненные И eligible)
-    if (completed.length > 0 && adEligible) {
+    const hasDailySection = dailyTasks.length > 0 || adEligible;
+
+    // 2. Divider → ежедневные
+    if (hasDailySection) {
       nodes.push(
         <SectionDivider key="d-daily" label="Ежедневные"
           icon={<Coins size={10} className="text-amber-400" />}
@@ -592,7 +601,12 @@ export function TasksScreen() {
       );
     }
 
-    // 3. Ежедневная реклама
+    // 3. Ежедневные задания
+    for (const task of [...dailyActive, ...dailyCompleted]) {
+      nodes.push(renderTaskCard(task, i++ * STAGGER));
+    }
+
+    // 4. Ежедневная реклама
     if (showAds) {
       nodes.push(
         <DailyAdTaskCard key="daily-ad"
@@ -605,8 +619,8 @@ export function TasksScreen() {
       if (adEligible) i++;
     }
 
-    // 4. Divider → активные (если что-то есть выше)
-    const anythingAbove = completed.length > 0 || adEligible;
+    // 5. Divider → активные (если что-то есть выше)
+    const anythingAbove = completed.length > 0 || hasDailySection;
     if (anythingAbove && active.length > 0) {
       nodes.push(
         <SectionDivider key="d-active" label="Задания"
@@ -616,7 +630,7 @@ export function TasksScreen() {
       );
     }
 
-    // 5. Активные задания
+    // 6. Активные задания
     for (const task of active) nodes.push(renderTaskCard(task, i++ * STAGGER));
 
     return nodes;

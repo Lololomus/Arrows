@@ -591,7 +591,7 @@ export const adsApi = {
       currentLevel: (raw.current_level ?? raw.currentLevel) as number,
       dailyCoins: {
         used: (dc?.used ?? 0) as number,
-        limit: (dc?.limit ?? 3) as number,
+        limit: (dc?.limit ?? 5) as number,
         resetsAt: (dc?.resets_at ?? dc?.resetsAt ?? '') as string,
       },
       hintAdAvailable: (raw.hint_ad_available ?? raw.hintAdAvailable ?? false) as boolean,
