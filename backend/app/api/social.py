@@ -327,11 +327,16 @@ async def get_referral_leaderboard(
 async def _fetch_global_top(db: AsyncSession, limit: int) -> Tuple[list, int]:
     """Загрузить global leaderboard из БД."""
     base_filter = [User.current_level > 1, User.is_banned == False]
+    _FAR_FUTURE = datetime(9999, 1, 1)
 
     result = await db.execute(
         select(User)
         .where(*base_filter)
-        .order_by(desc(User.current_level), desc(User.total_stars), asc(User.id))
+        .order_by(
+            desc(User.current_level),
+            asc(func.coalesce(User.level_reached_at, _FAR_FUTURE)),
+            asc(User.id),
+        )
         .limit(limit)
     )
     users = result.scalars().all()
@@ -359,6 +364,8 @@ async def _fetch_global_top(db: AsyncSession, limit: int) -> Tuple[list, int]:
 async def _fetch_global_position(db: AsyncSession, user: User) -> int:
     """Вычислить позицию юзера в global leaderboard."""
     base_filter = [User.current_level > 1, User.is_banned == False]
+    _FAR_FUTURE = datetime(9999, 1, 1)
+    user_reached_at = user.level_reached_at or _FAR_FUTURE
 
     count_above = await db.execute(
         select(func.count())
@@ -369,11 +376,11 @@ async def _fetch_global_position(db: AsyncSession, user: User) -> int:
                 User.current_level > user.current_level,
                 and_(
                     User.current_level == user.current_level,
-                    User.total_stars > user.total_stars,
+                    func.coalesce(User.level_reached_at, _FAR_FUTURE) < user_reached_at,
                 ),
                 and_(
                     User.current_level == user.current_level,
-                    User.total_stars == user.total_stars,
+                    func.coalesce(User.level_reached_at, _FAR_FUTURE) == user_reached_at,
                     User.id < user.id,
                 ),
             )
@@ -665,8 +672,9 @@ async def get_friends_leaderboard(
     referrals = result.scalars().all()
 
     # Все юзеры (пользователь + рефералы), фильтруем тех кто прошёл ≥1 уровень
+    _FAR_FUTURE = datetime(9999, 1, 1)
     all_users = [u for u in [user] + list(referrals) if u.current_level > 1]
-    all_users.sort(key=lambda u: (u.current_level, u.total_stars, -u.id), reverse=True)
+    all_users.sort(key=lambda u: (-u.current_level, u.level_reached_at or _FAR_FUTURE, u.id))
 
     leaders = [
         LeaderboardEntry(

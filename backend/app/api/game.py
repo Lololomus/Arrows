@@ -363,6 +363,7 @@ async def _do_complete(
     # Idempotency: уже награждён?
     if allow_locked_level_debug and level_num > user.current_level and not request.is_daily:
         user.current_level = level_num
+        user.level_reached_at = datetime.utcnow()
 
     rewarded = await db.execute(
         select(LevelAttempt.id).where(
@@ -465,6 +466,7 @@ async def _do_complete(
     if not request.is_daily and level_num == user.current_level:
         user.current_level = level_num + 1
         new_level = True
+        user.level_reached_at = datetime.utcnow()
 
     user.total_stars += stars
     user.coins += coins_earned
@@ -816,6 +818,7 @@ async def reset_progress(
     user.current_level = 1
     user.coins = settings.INITIAL_COINS
     user.total_stars = 0
+    user.level_reached_at = None
     result = await db.execute(select(UserStats).where(UserStats.user_id == user.id))
     stats = result.scalar_one_or_none()
     if stats:

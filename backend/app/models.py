@@ -32,6 +32,7 @@ class User(Base):
     # Прогресс
     current_level = Column(Integer, default=1)
     total_stars = Column(Integer, default=0)
+    level_reached_at = Column(DateTime, nullable=True)
     
     # Экономика
     coins = Column(Integer, default=0)

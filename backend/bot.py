@@ -9,16 +9,22 @@ import html
 import logging
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from sqlalchemy import select
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from app.config import settings
-from app.database import close_redis
+from app.database import AsyncSessionLocal, close_redis
+from app.models import User
+from app.services.bot_notifications import notify_spin_streak_reset, notify_streak_warning
 from app.services.referrals import extract_referral_code, store_pending_referral_code
+
+MSK = timezone(timedelta(hours=3))
 
 
 logging.basicConfig(
@@ -162,12 +168,71 @@ async def cmd_stats(message: types.Message):
     await message.answer(stats_text, parse_mode="HTML")
 
 
+async def _send_streak_notifications() -> None:
+    """Рассылка двух типов уведомлений в 18:00 MSK:
+    - warn: стрик цел (last_spin == вчера), но сегодня ещё не крутили
+    - expired: стрик уже сгорел (last_spin == позавчера, пропустили вчера)
+    """
+    from app.api.spin import _get_tier  # local import to avoid top-level cycle
+
+    today = datetime.now(MSK).date()
+    yesterday = today - timedelta(days=1)
+    two_days_ago = today - timedelta(days=2)
+
+    try:
+        async with AsyncSessionLocal() as db:
+            warn_result = await db.execute(
+                select(User.telegram_id, User.login_streak)
+                .where(User.login_streak >= 2)
+                .where(User.last_spin_date == yesterday)
+                .where(User.is_banned == False)
+            )
+            warn_users = warn_result.fetchall()
+
+            expired_result = await db.execute(
+                select(User.telegram_id, User.login_streak)
+                .where(User.login_streak >= 2)
+                .where(User.last_spin_date == two_days_ago)
+                .where(User.is_banned == False)
+            )
+            expired_users = expired_result.fetchall()
+    except Exception as e:
+        logger.error("streak notifications: DB query failed: %s", e)
+        return
+
+    logger.info("streak notifications: %d warnings, %d expired", len(warn_users), len(expired_users))
+
+    for telegram_id, streak in warn_users:
+        await notify_streak_warning(telegram_id, streak, _get_tier(streak))
+
+    for telegram_id, streak in expired_users:
+        await notify_spin_streak_reset(telegram_id, streak)
+
+
+async def streak_warning_scheduler() -> None:
+    """Фоновый loop: ждёт 18:00 MSK и рассылает предупреждения (за 6ч до сброса)."""
+    while True:
+        now = datetime.now(MSK)
+        next_18 = now.replace(hour=18, minute=0, second=0, microsecond=0)
+        if now >= next_18:
+            next_18 += timedelta(days=1)
+        wait_seconds = (next_18 - now).total_seconds()
+        logger.info("streak warning scheduler: next run in %.0f seconds", wait_seconds)
+        await asyncio.sleep(wait_seconds)
+        try:
+            await _send_streak_notifications()
+        except Exception as e:
+            logger.error("streak warning scheduler error: %s", e)
+
+
 async def main():
     """Запуск бота."""
     logger.info(f"Starting {settings.APP_NAME} Bot...")
     logger.info(f"Web App URL: {settings.WEBAPP_URL}")
 
     await bot.delete_webhook(drop_pending_updates=True)
+
+    asyncio.create_task(streak_warning_scheduler())
 
     logger.info("Bot is running!")
     try:
