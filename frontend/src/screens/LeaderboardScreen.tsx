@@ -1,5 +1,5 @@
 ﻿// ===== 📄 ФАЙЛ: frontend/src/screens/LeaderboardScreen.tsx =====
-import { useState, useMemo, useRef, useEffect, useCallback, memo, type CSSProperties } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback, memo, type CSSProperties, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Trophy, Gift, Info } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -61,6 +61,38 @@ const TWO_LINE_CLAMP_STYLE: CSSProperties = {
   WebkitBoxOrient: 'vertical',
   overflow: 'hidden',
 };
+
+type PrizeTier = {
+  label: string;
+  badgeClass: string;
+  icon?: string;
+};
+
+const PRIZE_BADGE_BASE_CLASS = 'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wide';
+
+const getPrizeTierByRank = (rank: number): PrizeTier | null => {
+  if (rank === 1) {
+    return { label: '$75', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' };
+  }
+  if (rank === 2) {
+    return { label: '$30', badgeClass: 'text-gray-200 border-gray-400/40 bg-black/20' };
+  }
+  if (rank === 3) {
+    return { label: '$25', badgeClass: 'text-orange-300 border-orange-500/40 bg-black/20' };
+  }
+  if (rank >= 4 && rank <= 10) {
+    return { label: '350 TG STARS', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20', icon: '⭐' };
+  }
+  return null;
+};
+
+const PrizeBadge = memo(({ tier }: { tier: PrizeTier }) => (
+  <span className={`${PRIZE_BADGE_BASE_CLASS} ${tier.badgeClass}`}>
+    {tier.icon && <span className="text-[11px]">{tier.icon}</span>}
+    <span>{tier.label}</span>
+  </span>
+));
+PrizeBadge.displayName = 'PrizeBadge';
 
 // Live mode must define boardType. Coming-soon mode must not trigger leaderboard requests.
 const LEADERBOARD_MODES: readonly LeaderboardModeConfig[] = [
@@ -225,17 +257,47 @@ const SeasonInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose: (
               </h3>
               
               <div className="space-y-4 text-left">
+                {/* БЛОК С ПРИЗАМИ */}
+                <div className="bg-gradient-to-br from-yellow-900/30 to-orange-900/10 rounded-2xl p-4 border border-yellow-500/30 shadow-lg">
+                  <h4 className="text-yellow-400 font-bold text-base mb-3 text-center uppercase tracking-wider drop-shadow-sm">Призовой фонд</h4>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between bg-black/20 rounded-xl p-3 border border-yellow-500/30">
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl drop-shadow-md">🥇</span>
+                        <span className="text-white font-medium">1 место</span>
+                      </div>
+                      <span className="text-yellow-300 font-black text-lg drop-shadow-glow">$75</span>
+                    </div>
+                    <div className="flex items-center justify-between bg-black/20 rounded-xl p-3 border border-gray-400/30">
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl drop-shadow-md">🥈</span>
+                        <span className="text-white font-medium">2 место</span>
+                      </div>
+                      <span className="text-gray-300 font-black text-lg">$30</span>
+                    </div>
+                    <div className="flex items-center justify-between bg-black/20 rounded-xl p-3 border border-orange-500/30">
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl drop-shadow-md">🥉</span>
+                        <span className="text-white font-medium">3 место</span>
+                      </div>
+                      <span className="text-orange-300 font-black text-lg">$25</span>
+                    </div>
+                    <div className="flex items-center justify-between bg-black/20 rounded-xl p-3 border border-yellow-500/25">
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl drop-shadow-md">⭐</span>
+                        <span className="text-white font-medium">4–10 место</span>
+                      </div>
+                      <span className="text-yellow-300 font-black text-base">350 TG STARS</span>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
                   <p className="text-white/90 font-medium text-sm leading-relaxed">
-                    По завершении сезона 3 игрока, прошедших <span className="text-yellow-400 font-bold">наибольшее количество уровней</span>, получат награды.
+                    По завершении сезона награды получат игроки, занявшие <span className="text-yellow-400 font-bold">1–10 места</span> в лидерборде.
                   </p>
                 </div>
                 
-                <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
-                  <p className="text-white/90 font-medium text-sm leading-relaxed">
-                    Также <span className="text-yellow-400 font-bold">5 случайных пользователей</span>, попавших в топ-1000, получат призы.
-                  </p>
-                </div>
               </div>
             </div>
           </motion.div>
@@ -274,16 +336,23 @@ interface PlayerIdentityTextProps {
   username: string | null;
   nameClassName?: string;
   usernameClassName?: string;
+  badge?: ReactNode;
 }
 
-const PlayerIdentityText = memo(({ displayName, username, nameClassName, usernameClassName }: PlayerIdentityTextProps) => {
+const PlayerIdentityText = memo(({ displayName, username, nameClassName, usernameClassName, badge }: PlayerIdentityTextProps) => {
   const formattedUsername = formatUsernameForUi(username);
+  const showMetaRow = Boolean(formattedUsername) || Boolean(badge);
 
   return (
     <>
       <div className={nameClassName ?? 'text-white text-[15px] font-bold leading-tight truncate'}>{displayName}</div>
-      {formattedUsername && (
-        <div className={usernameClassName ?? 'text-[11px] leading-tight text-white/55 truncate mt-0.5'}>{formattedUsername}</div>
+      {showMetaRow && (
+        <div className="flex items-center gap-2 mt-0.5">
+          {formattedUsername && (
+            <div className={usernameClassName ?? 'text-[11px] leading-tight text-white/55 truncate'}>{formattedUsername}</div>
+          )}
+          {badge}
+        </div>
       )}
     </>
   );
@@ -293,6 +362,7 @@ PlayerIdentityText.displayName = 'PlayerIdentityText';
 // --- КОМПОНЕНТ: ЭЛЕМЕНТ ТОП-3 ---
 const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Player, index: number, animateEntry: boolean }) => {
   const styles = RANK_STYLES[player.rank];
+  const prizeTier = getPrizeTierByRank(player.rank);
   const [isAnimationDone, setIsAnimationDone] = useState(!animateEntry);
   const { isReducedMotion, isLowEnd, isPageVisible } = useParticleRuntimeProfile();
   const topParticleProfile = useMemo(() => {
@@ -340,7 +410,11 @@ const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Play
         <AsyncAvatar seed={player.avatarSeed} rank={player.rank} photoUrl={player.photoUrl || undefined} />
       </div>
       <div className="flex-1 min-w-0 relative z-20 py-1">
-        <PlayerIdentityText displayName={player.displayName} username={player.username} />
+        <PlayerIdentityText
+          displayName={player.displayName}
+          username={player.username}
+          badge={prizeTier ? <PrizeBadge tier={prizeTier} /> : undefined}
+        />
       </div>
       <div className="font-mono text-base font-black relative z-20 text-yellow-400 drop-shadow-md shrink-0 pl-2 text-right">
         {player.score.toLocaleString()}
@@ -353,8 +427,13 @@ TopLeaderboardItem.displayName = 'TopLeaderboardItem';
 // --- КОМПОНЕНТ: ОБЫЧНЫЙ ЭЛЕМЕНТ ТОП-4+ ---
 const RegularLeaderboardItem = memo(({ player, isCurrentUser }: { player: Player; isCurrentUser?: boolean }) => {
   const styles = DEFAULT_RANK_STYLE;
+  const prizeTier = getPrizeTierByRank(player.rank);
+  const isMinorPrize = player.rank >= 4 && player.rank <= 10;
+  const minorPrizeClass = isMinorPrize && !isCurrentUser
+    ? 'bg-yellow-500/6 border-yellow-500/20 shadow-[0_0_10px_rgba(250,204,21,0.08)]'
+    : `${styles.bg} ${styles.border}`;
   return (
-    <div className={`flex items-center px-3 py-2 rounded-2xl border relative overflow-hidden h-[72px] mb-3 ${isCurrentUser ? 'bg-blue-500/8 border-blue-500/40 shadow-[0_0_10px_rgba(59,130,246,0.15)]' : `${styles.bg} ${styles.border}`}`}>
+    <div className={`flex items-center px-3 py-2 rounded-2xl border relative overflow-hidden h-[72px] mb-3 ${isCurrentUser ? 'bg-blue-500/8 border-blue-500/40 shadow-[0_0_10px_rgba(59,130,246,0.15)]' : minorPrizeClass}`}>
       <div className="flex items-center justify-center w-8 mr-2 relative z-10 shrink-0">
         <span className={`font-bold text-lg ${isCurrentUser ? 'text-blue-300' : styles.rankClass}`}>{player.rank}</span>
       </div>
@@ -365,7 +444,8 @@ const RegularLeaderboardItem = memo(({ player, isCurrentUser }: { player: Player
         <PlayerIdentityText
           displayName={player.displayName}
           username={player.username}
-          usernameClassName="text-[11px] leading-tight text-white/50 truncate mt-0.5"
+          usernameClassName="text-[11px] leading-tight text-white/50 truncate"
+          badge={prizeTier ? <PrizeBadge tier={prizeTier} /> : undefined}
         />
       </div>
       <div className="font-mono text-base font-black relative z-10 text-yellow-400/80 shrink-0 pl-2 text-right">
