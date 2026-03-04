@@ -18,6 +18,7 @@ from ..services.ad_rewards import (
     PLACEMENT_DAILY_COINS,
     PLACEMENT_HINT,
     PLACEMENT_REVIVE,
+    PLACEMENT_SPIN_RETRY,
     extract_callback_value,
     find_pending_intent_for_callback,
     grant_intent,
@@ -228,6 +229,14 @@ async def handle_adsgram_reward_revive(
     db: AsyncSession = Depends(get_db),
 ):
     return await _handle_adsgram_reward_callback(request, PLACEMENT_REVIVE, db)
+
+
+@router.api_route("/adsgram/reward/spin-retry", methods=["GET", "POST"])
+async def handle_adsgram_reward_spin_retry(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _handle_adsgram_reward_callback(request, PLACEMENT_SPIN_RETRY, db)
 
 
 @router.api_route("/adsgram/reward", methods=["GET", "POST"])

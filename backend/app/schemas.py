@@ -102,6 +102,8 @@ class LevelResponse(BaseModel):
     grid: Grid
     arrows: List[Arrow]
     meta: LevelMeta
+    daily_day_number: Optional[int] = None
+    daily_date: Optional[str] = None
 
 
 class CompleteRequest(BaseModel):
@@ -110,6 +112,7 @@ class CompleteRequest(BaseModel):
     seed: int
     moves: List[str]  # Последовательность ID стрелок
     time_seconds: int
+    is_daily: bool = False
 
 
 class CompleteResponse(BaseModel):
@@ -440,7 +443,7 @@ class ClaimReviveResponse(BaseModel):
     session_id: str
 
 
-RewardPlacement = Literal["reward_daily_coins", "reward_hint", "reward_revive"]
+RewardPlacement = Literal["reward_daily_coins", "reward_hint", "reward_revive", "reward_spin_retry"]
 RewardIntentStatus = Literal["pending", "granted", "rejected", "expired"]
 
 

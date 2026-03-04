@@ -39,6 +39,9 @@ interface VictoryScreenProps {
   onNextLevel: () => void;
   onRetry?: () => void;
   onMenu: () => void;
+  /** Daily Challenge mode */
+  isDaily?: boolean;
+  onShare?: () => void;
 }
 
 /** Текст кнопки по состоянию */
@@ -74,6 +77,8 @@ export function VictoryScreen({
   onNextLevel,
   onRetry,
   onMenu,
+  isDaily = false,
+  onShare,
 }: VictoryScreenProps) {
   const [showTotal, setShowTotal] = useState(false);
   const [showSpinner, setShowSpinner] = useState(false);
@@ -283,6 +288,18 @@ export function VictoryScreen({
             )}
           </AnimatePresence>
 
+          {/* === DAILY: КНОПКА ПОДЕЛИТЬСЯ === */}
+          {isDaily && onShare && (
+            <motion.button
+              whileTap={{ scale: 0.96 }}
+              onClick={onShare}
+              className="w-full py-4 rounded-[20px] text-white font-black text-base uppercase tracking-widest bg-gradient-to-r from-blue-600 to-cyan-600 border border-white/20 shadow-xl hover:brightness-110 transition-all flex items-center justify-center gap-2"
+            >
+              <span>📤</span>
+              <span>Поделиться результатом</span>
+            </motion.button>
+          )}
+
           {/* === ГЛАВНАЯ КНОПКА === */}
           <motion.button
             whileTap={isBusy ? undefined : { scale: 0.96 }}
@@ -325,7 +342,7 @@ export function VictoryScreen({
 
             {/* Текст */}
             <span className={isBusy ? 'text-lg' : ''}>
-              {getButtonLabel(nextButtonState, stateElapsed)}
+              {isDaily && !isBusy && !isError ? 'Готово!' : getButtonLabel(nextButtonState, stateElapsed)}
             </span>
           </motion.button>
 

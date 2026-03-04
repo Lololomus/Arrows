@@ -55,6 +55,13 @@ class User(Base):
     # Активные скины
     active_arrow_skin = Column(String(64), default="default")
     active_theme = Column(String(64), default="light")
+
+    # Ежедневная рулетка
+    login_streak = Column(Integer, default=0)
+    last_spin_date = Column(Date, nullable=True)
+    pending_spin_prize_type = Column(String(16), nullable=True)   # "coins"|"hints"|"revive"
+    pending_spin_prize_amount = Column(Integer, nullable=True)
+    spin_retry_used_date = Column(Date, nullable=True)            # если == today, retry уже использован
     
     
     # Ban система (для anti-cheat)
@@ -120,6 +127,10 @@ class UserStats(Base):
     current_streak = Column(Integer, default=0)
     max_streak = Column(Integer, default=0)
     last_played_date = Column(Date, nullable=True)
+
+    # Daily Challenge
+    last_daily_date = Column(Date, nullable=True)
+    daily_streak = Column(Integer, default=0)
     
     # Время
     total_playtime_seconds = Column(Integer, default=0)

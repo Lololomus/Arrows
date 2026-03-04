@@ -24,6 +24,8 @@ function getRewardToastMessage(status: RewardIntentStatusResponse): string | nul
         return '+1 подсказка начислена';
       case 'reward_revive':
         return 'Награда за продолжение подтверждена';
+      case 'reward_spin_retry':
+        return 'Респин за рекламу подтвержден';
       default:
         return 'Награда начислена';
     }

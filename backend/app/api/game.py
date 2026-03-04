@@ -7,8 +7,9 @@ Arrow Puzzle - Game API (OPTIMIZED)
 3. Кэш уровней в памяти (LRU)
 """
 
+import hashlib
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -18,7 +19,7 @@ from sqlalchemy import select, update
 
 from ..config import settings
 from ..database import get_db, get_redis
-from ..models import User, UserStats, LevelAttempt, Referral
+from ..models import User, UserStats, LevelAttempt, Referral, Leaderboard
 from ..schemas import (
     LevelResponse, CompleteRequest, CompleteResponse, CompleteAndNextResponse,
     EnergyResponse, HintRequest, HintResponse,
@@ -30,6 +31,9 @@ from ..services.generator import get_hint as get_hint_arrow, get_free_arrows
 
 
 router = APIRouter(prefix="/game", tags=["game"])
+
+def _utc_today() -> date:
+    return datetime.utcnow().date()
 
 
 # ============================================
@@ -357,7 +361,7 @@ async def _do_complete(
         )
 
     # Idempotency: уже награждён?
-    if allow_locked_level_debug and level_num > user.current_level:
+    if allow_locked_level_debug and level_num > user.current_level and not request.is_daily:
         user.current_level = level_num
 
     rewarded = await db.execute(
@@ -383,7 +387,13 @@ async def _do_complete(
             metrics,
         )
 
-    if level_num != user.current_level:
+    if request.is_daily:
+        if level_num != _get_daily_level_num():
+            return (
+                CompleteResponse(valid=False, current_level=user.current_level, error="Invalid daily level"),
+                metrics,
+            )
+    elif level_num != user.current_level:
         return (
             CompleteResponse(valid=False, current_level=user.current_level, error="Level not unlocked"),
             metrics,
@@ -452,7 +462,7 @@ async def _do_complete(
 
     # Сохранение прогресса
     new_level = False
-    if level_num == user.current_level:
+    if not request.is_daily and level_num == user.current_level:
         user.current_level = level_num + 1
         new_level = True
 
@@ -481,6 +491,39 @@ async def _do_complete(
         moves_log=request.moves,
     )
     db.add(attempt)
+
+    # Daily Challenge: запись в лидерборд и обновление стрика
+    if request.is_daily and level_num == _get_daily_level_num():
+        today = _utc_today()
+        yesterday = today - timedelta(days=1)
+
+        # Обновить daily streak в статистике
+        if stats:
+            if stats.last_daily_date == yesterday:
+                stats.daily_streak = (stats.daily_streak or 0) + 1
+            elif stats.last_daily_date != today:
+                stats.daily_streak = 1
+            stats.last_daily_date = today
+
+        # Записать или улучшить результат в daily leaderboard (меньше ходов = лучше)
+        existing_lb = await db.execute(
+            select(Leaderboard).where(
+                Leaderboard.user_id == user.id,
+                Leaderboard.board_type == "daily",
+                Leaderboard.season == int(today.strftime("%Y%m%d")),
+            )
+        )
+        existing = existing_lb.scalar_one_or_none()
+        if existing is None:
+            db.add(Leaderboard(
+                user_id=user.id,
+                board_type="daily",
+                score=total_moves,
+                season=int(today.strftime("%Y%m%d")),
+            ))
+        elif total_moves < existing.score:
+            existing.score = total_moves
+            existing.updated_at = datetime.utcnow()
 
     referral_confirmed = await check_referral_confirmation(user, level_num, db)
     await db.commit()
@@ -523,6 +566,47 @@ async def get_level(
 
     try:
         return _serialize_level_response(level_num, level_data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Level data error: {str(e)}")
+
+
+# ============================================
+# DAILY CHALLENGE
+# ============================================
+
+HARD_LEVEL_IDS = [
+    30, 40, 50, 60, 65, 70, 75, 80, 85, 90,
+    120, 125, 130, 165, 190, 220, 228, 270,
+    280, 290, 320, 330, 370, 380, 385, 390,
+]
+
+def _get_daily_level_num() -> int:
+    """Детерминированный выбор уровня по дате (UTC)."""
+    date_str = _utc_today().isoformat()
+    idx = int(hashlib.md5(date_str.encode()).hexdigest(), 16) % len(HARD_LEVEL_IDS)
+    return HARD_LEVEL_IDS[idx]
+
+def _day_number() -> int:
+    """Порядковый номер дня с эпохи (для отображения Daily #N)."""
+    return (_utc_today() - date(2026, 1, 1)).days + 1
+
+
+@router.get("/daily", response_model=LevelResponse)
+async def get_daily_level(
+    user: User = Depends(get_current_user),
+):
+    """Уровень дня — один из сложных, доступен всем без проверки unlock."""
+    if user.is_banned:
+        raise HTTPException(status_code=403, detail="Banned")
+    level_num = _get_daily_level_num()
+    level_data = get_cached_level(level_num)
+    if not level_data:
+        raise HTTPException(status_code=404, detail="Daily level not found")
+    try:
+        response = _serialize_level_response(level_num, level_data)
+        response.daily_day_number = _day_number()
+        response.daily_date = _utc_today().isoformat()
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Level data error: {str(e)}")
 

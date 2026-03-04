@@ -1,7 +1,10 @@
-import { motion } from 'framer-motion';
+import { useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '../stores/store';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { CoinStashCard } from '../components/ui/CoinStashCard';
+import { SpinScreen } from './SpinScreen';
+import { spinApi } from '../api/client';
 
 const HOME_BG_STAR_SIZE_PROFILE = { small: 0.8, medium: 0.16, large: 0.04 } as const;
 
@@ -27,19 +30,30 @@ const titleLine = {
 };
 
 export function HomeScreen() {
-  const { setScreen, user } = useAppStore();
+  const { setScreen, user, spinAvailable, loginStreak, setSpinStatus, setDailyMode } = useAppStore();
+  const [showSpin, setShowSpin] = useState(false);
   const displayTitleFont = { fontFamily: '"Bungee Inline", cursive' } as const;
   const coinBalance = user?.coins ?? 0;
   const displayedLevel = (user as (typeof user & { current_level?: number }) | null)?.currentLevel
     ?? (user as (typeof user & { current_level?: number }) | null)?.current_level
     ?? 1;
 
+  useEffect(() => {
+    spinApi.getStatus()
+      .then(s => setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize))
+      .catch(() => {/* не критично */});
+  }, [setSpinStatus]);
+
   const handlePlayArcade = () => {
+    setDailyMode(false);
     setScreen('game');
   };
 
   return (
-    <div className="relative flex flex-col h-full w-full">
+    <div className="relative flex flex-col h-full w-full overflow-hidden">
+      {/* Модалка Рулетки */}
+      {showSpin && <SpinScreen onClose={() => setShowSpin(false)} />}
+      
       <AdaptiveParticles
         variant="bg"
         tone="neutral"
@@ -69,7 +83,7 @@ export function HomeScreen() {
           </h1>
         </motion.div>
 
-        <div className="flex-1 flex flex-col justify-center space-y-3 pb-8">
+        <div className="flex-1 flex flex-col justify-center space-y-4 pb-8">
           <CoinStashCard balance={coinBalance} />
 
           <motion.button
@@ -133,6 +147,76 @@ export function HomeScreen() {
             </div>
           </motion.div>
         </div>
+      </div>
+
+      {/* Floating Spin Button (Справа снизу, приподнята над навигацией) */}
+      <div className="absolute bottom-[110px] right-6 z-40">
+        {/* Пульсирующий круг на фоне, если рулетка доступна */}
+        {spinAvailable && (
+          <div className="absolute inset-0 rounded-full bg-pink-500 opacity-40 animate-ping" style={{ animationDuration: '2s' }} />
+        )}
+        
+        <motion.button
+          onClick={() => setShowSpin(true)}
+          className={`relative flex items-center justify-center w-[76px] h-[76px] rounded-full backdrop-blur-xl transition-all duration-500 ${
+            spinAvailable
+              ? 'shadow-[0_0_25px_rgba(236,72,153,0.5)]'
+              : 'shadow-none opacity-70'
+          }`}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+        >
+          {/* Внешний ободок кнопки */}
+          <div className={`absolute inset-0 rounded-full border-[3px] z-20 pointer-events-none transition-colors duration-500 ${
+            spinAvailable ? 'border-pink-500/80' : 'border-white/10'
+          }`} />
+
+          {/* Само мини-колесо рулетки */}
+          <motion.div
+            className={`absolute inset-1 rounded-full overflow-hidden ${!spinAvailable && 'grayscale opacity-60'}`}
+            style={{
+              // Точно те же цвета, что и в SpinScreen.tsx, поделенные на 8 секторов по 45 градусов
+              background: 'conic-gradient(#0f766e 0 45deg, #047857 45deg 90deg, #1d4ed8 90deg 135deg, #2563eb 135deg 180deg, #7e22ce 180deg 225deg, #9333ea 225deg 270deg, #b45309 270deg 315deg, #be123c 315deg 360deg)'
+            }}
+            animate={spinAvailable ? { rotate: 360 } : { rotate: 0 }}
+            transition={{ repeat: Infinity, duration: 12, ease: "linear" }}
+          >
+            {/* Тонкие разделители секторов для объема */}
+            <div className="absolute inset-0 rounded-full border border-white/20 mix-blend-overlay" />
+          </motion.div>
+
+          {/* Центр рулетки */}
+          <div className={`absolute m-auto w-[18px] h-[18px] rounded-full z-20 ${
+            spinAvailable ? 'bg-[#0a0c1a] border-2 border-[#d8b4fe]' : 'bg-gray-600 border-2 border-gray-400'
+          }`} />
+
+          {/* Миниатюрный язычок (указатель) сверху */}
+          <div className={`absolute -top-[6px] left-1/2 -translate-x-1/2 z-30 drop-shadow-md ${!spinAvailable && 'grayscale opacity-60'}`}>
+            <svg width="16" height="22" viewBox="0 0 24 34" fill="none">
+              <path d="M12 34L2 14C2 8.477 6.477 4 12 4C17.523 4 22 8.477 22 14L12 34Z" fill="url(#miniPointerGrad)" stroke="#ffffff" strokeWidth="2.5" strokeLinejoin="round"/>
+              <circle cx="12" cy="10" r="3.5" fill="#1e1b4b" />
+              <defs>
+                <linearGradient id="miniPointerGrad" x1="12" y1="4" x2="12" y2="34" gradientUnits="userSpaceOnUse">
+                  <stop stopColor="#fbcfe8" />
+                  <stop offset="1" stopColor="#ec4899" />
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+
+          {/* Бейджик нотификации/стрика */}
+          <AnimatePresence>
+            {spinAvailable && (
+              <motion.div 
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className="absolute -top-1 -right-1 flex h-[24px] min-w-[24px] items-center justify-center rounded-full bg-gradient-to-br from-orange-500 to-red-500 px-1.5 text-[12px] font-black text-white shadow-md border-2 border-[#0a0c1a] z-40"
+              >
+                {loginStreak > 0 ? `🔥${loginStreak}` : '!'}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.button>
       </div>
     </div>
   );

@@ -230,12 +230,19 @@ export function getRewardedFlowMessage(
       return 'Проверка награды истекла, попробуйте снова';
     case 'REWARD_INTENT_ALREADY_PENDING':
       return 'Награда уже проверяется. Мы продолжим проверку автоматически.';
+    case 'SPIN_RETRY_NOT_AVAILABLE':
+      return 'Респин сейчас недоступен.';
+    case 'SPIN_RETRY_ALREADY_GRANTED':
+      return 'Респин уже доступен.';
     default:
       if (placement === 'reward_hint') {
         return 'Не удалось получить подсказку';
       }
       if (placement === 'reward_revive') {
         return 'Не удалось получить воскрешение';
+      }
+      if (placement === 'reward_spin_retry') {
+        return 'Не удалось получить респин';
       }
       return 'Не удалось получить награду';
   }

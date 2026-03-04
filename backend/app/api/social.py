@@ -6,7 +6,7 @@ Arrow Puzzle - Social API
 
 import json
 import secrets
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,9 @@ from .auth import get_current_user
 
 
 router = APIRouter(prefix="/social", tags=["social"])
+
+def _utc_today() -> date:
+    return datetime.utcnow().date()
 
 # TTL кэша лидербордов (секунды)
 _LB_CACHE_TTL = 30
@@ -457,6 +460,45 @@ async def _fetch_board_position(db: AsyncSession, user: User, board_type: str) -
     return count_above.scalar() + 1, my_entry.score
 
 
+async def _fetch_daily_top(db: AsyncSession, limit: int) -> Tuple[list, int]:
+    """Загрузить daily leaderboard из БД (score ASC — меньше ходов = лучше)."""
+    today_int = int(_utc_today().strftime("%Y%m%d"))
+    result = await db.execute(
+        select(Leaderboard, User)
+        .join(User, Leaderboard.user_id == User.id)
+        .where(
+            Leaderboard.board_type == "daily",
+            Leaderboard.season == today_int,
+            User.is_banned == False,
+        )
+        .order_by(asc(Leaderboard.score), asc(Leaderboard.updated_at), asc(User.id))
+        .limit(limit)
+    )
+    rows = result.all()
+    leaders = [
+        {
+            "rank": i + 1,
+            "user_id": lb.user_id,
+            "username": u.username,
+            "first_name": u.first_name,
+            "photo_url": u.photo_url,
+            "score": lb.score,
+        }
+        for i, (lb, u) in enumerate(rows)
+    ]
+    total_result = await db.execute(
+        select(func.count())
+        .select_from(Leaderboard)
+        .join(User, Leaderboard.user_id == User.id)
+        .where(
+            Leaderboard.board_type == "daily",
+            Leaderboard.season == today_int,
+            User.is_banned == False,
+        )
+    )
+    return leaders, total_result.scalar()
+
+
 @router.get("/leaderboard/{board_type}", response_model=LeaderboardResponse)
 async def get_leaderboard(
     board_type: str,
@@ -472,11 +514,12 @@ async def get_leaderboard(
 
     Кэшируется в Redis (TTL 30 сек).
     """
-    if board_type not in ["global", "weekly", "arcade"]:
+    if board_type not in ["global", "weekly", "arcade", "daily"]:
         raise HTTPException(status_code=400, detail="Invalid leaderboard type")
 
     redis = await get_redis()
-    cache_key = f"lb:{board_type}:top:{limit}"
+    # Для daily кэш по дате, чтобы автоматически сбрасывался на следующий день
+    cache_key = f"lb:{board_type}:top:{limit}" if board_type != "daily" else f"lb:daily:{_utc_today().isoformat()}:top:{limit}"
 
     # Пробуем взять топ из кэша
     cached = await redis.get(cache_key)
@@ -487,6 +530,8 @@ async def get_leaderboard(
     else:
         if board_type == "global":
             leaders_raw, total_participants = await _fetch_global_top(db, limit)
+        elif board_type == "daily":
+            leaders_raw, total_participants = await _fetch_daily_top(db, limit)
         else:
             leaders_raw, total_participants = await _fetch_board_top(db, board_type, limit)
         await redis.set(cache_key, json.dumps({"leaders": leaders_raw, "total": total_participants}), ex=_LB_CACHE_TTL)

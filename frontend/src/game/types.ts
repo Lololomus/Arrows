@@ -362,6 +362,8 @@ export interface LevelResponse {
   grid: Grid;
   arrows: Arrow[];
   meta: LevelMeta;
+  daily_day_number?: number;
+  daily_date?: string;
 }
 
 /** Запрос завершения уровня */
@@ -370,6 +372,7 @@ export interface CompleteRequest {
   seed: number;
   moves: string[];
   timeSeconds: number;
+  isDaily?: boolean;
 }
 
 /** Ответ завершения уровня */
@@ -442,7 +445,7 @@ export interface ClaimReviveResponse {
   sessionId: string;
 }
 
-export type RewardPlacement = 'reward_daily_coins' | 'reward_hint' | 'reward_revive';
+export type RewardPlacement = 'reward_daily_coins' | 'reward_hint' | 'reward_revive' | 'reward_spin_retry';
 export type RewardIntentStatus = 'pending' | 'granted' | 'rejected' | 'expired';
 
 export interface RewardIntentCreateRequest {

@@ -300,6 +300,13 @@ export function GameScreen() {
   const user = useAppStore(s => s.user);
   const setUser = useAppStore(s => s.setUser);
   const setScreen = useAppStore(s => s.setScreen);
+  const isDailyMode = useAppStore(s => s.isDailyMode);
+  const setDailyMode = useAppStore(s => s.setDailyMode);
+  const isDailyModeRef = useRef(false);
+  isDailyModeRef.current = isDailyMode;
+  const dailyLevelNumRef = useRef<number | null>(null);
+  const dailyDayNumberRef = useRef<number | null>(null);
+  const dailySaveStartedRef = useRef(false);
 
   const gridSize = useGameStore(s => s.gridSize);
   const gameLevel = useGameStore(s => s.level);
@@ -713,18 +720,40 @@ export function GameScreen() {
     }
 
     try {
-      const levelData = await gameApi.getLevel(levelNum);
-      const diff = levelData.meta?.difficulty ?? 1;
-      setLevelDifficulty(diff);
-      const livesForLevel = getLivesForDifficulty(diff);
-      initLevel(levelNum, levelData.seed, levelData.grid, levelData.arrows, livesForLevel);
+      if (isDailyModeRef.current) {
+        const levelData = await gameApi.getDaily();
+        dailyLevelNumRef.current = levelData.level;
+        dailyDayNumberRef.current = levelData.daily_day_number ?? null;
+        dailySaveStartedRef.current = false;
+        const diff = levelData.meta?.difficulty ?? 1;
+        setLevelDifficulty(diff);
+        const livesForLevel = getLivesForDifficulty(diff);
+        initLevel(levelData.level, levelData.seed, levelData.grid, levelData.arrows, livesForLevel);
+      } else {
+        const levelData = await gameApi.getLevel(levelNum);
+        const diff = levelData.meta?.difficulty ?? 1;
+        setLevelDifficulty(diff);
+        const livesForLevel = getLivesForDifficulty(diff);
+        initLevel(levelNum, levelData.seed, levelData.grid, levelData.arrows, livesForLevel);
+      }
     } catch (error: any) {
       console.error(error);
+      if (isDailyModeRef.current) {
+        dailyLevelNumRef.current = null;
+        dailyDayNumberRef.current = null;
+        dailySaveStartedRef.current = false;
+        setDailyMode(false);
+        if (error?.status === 404) { alert('❌ Daily level not found'); }
+        else if (error?.status === 403) { alert('🔒 Daily недоступен'); }
+        else { alert('❌ Ошибка загрузки Daily'); }
+        setScreen('home');
+        return;
+      }
       if (error?.status === 404) { setNoMoreLevels(true); setStatus('victory'); }
       else if (error?.status === 403) { alert(`🔒 Уровень ${levelNum} закрыт!`); setScreen('home'); }
       else { alert(`❌ Ошибка загрузки уровня ${levelNum}`); setScreen('home'); }
     }
-  }, [cancelAutoSolve, initLevel, setStatus, setScreen]);
+  }, [cancelAutoSolve, initLevel, setStatus, setScreen, setDailyMode]);
 
   useEffect(() => {
     loadLevel(currentLevel);
@@ -990,15 +1019,42 @@ export function GameScreen() {
     status,
   ]);
 
+  const startDailySave = useCallback(async () => {
+    if (dailySaveStartedRef.current) return;
+    if (dailyLevelNumRef.current === null) return;
+    dailySaveStartedRef.current = true;
+    setSaveState('saving');
+    setSaveError(null);
+    try {
+      await gameApi.complete({
+        level: dailyLevelNumRef.current,
+        seed: dailyLevelNumRef.current,
+        moves: removedArrowIds,
+        timeSeconds: getElapsedSeconds(),
+        isDaily: true,
+      });
+      setSaveState('saved');
+    } catch (err: any) {
+      dailySaveStartedRef.current = false;
+      setSaveState('error');
+      setSaveError(err?.message ?? 'Ошибка сохранения daily');
+    }
+  }, [removedArrowIds, getElapsedSeconds]);
+
   useEffect(() => {
     if (!ENABLE_SERVER_PROGRESS_PERSIST) return;
-    if (status !== 'victory' || noMoreLevels) return;
+    if (status !== 'victory') return;
+    if (isDailyModeRef.current) {
+      void startDailySave();
+      return;
+    }
+    if (noMoreLevels) return;
     if (completedLevelsSentRef.current.has(gameLevel)) return;
     if (saveStartedLevelRef.current === gameLevel) return;
     if (saveResolvedLevelRef.current === gameLevel) return;
 
     void startVictorySave(gameLevel);
-  }, [gameLevel, noMoreLevels, startVictorySave, status]);
+  }, [gameLevel, noMoreLevels, startVictorySave, startDailySave, status]);
 
   useEffect(() => {
     if (!ENABLE_SERVER_PROGRESS_PERSIST) return;
@@ -1307,6 +1363,15 @@ export function GameScreen() {
 
   useEffect(() => cancelAutoSolve, [cancelAutoSolve]);
 
+  // Reset daily mode when GameScreen unmounts (handles all exit paths not covered by handleDailyDone)
+  useEffect(() => {
+    return () => {
+      if (isDailyModeRef.current) {
+        setDailyMode(false);
+      }
+    };
+  }, [setDailyMode]);
+
   const onMenuClick = useCallback(() => { if (!isIntroAnimating) setConfirmAction('menu'); }, [isIntroAnimating]);
   const jumpToLevel = useCallback((level: number) => {
     const nextLevel = Math.max(1, Math.floor(level));
@@ -1381,8 +1446,34 @@ export function GameScreen() {
     }
   }, [adReviveUsedThisLevel, applyReviveQuotaFromStatus, currentLevel, loadReviveStatus, pendingReviveIntentId, reviveLoading]);
 
+  const handleDailyDone = useCallback(() => {
+    dailySaveStartedRef.current = false;
+    dailyLevelNumRef.current = null;
+    dailyDayNumberRef.current = null;
+    setDailyMode(false);
+    setScreen('home');
+  }, [setDailyMode, setScreen]);
+
+  const handleDailyShare = useCallback(() => {
+    const moves = removedArrowIds.length;
+    const dayNum = dailyDayNumberRef.current ?? dailyLevelNumRef.current ?? 0;
+    const text = `Daily Challenge #${dayNum}: прошёл за ${moves} ходов! 🏹\nПопробуй: @ArrowRewardBot`;
+    const tg = (window as Window & { Telegram?: { WebApp?: { openTelegramLink?: (url: string) => void } } }).Telegram?.WebApp;
+    const shareUrl = `https://t.me/share/url?text=${encodeURIComponent(text)}`;
+    if (tg?.openTelegramLink) {
+      tg.openTelegramLink(shareUrl);
+    } else {
+      void navigator.clipboard?.writeText(text);
+    }
+  }, [removedArrowIds.length]);
+
   const handleNextLevel = useCallback(() => {
     if (status !== 'victory' || noMoreLevels) return;
+
+    if (isDailyModeRef.current) {
+      handleDailyDone();
+      return;
+    }
 
     if (!ENABLE_SERVER_PROGRESS_PERSIST) {
       maybeShowInterstitialForVictory(gameLevel, levelDifficulty, getElapsedSeconds());
@@ -1403,6 +1494,7 @@ export function GameScreen() {
   }, [
     getElapsedSeconds,
     gameLevel,
+    handleDailyDone,
     levelDifficulty,
     maybeShowInterstitialForVictory,
     navigationState,
@@ -1416,10 +1508,20 @@ export function GameScreen() {
 
   const handleVictoryRetry = useCallback(() => {
     if (status !== 'victory' || noMoreLevels) return;
+    if (isDailyModeRef.current) {
+      dailySaveStartedRef.current = false;
+      void startDailySave();
+      return;
+    }
     void startVictorySave(gameLevel, true);
-  }, [gameLevel, noMoreLevels, startVictorySave, status]);
+  }, [gameLevel, noMoreLevels, startDailySave, startVictorySave, status]);
 
   const handleVictoryMenu = useCallback(() => {
+    if (isDailyModeRef.current) {
+      handleDailyDone();
+      return;
+    }
+
     if (status !== 'victory') {
       confirmMenu();
       return;
@@ -1449,6 +1551,7 @@ export function GameScreen() {
     void startVictorySave(gameLevel, true);
   }, [
     clearVictoryAction,
+    handleDailyDone,
     confirmMenu,
     gameLevel,
     navigationState,
@@ -1470,13 +1573,15 @@ export function GameScreen() {
     setScreen('home');
   }, [clearVictoryAction, setScreen]);
 
+  const displayLevel = isDailyMode ? (dailyDayNumberRef.current ?? currentLevel) : currentLevel;
+
   return (
     <div
       className="relative w-full h-full overflow-hidden font-sans select-none touch-none"
       style={{ backgroundImage: `url(${gameBgImage})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: '#1e3a52' }}
     >
       <GameHUD
-        currentLevel={currentLevel}
+        currentLevel={displayLevel}
         lives={lives}
         difficulty={levelDifficulty}
         hintBalance={hintBalance}
@@ -1512,7 +1617,7 @@ export function GameScreen() {
                 </motion.div>
             </div>
           ) : status === 'loading' ? (
-            <LevelTransitionLoader level={currentLevel} />
+            <LevelTransitionLoader level={displayLevel} />
           ) : (
             <CanvasBoard
               key={`canvas-${currentLevel}`}
@@ -1605,6 +1710,8 @@ export function GameScreen() {
         onDefeatRetry={confirmRestart}
         onVictoryMenu={handleVictoryMenu}
         onDefeatMenu={confirmMenu}
+        isDaily={isDailyMode}
+        onShare={handleDailyShare}
       />
     </div>
   );

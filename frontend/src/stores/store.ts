@@ -50,6 +50,15 @@ interface AppState {
   error: string | null;
   setError: (error: string | null) => void;
   clearError: () => void;
+
+  spinAvailable: boolean;
+  loginStreak: number;
+  spinRetryAvailable: boolean;
+  spinPendingPrize: { prizeType: 'coins' | 'hints' | 'revive'; prizeAmount: number } | null;
+  setSpinStatus: (available: boolean, streak: number, retryAvailable?: boolean, pendingPrize?: { prizeType: 'coins' | 'hints' | 'revive'; prizeAmount: number } | null) => void;
+
+  isDailyMode: boolean;
+  setDailyMode: (isDailyMode: boolean) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -99,6 +108,15 @@ export const useAppStore = create<AppState>()(
       error: null,
       setError: (error) => set({ error }),
       clearError: () => set({ error: null }),
+
+      spinAvailable: false,
+      loginStreak: 0,
+      spinRetryAvailable: false,
+      spinPendingPrize: null,
+      setSpinStatus: (available, streak, retryAvailable, pendingPrize) => set({ spinAvailable: available, loginStreak: streak, spinRetryAvailable: retryAvailable ?? false, spinPendingPrize: pendingPrize ?? null }),
+
+      isDailyMode: false,
+      setDailyMode: (isDailyMode) => set({ isDailyMode }),
     }),
     {
       name: 'arrow-puzzle-app',

@@ -38,6 +38,8 @@ interface GameResultModalProps {
   onDefeatRetry: () => void;
   onVictoryMenu: () => void;
   onDefeatMenu: () => void;
+  isDaily?: boolean;
+  onShare?: () => void;
 }
 
 export function GameResultModal({
@@ -64,6 +66,8 @@ export function GameResultModal({
   onDefeatRetry,
   onVictoryMenu,
   onDefeatMenu,
+  isDaily = false,
+  onShare,
 }: GameResultModalProps) {
   const showVictory = status === 'victory' && !noMoreLevels;
   const showDefeat = status === 'defeat';
@@ -83,6 +87,8 @@ export function GameResultModal({
           onNextLevel={onNextLevel}
           onRetry={onVictoryRetry}
           onMenu={onVictoryMenu}
+          isDaily={isDaily}
+          onShare={onShare}
         />
       )}
       {showDefeat && (

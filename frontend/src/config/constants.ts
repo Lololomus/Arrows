@@ -221,6 +221,7 @@ export const API_ENDPOINTS = {
   },
   game: {
     level: (n: number) => `/game/level/${n}`,
+    daily: '/game/daily',
     complete: '/game/complete',
     completeAndNext: '/game/complete-and-next',
     energy: '/game/energy',
@@ -259,6 +260,14 @@ export const API_ENDPOINTS = {
     list: '/tasks',
     claim: '/tasks/claim',
   },
+  spin: {
+    status: '/spin/status',
+    roll: '/spin/roll',
+    retry: '/spin/retry',
+    collect: '/spin/collect',
+    devReset: '/spin/dev/reset',
+    devSetStreak: '/spin/dev/set-streak',
+  },
 };
 
 // ============================================
@@ -272,6 +281,7 @@ export const ADSGRAM_BLOCK_IDS = {
   rewardDailyCoins: import.meta.env.VITE_ADSGRAM_REWARD_DAILY_COINS_BLOCK_ID || '',
   rewardHint: import.meta.env.VITE_ADSGRAM_REWARD_HINT_BLOCK_ID || '',
   rewardRevive: import.meta.env.VITE_ADSGRAM_REWARD_REVIVE_BLOCK_ID || '',
+  rewardSpinRetry: import.meta.env.VITE_ADSGRAM_REWARD_SPIN_RETRY_BLOCK_ID || '',
   interstitialProgress: import.meta.env.VITE_ADSGRAM_INTERSTITIAL_PROGRESS_BLOCK_ID || '',
   interstitialHard: import.meta.env.VITE_ADSGRAM_INTERSTITIAL_HARD_BLOCK_ID || '',
 } as const;

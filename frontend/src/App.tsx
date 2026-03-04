@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import '@fontsource/bungee-inline';
 import { useAppStore } from './stores/store';
 import { authApi, socialApi } from './api/client';
-import { UI_ANIMATIONS } from './config/constants';
+import { ADS_ENABLED, UI_ANIMATIONS } from './config/constants';
 import { RewardToastHost } from './components/ui/RewardToastHost';
 import { SmartLoader } from './components/ui/SmartLoader';
 import { AuthExpiredScreen } from './components/AuthExpiredScreen';
@@ -134,6 +134,9 @@ export default function App() {
   }, [runBootstrap]);
 
   useEffect(() => {
+    if (!ADS_ENABLED) {
+      return;
+    }
     startRewardReconciler();
     return () => {
       stopRewardReconciler();

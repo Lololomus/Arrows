@@ -456,6 +456,9 @@ export const gameApi = {
   getLevel: (level: number): Promise<LevelResponse> =>
     request<LevelResponse>(API_ENDPOINTS.game.level(level)),
 
+  getDaily: (): Promise<LevelResponse> =>
+    request<LevelResponse>(API_ENDPOINTS.game.daily),
+
   complete: async (data: CompleteRequest): Promise<CompleteResponse> => {
     const raw = await request<RawCompleteResponse | CompleteResponse>(API_ENDPOINTS.game.complete, {
       method: 'POST',
@@ -464,6 +467,7 @@ export const gameApi = {
         seed: data.seed,
         moves: data.moves,
         time_seconds: data.timeSeconds,
+        is_daily: data.isDaily ?? false,
       }),
     });
     return normalizeCompleteResponse(raw as RawCompleteResponse & Partial<CompleteResponse>, data.level);
@@ -945,6 +949,95 @@ export const socialApi = {
       method: 'POST',
       body: JSON.stringify({ channel_id: channelId }),
     }),
+};
+
+// ============================================
+// SPIN API
+// ============================================
+
+export interface SpinStatusResponse {
+  available: boolean;
+  streak: number;
+  tier: number;
+  nextTierInDays: number;
+  retryAvailable: boolean;
+  pendingPrize: { prizeType: 'coins' | 'hints' | 'revive'; prizeAmount: number } | null;
+}
+
+export interface SpinRollResponse {
+  prizeType: 'coins' | 'hints' | 'revive';
+  prizeAmount: number;
+  streak: number;
+  tier: number;
+  retryAvailable: boolean;
+}
+
+export interface SpinCollectResponse {
+  prizeType: 'coins' | 'hints' | 'revive';
+  prizeAmount: number;
+}
+
+export const spinApi = {
+  getStatus: async (): Promise<SpinStatusResponse> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.spin.status);
+    const rawPending = raw.pending_prize as Record<string, unknown> | null | undefined;
+    return {
+      available: Boolean(raw.available),
+      streak: Number(raw.streak ?? 0),
+      tier: Number(raw.tier ?? 0),
+      nextTierInDays: Number(raw.next_tier_in_days ?? raw.nextTierInDays ?? 0),
+      retryAvailable: Boolean(raw.retry_available),
+      pendingPrize: rawPending
+        ? {
+            prizeType: (rawPending.prize_type ?? rawPending.prizeType) as SpinRollResponse['prizeType'],
+            prizeAmount: Number(rawPending.prize_amount ?? rawPending.prizeAmount ?? 0),
+          }
+        : null,
+    };
+  },
+
+  roll: async (): Promise<SpinRollResponse> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.spin.roll, { method: 'POST' });
+    return {
+      prizeType: (raw.prize_type ?? raw.prizeType) as SpinRollResponse['prizeType'],
+      prizeAmount: Number(raw.prize_amount ?? raw.prizeAmount ?? 0),
+      streak: Number(raw.streak ?? 0),
+      tier: Number(raw.tier ?? 0),
+      retryAvailable: Boolean(raw.retry_available),
+    };
+  },
+
+  retry: async (): Promise<SpinRollResponse> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.spin.retry, { method: 'POST' });
+    return {
+      prizeType: (raw.prize_type ?? raw.prizeType) as SpinRollResponse['prizeType'],
+      prizeAmount: Number(raw.prize_amount ?? raw.prizeAmount ?? 0),
+      streak: Number(raw.streak ?? 0),
+      tier: Number(raw.tier ?? 0),
+      retryAvailable: false,
+    };
+  },
+
+  collect: async (): Promise<SpinCollectResponse> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.spin.collect, { method: 'POST' });
+    return {
+      prizeType: (raw.prize_type ?? raw.prizeType) as SpinCollectResponse['prizeType'],
+      prizeAmount: Number(raw.prize_amount ?? raw.prizeAmount ?? 0),
+    };
+  },
+
+  devReset: async (): Promise<{ success: boolean }> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.spin.devReset, { method: 'POST' });
+    return { success: Boolean(raw.success) };
+  },
+
+  devSetStreak: async (streak: number): Promise<{ success: boolean; streak: number }> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.spin.devSetStreak, {
+      method: 'POST',
+      body: JSON.stringify({ streak }),
+    });
+    return { success: Boolean(raw.success), streak: Number(raw.streak ?? streak) };
+  },
 };
 
 export const tasksApi = {
