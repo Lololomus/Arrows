@@ -1,11 +1,11 @@
 /**
  * HintEmptyModal - shown when user clicks Hint with hintBalance=0.
- * Options: watch ad for +1 hint, go to shop, or close.
+ * Options: watch ad for +3 hints or close.
  */
 
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Lightbulb, ShoppingBag, Play } from 'lucide-react';
+import { Lightbulb, Play } from 'lucide-react';
 import { authApi } from '../../api/client';
 import { ADSGRAM_BLOCK_IDS } from '../../config/constants';
 import { useAppStore } from '../../stores/store';
@@ -20,7 +20,6 @@ interface HintEmptyModalProps {
   open: boolean;
   onClose: () => void;
   onHintEarned: () => void;
-  onGoToShop: () => void;
   adAllowed: boolean;
 }
 
@@ -28,7 +27,6 @@ export function HintEmptyModal({
   open,
   onClose,
   onHintEarned,
-  onGoToShop,
   adAllowed,
 }: HintEmptyModalProps) {
   const trackedIntent = useRewardStore((s) => s.activeIntents.reward_hint ?? null);
@@ -46,7 +44,7 @@ export function HintEmptyModal({
       return;
     } catch {
       const currentHintBalance = useAppStore.getState().user?.hintBalance ?? 0;
-      useAppStore.getState().updateUser({ hintBalance: Math.max(currentHintBalance, 1) });
+      useAppStore.getState().updateUser({ hintBalance: Math.max(currentHintBalance, 3) });
     }
   };
 
@@ -198,7 +196,7 @@ export function HintEmptyModal({
               Подсказки закончились
             </h3>
             <p className="text-sm text-white/60 mb-5">
-              Посмотрите рекламу или купите подсказки в магазине
+              Смотрите рекламу — получите 3 подсказки.
             </p>
 
             {infoMessage && <p className="text-sm text-amber-300 mb-3">{infoMessage}</p>}
@@ -215,14 +213,6 @@ export function HintEmptyModal({
                   {loading ? 'Загрузка...' : pendingIntentId ? 'Проверить награду' : 'Смотреть рекламу'}
                 </button>
               )}
-
-              <button
-                onClick={() => { onClose(); onGoToShop(); }}
-                className="w-full py-3.5 bg-white/5 rounded-xl text-white font-bold flex items-center justify-center gap-2"
-              >
-                <ShoppingBag size={18} />
-                Магазин
-              </button>
 
               <button
                 onClick={onClose}

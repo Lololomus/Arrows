@@ -99,6 +99,7 @@ class Settings(BaseSettings):
     AD_FIRST_ELIGIBLE_LEVEL: int = 21
     AD_DAILY_COINS_REWARD: int = 20
     AD_DAILY_COINS_LIMIT: int = 5
+    AD_HINT_REWARD: int = 3
     AD_RESET_TIMEZONE: str = "Europe/Moscow"
     AD_INTERSTITIAL_EASY_NORMAL_INTERVAL: int = 5
     AD_INTERSTITIAL_EASY_NORMAL_MIN_LEVEL_SECONDS: int = 20

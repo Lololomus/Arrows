@@ -3,8 +3,8 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { motion } from 'framer-motion';
-import { Heart, Lightbulb } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Heart, Lightbulb, Play } from 'lucide-react';
 import { useGameStore } from '../../stores/store';
 import {
   getDifficultyConfig,
@@ -20,6 +20,7 @@ interface GameHUDProps {
   lives: number;
   difficulty: DifficultyValue;
   hintBalance: number;
+  adHintAvailable: boolean;
   onHintClick: () => void;
   onMenuClick: () => void;
   children: ReactNode;
@@ -190,6 +191,7 @@ function TopBar({
 
 function BottomBar({
   hintBalance,
+  adHintAvailable,
   lives,
   currentLevel,
   lifeHitTick,
@@ -197,13 +199,15 @@ function BottomBar({
   onMenuClick,
 }: {
   hintBalance: number;
+  adHintAvailable: boolean;
   lives: number;
   currentLevel: number;
   lifeHitTick: number;
   onHintClick: () => void;
   onMenuClick: () => void;
 }) {
-  const disabled = false; // hint button always clickable — opens modal when balance=0
+  const isAdState = hintBalance <= 0 && adHintAvailable;
+  const isDisabled = hintBalance <= 0 && !adHintAvailable;
 
   return (
     <div className="relative z-20 w-full mt-auto">
@@ -225,39 +229,86 @@ function BottomBar({
           <span className="text-white/90 font-bold text-xs tracking-wider">MENU</span>
         </motion.button>
 
-        {/* 2. Статус Жизней — ТЕПЕРЬ ПЛОТНЫЙ ФОН КАК У МЕНЮ */}
+        {/* 2. Статус Жизней */}
         <div className="bg-slate-800/90 backdrop-blur-md rounded-2xl border border-white/10 shrink-0 px-6 flex items-center justify-center shadow-[0_8px_24px_rgba(0,0,0,0.2)]">
           <LivesDisplay lives={lives} currentLevel={currentLevel} lifeHitTick={lifeHitTick} />
         </div>
 
-        {/* 3. Кнопка Подсказки */}
-        <motion.button
-          whileTap={{ scale: 0.93 }}
-          onClick={onHintClick}
-          disabled={disabled}
-          className={`
-            flex-1 flex items-center justify-center gap-2.5
-            py-4 rounded-2xl
-            border 
-            transition-all duration-200
-            ${disabled
-              ? 'bg-slate-800/50 border-white/5 opacity-50 shadow-none'
-              : 'bg-gradient-to-b from-amber-500 to-orange-600 border-orange-400/30 shadow-[0_8px_24px_rgba(245,158,11,0.3)]'
-            }
-          `}
-        >
-          <Lightbulb
-            size={22}
-            className={disabled ? 'text-white/30' : 'text-yellow-100'}
-          />
-          <span
-            className={`font-bold text-xl tabular-nums leading-none ${
-              disabled ? 'text-white/30' : 'text-white'
-            }`}
+        {/* 3. Переработанная Кнопка Подсказки с интеграцией Рекламы */}
+        <div className="relative flex-1">
+          <motion.button
+            whileTap={!isDisabled ? { scale: 0.93 } : {}}
+            onClick={onHintClick}
+            disabled={isDisabled}
+            className={`
+              w-full h-full min-h-[56px] flex items-center justify-center px-2 rounded-2xl
+              border relative overflow-hidden
+              transition-all duration-300 ease-out
+              ${isDisabled
+                ? 'bg-slate-800/50 border-white/5 opacity-50 shadow-none'
+                : isAdState
+                  ? 'bg-gradient-to-b from-emerald-500 to-teal-600 border-emerald-400/40 shadow-[0_8px_24px_rgba(16,185,129,0.35)]'
+                  : 'bg-gradient-to-b from-amber-500 to-orange-600 border-orange-400/30 shadow-[0_8px_24px_rgba(245,158,11,0.3)]'
+              }
+            `}
           >
-            {hintBalance}
-          </span>
-        </motion.button>
+            <AnimatePresence mode="wait">
+              {/* СОСТОЯНИЕ 1: Реклама доступна (0 подсказок) */}
+              {isAdState && (
+                <motion.div
+                  key="ad-state"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="flex items-center gap-2.5"
+                >
+                  <div className="bg-white/25 rounded-full p-1.5 flex items-center justify-center backdrop-blur-md shadow-inner">
+                    <Play size={14} fill="currentColor" className="text-white ml-0.5" />
+                  </div>
+                  <div className="flex flex-col items-start leading-none justify-center">
+                    <span className="text-[9px] font-bold text-emerald-50 uppercase tracking-widest mb-1 opacity-90">
+                      Бесплатно
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className="font-black text-lg text-white leading-none">+3</span>
+                      <Lightbulb size={14} className="text-yellow-200" />
+                    </div>
+                  </div>
+                  
+                  {/* Легкий анимированный блик на кнопке */}
+                  <motion.div 
+                    animate={{ x: ['-100%', '200%'] }}
+                    transition={{ repeat: Infinity, duration: 2.5, ease: "easeInOut", repeatDelay: 1 }}
+                    className="absolute inset-0 w-1/2 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 pointer-events-none"
+                  />
+                </motion.div>
+              )}
+
+              {/* СОСТОЯНИЕ 2: Обычное (или полностью отключено) */}
+              {!isAdState && (
+                <motion.div
+                  key="normal-state"
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  className="flex items-center gap-2.5"
+                >
+                  <Lightbulb
+                    size={22}
+                    className={isDisabled ? 'text-white/30' : 'text-yellow-100'}
+                  />
+                  <span
+                    className={`font-bold text-xl tabular-nums leading-none mt-0.5 ${
+                      isDisabled ? 'text-white/30' : 'text-white'
+                    }`}
+                  >
+                    {hintBalance}
+                  </span>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.button>
+        </div>
       </motion.div>
     </div>
   );
@@ -272,6 +323,7 @@ export function GameHUD({
   lives,
   difficulty,
   hintBalance,
+  adHintAvailable,
   onHintClick,
   onMenuClick,
   children,
@@ -292,6 +344,7 @@ export function GameHUD({
 
       <BottomBar
         hintBalance={hintBalance}
+        adHintAvailable={adHintAvailable}
         lives={lives}
         currentLevel={currentLevel}
         lifeHitTick={lifeHitTick}

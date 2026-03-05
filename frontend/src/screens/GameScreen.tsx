@@ -399,6 +399,10 @@ export function GameScreen() {
     && ADS_ENABLED
     && isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardRevive)
     && (revivePending || reviveQuota === null || reviveQuota.remaining > 0);
+  const adHintAvailable = currentLevel >= ADS_FIRST_ELIGIBLE_LEVEL
+    && ADS_ENABLED
+    && isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardHint);
+  const adHintAvailableVisual = adHintAvailable || import.meta.env.DEV;
 
   const getElapsedSeconds = useCallback(() => {
     if (levelStartTime <= 0) return 1;
@@ -1585,6 +1589,7 @@ export function GameScreen() {
         lives={lives}
         difficulty={levelDifficulty}
         hintBalance={hintBalance}
+        adHintAvailable={adHintAvailableVisual}
         onHintClick={onHintClick}
         onMenuClick={onMenuClick}
       >
@@ -1680,10 +1685,7 @@ export function GameScreen() {
         open={showHintModal}
         onClose={() => setShowHintModal(false)}
         onHintEarned={() => void onHintClick()}
-        onGoToShop={() => setScreen('shop')}
-        adAllowed={currentLevel >= ADS_FIRST_ELIGIBLE_LEVEL
-          && ADS_ENABLED
-          && isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardHint)}
+        adAllowed={adHintAvailableVisual}
       />
 
       <GameResultModal

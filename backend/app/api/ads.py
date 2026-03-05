@@ -292,7 +292,7 @@ async def claim_hint(
     result = await db.execute(
         update(User)
         .where(User.id == user.id, User.hint_balance == 0)
-        .values(hint_balance=User.hint_balance + 1)
+        .values(hint_balance=User.hint_balance + settings.AD_HINT_REWARD)
         .returning(User.hint_balance)
     )
     row = result.first()
@@ -305,7 +305,7 @@ async def claim_hint(
             user_id=user.id,
             placement=PLACEMENT_HINT,
             ad_reference=request.ad_reference,
-            reward_amount=1,
+            reward_amount=settings.AD_HINT_REWARD,
         )
     )
     await db.commit()

@@ -95,3 +95,6 @@ htmlcov/
 
 # Game levels (local only)
 backend/app/levels/level_*.json
+
+# Local sync script
+scripts/sync_levels.ps1

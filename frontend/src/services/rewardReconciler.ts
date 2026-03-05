@@ -21,7 +21,7 @@ function getRewardToastMessage(status: RewardIntentStatusResponse): string | nul
       case 'reward_daily_coins':
         return '+20 монет начислены';
       case 'reward_hint':
-        return '+1 подсказка начислена';
+        return '+3 подсказки начислены';
       case 'reward_revive':
         return 'Награда за продолжение подтверждена';
       case 'reward_spin_retry':

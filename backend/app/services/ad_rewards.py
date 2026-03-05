@@ -386,7 +386,7 @@ async def _grant_hint(
     result = await db.execute(
         update(User)
         .where(User.id == user.id)
-        .values(hint_balance=User.hint_balance + 1)
+        .values(hint_balance=User.hint_balance + settings.AD_HINT_REWARD)
         .returning(User.hint_balance)
     )
     row = result.first()
@@ -396,7 +396,7 @@ async def _grant_hint(
         user_id=user.id,
         placement=PLACEMENT_HINT,
         ad_reference=ad_reference,
-        reward_amount=1,
+        reward_amount=settings.AD_HINT_REWARD,
     )
     db.add(claim)
 
