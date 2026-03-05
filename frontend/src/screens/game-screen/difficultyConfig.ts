@@ -10,7 +10,7 @@
  * Lives are fixed across all difficulty tiers.
  */
 
-import { Trophy, Crown, Medal, Flame, HeartCrack, type LucideIcon } from 'lucide-react';
+import { Trophy, Crown, Medal, Flame, Skull, HeartCrack, type LucideIcon } from 'lucide-react';
 
 // ============================================
 // TYPES
@@ -140,20 +140,20 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
   },
   impossible: {
     label: 'Impossible',
-    headerColor: 'text-purple-400',
-    hudBadgeColor: 'text-purple-400',
-    hudDotColor: 'bg-purple-400',
+    headerColor: 'text-red-500',
+    hudBadgeColor: 'text-red-500',
+    hudDotColor: 'bg-red-500',
     lives: 3,
-    victoryTitle: 'ЛЕГЕНДА!',
-    victoryIcon: Flame,
-    victoryIconColor: 'text-purple-200',
-    victoryGlow: 'bg-purple-600',
-    victoryTextGradient: 'from-purple-200 via-fuchsia-400 to-orange-400',
+    victoryTitle: 'НЕВОЗМОЖНО!',
+    victoryIcon: Skull,
+    victoryIconColor: 'text-red-200',
+    victoryGlow: 'bg-red-600',
+    victoryTextGradient: 'from-red-200 via-red-500 to-orange-400',
     victoryButton:
-      'bg-gradient-to-r from-purple-700 to-fuchsia-600 shadow-[0_0_35px_rgba(147,51,234,0.5)]',
-    badgeStyle: 'bg-purple-500/20 border-purple-500/30 text-purple-300',
-    primary: '#9333ea',
-    secondary: '#c084fc',
+      'bg-gradient-to-r from-red-700 to-red-500 shadow-[0_0_35px_rgba(239,68,68,0.55)]',
+    badgeStyle: 'bg-red-500/20 border-red-500/30 text-red-300',
+    primary: '#ff1744',
+    secondary: '#ff5252',
     scale: 1.4,
     bounce: 0.8,
     reward: 50,
