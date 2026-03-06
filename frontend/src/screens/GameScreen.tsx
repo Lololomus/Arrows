@@ -18,10 +18,10 @@ import { useMotionValue, motion } from 'framer-motion';
 import { useAppStore, useGameStore } from '../stores/store';
 import { useRewardStore } from '../stores/rewardStore';
 import { CanvasBoard } from '../components/CanvasBoard';
-import { adsApi, gameApi, sendAuthorizedKeepalive, type CompleteAndNextResponse } from '../api/client';
+import { ApiError, adsApi, gameApi, sendAuthorizedKeepalive, type CompleteAndNextResponse } from '../api/client';
 import { isValidInterstitialBlockId, isValidRewardedBlockId, showInterstitialAd, showRewardedAd } from '../services/adsgram';
 import { getRewardedFlowMessage } from '../services/rewardedAds';
-import { clearPendingRewardIntent } from '../services/rewardReconciler';
+import { clearPendingRewardIntent, rememberPendingRewardIntent } from '../services/rewardReconciler';
 import {
   API_ENDPOINTS,
   MAX_CELL_SIZE,
@@ -386,6 +386,7 @@ export function GameScreen() {
   const resolvedReviveIntent = useRewardStore((s) => s.lastResolved.reward_revive ?? null);
   const clearResolvedReward = useRewardStore((s) => s.clearResolved);
   const reviveOpportunityIdRef = useRef(createClientId());
+  const reviveFailedAttemptsRef = useRef(0);
   const previousStatusRef = useRef(status);
   const [reviveLoading, setReviveLoading] = useState(false);
   const [reviveMessage, setReviveMessage] = useState<string | null>(null);
@@ -727,6 +728,7 @@ export function GameScreen() {
     setReviveQuota(null);
     setAdReviveUsedThisLevel(false);
     reviveOpportunityIdRef.current = createClientId();
+    reviveFailedAttemptsRef.current = 0;
 
     const prefetched = prefetchedNextLevelRef.current;
     prefetchedNextLevelRef.current = null;
@@ -797,6 +799,7 @@ export function GameScreen() {
     }
 
     reviveOpportunityIdRef.current = createClientId();
+    reviveFailedAttemptsRef.current = 0;
     setReviveMessage(null);
 
     if (!pendingReviveIntentId) {
@@ -1432,35 +1435,68 @@ export function GameScreen() {
     }
   }, [reviveLoading]);
 
-  // === REVIVE через рекламу (мгновенное применение после просмотра) ===
+  // === REVIVE через рекламу ===
+  // Попытка 1: обычная. Если пользователь не досмотрел (not_completed/provider_error) —
+  // разрешаем одну ещё попытку. Попытка 2: полуслепой оптимистик — воскрешаем
+  // независимо от ответа SDK, подтверждение в фоне.
   const handleRevive = useCallback(async () => {
     if (reviveLoading || adReviveUsedThisLevel || pendingReviveIntentId) return;
     setReviveLoading(true);
     setReviveMessage(null);
+
+    const isSecondAttempt = reviveFailedAttemptsRef.current >= 1;
+
+    // На второй попытке берём свежий sessionId, чтобы не получить 409
+    if (isSecondAttempt) {
+      reviveOpportunityIdRef.current = createClientId();
+    }
+
     try {
       const intent = await adsApi.createRewardIntent({
         placement: 'reward_revive',
         level: currentLevel,
         sessionId: reviveOpportunityIdRef.current,
       });
+
       const adResult = await showRewardedAd(ADSGRAM_BLOCK_IDS.rewardRevive);
-      if (adResult.success) {
-        // Воскрешаем СРАЗУ после просмотра, не ждём подтверждения сервера
+
+      if (adResult.success || isSecondAttempt) {
+        // Реклама досмотрена — или вторая попытка (полуслепой оптимистик).
+        // В обоих случаях воскрешаем немедленно, сервер подтверждаем в фоне.
         setAdReviveUsedThisLevel(true);
         useGameStore.getState().revivePlayer();
-        // Подтверждаем в фоне (fire-and-forget)
+        // Если не success (вторая попытка, SDK не вернул done:true) — сохраняем
+        // intent для reconciler'а на случай, если webhook от AdsGram придёт позже.
+        if (!adResult.success) {
+          rememberPendingRewardIntent({ intentId: intent.intentId, placement: 'reward_revive' });
+        }
         void adsApi.clientCompleteRewardIntent(intent.intentId).then((s) => {
           applyReviveQuotaFromStatus(s);
         }).catch(() => {
-          void loadReviveStatus(currentLevel);
+          if (adResult.success) void loadReviveStatus(currentLevel);
         });
         return;
       }
-      // Реклама не досмотрена — отменяем intent
-      void adsApi.cancelRewardIntent(intent.intentId).catch(() => {});
-      setReviveMessage(getRewardedFlowMessage('reward_revive', { outcome: 'not_completed' }));
-    } catch {
-      setReviveMessage('Не удалось связаться с сервером. Попробуйте ещё раз.');
+
+      // Первая попытка не удалась — разрешаем ещё одну попытку.
+      reviveFailedAttemptsRef.current += 1;
+
+      if (adResult.outcome === 'provider_error') {
+        // Технический сбой AdsGram — intent оставляем (webhook может прийти позже)
+        rememberPendingRewardIntent({ intentId: intent.intentId, placement: 'reward_revive' });
+        setReviveMessage('Ошибка загрузки рекламы. Попробуйте ещё раз.');
+      } else {
+        // not_completed — пользователь закрыл рекламу, отменяем intent
+        void adsApi.cancelRewardIntent(intent.intentId).catch(() => {});
+        setReviveMessage(getRewardedFlowMessage('reward_revive', { outcome: 'not_completed' }));
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        // Intent уже активен (race) — не критично, reconciler разберётся
+        setReviveMessage('Воскрешение уже в процессе. Подождите...');
+      } else {
+        setReviveMessage('Не удалось связаться с сервером. Попробуйте ещё раз.');
+      }
     } finally {
       setReviveLoading(false);
     }
