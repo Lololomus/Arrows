@@ -83,6 +83,7 @@ async def get_ads_status(
             resets_at=resets_at.replace(tzinfo=timezone.utc).isoformat() if isinstance(resets_at, datetime) else "",
         ),
         hint_ad_available=eligible and user.hint_balance == 0,
+        hint_ad_reward=settings.AD_HINT_REWARD,
     )
 
 

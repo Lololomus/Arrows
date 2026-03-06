@@ -21,6 +21,7 @@ interface GameHUDProps {
   difficulty: DifficultyValue;
   hintBalance: number;
   adHintAvailable: boolean;
+  hintAdRewardAmount?: number;
   onHintClick: () => void;
   onMenuClick: () => void;
   children: ReactNode;
@@ -192,6 +193,7 @@ function TopBar({
 function BottomBar({
   hintBalance,
   adHintAvailable,
+  hintAdRewardAmount = 3,
   lives,
   currentLevel,
   lifeHitTick,
@@ -200,6 +202,7 @@ function BottomBar({
 }: {
   hintBalance: number;
   adHintAvailable: boolean;
+  hintAdRewardAmount?: number;
   lives: number;
   currentLevel: number;
   lifeHitTick: number;
@@ -270,7 +273,7 @@ function BottomBar({
                       Бесплатно
                     </span>
                     <div className="flex items-center gap-1">
-                      <span className="font-black text-lg text-white leading-none">+3</span>
+                      <span className="font-black text-lg text-white leading-none">+{hintAdRewardAmount}</span>
                       <Lightbulb size={14} className="text-yellow-200" />
                     </div>
                   </div>
@@ -324,6 +327,7 @@ export function GameHUD({
   difficulty,
   hintBalance,
   adHintAvailable,
+  hintAdRewardAmount = 3,
   onHintClick,
   onMenuClick,
   children,
@@ -345,6 +349,7 @@ export function GameHUD({
       <BottomBar
         hintBalance={hintBalance}
         adHintAvailable={adHintAvailable}
+        hintAdRewardAmount={hintAdRewardAmount}
         lives={lives}
         currentLevel={currentLevel}
         lifeHitTick={lifeHitTick}

@@ -403,6 +403,22 @@ export function GameScreen() {
     && ADS_ENABLED
     && isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardHint);
   const adHintAvailableVisual = adHintAvailable || import.meta.env.DEV;
+  const [hintAdRewardAmount, setHintAdRewardAmount] = useState(3);
+
+  useEffect(() => {
+    let cancelled = false;
+    void adsApi.getStatus()
+      .then((status) => {
+        const reward = Number(status.hintAdReward ?? 3);
+        if (!cancelled && Number.isFinite(reward) && reward > 0) {
+          setHintAdRewardAmount(Math.floor(reward));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [currentLevel]);
 
   const getElapsedSeconds = useCallback(() => {
     if (levelStartTime <= 0) return 1;
@@ -1590,6 +1606,7 @@ export function GameScreen() {
         difficulty={levelDifficulty}
         hintBalance={hintBalance}
         adHintAvailable={adHintAvailableVisual}
+        hintAdRewardAmount={hintAdRewardAmount}
         onHintClick={onHintClick}
         onMenuClick={onMenuClick}
       >
@@ -1684,8 +1701,9 @@ export function GameScreen() {
       <HintEmptyModal
         open={showHintModal}
         onClose={() => setShowHintModal(false)}
-        onHintEarned={() => void onHintClick()}
+        onHintEarned={() => {}}
         adAllowed={adHintAvailableVisual}
+        hintRewardAmount={hintAdRewardAmount}
       />
 
       <GameResultModal

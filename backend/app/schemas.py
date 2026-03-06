@@ -407,6 +407,7 @@ class AdsStatusResponse(BaseModel):
     current_level: int
     daily_coins: DailyCoinsStatus
     hint_ad_available: bool
+    hint_ad_reward: int
 
 class ClaimDailyCoinsRequest(BaseModel):
     """Запрос награды за рекламу — дневные монеты."""

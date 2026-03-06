@@ -1,9 +1,9 @@
 /**
  * HintEmptyModal - shown when user clicks Hint with hintBalance=0.
- * Options: watch ad for +3 hints or close.
+ * Options: watch ad for hint reward or close.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Lightbulb, Play } from 'lucide-react';
 import { authApi } from '../../api/client';
@@ -21,6 +21,7 @@ interface HintEmptyModalProps {
   onClose: () => void;
   onHintEarned: () => void;
   adAllowed: boolean;
+  hintRewardAmount?: number;
 }
 
 export function HintEmptyModal({
@@ -28,6 +29,7 @@ export function HintEmptyModal({
   onClose,
   onHintEarned,
   adAllowed,
+  hintRewardAmount = 3,
 }: HintEmptyModalProps) {
   const trackedIntent = useRewardStore((s) => s.activeIntents.reward_hint ?? null);
   const resolvedIntent = useRewardStore((s) => s.lastResolved.reward_hint ?? null);
@@ -37,6 +39,13 @@ export function HintEmptyModal({
   const [error, setError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [pendingIntentId, setPendingIntentId] = useState<string | null>(null);
+  const hintConsumedRef = useRef(false);
+
+  const consumeHintOnce = useCallback(() => {
+    if (hintConsumedRef.current) return;
+    hintConsumedRef.current = true;
+    onHintEarned();
+  }, [onHintEarned]);
 
   // Progressive status messages while the ad is loading/playing.
   useEffect(() => {
@@ -50,16 +59,22 @@ export function HintEmptyModal({
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
   }, [loading]);
 
-  const syncHintBalance = async () => {
+  const syncHintBalance = useCallback(async () => {
     try {
       const me = await authApi.getMe();
       useAppStore.getState().setUser(me);
       return;
     } catch {
       const currentHintBalance = useAppStore.getState().user?.hintBalance ?? 0;
-      useAppStore.getState().updateUser({ hintBalance: Math.max(currentHintBalance, 3) });
+      useAppStore.getState().updateUser({ hintBalance: Math.max(currentHintBalance, hintRewardAmount) });
     }
-  };
+  }, [hintRewardAmount]);
+
+  useEffect(() => {
+    if (open) {
+      hintConsumedRef.current = false;
+    }
+  }, [open]);
 
   // Clear stale resolved state from a previous session when the modal opens fresh,
   // so it never auto-closes or fires onHintEarned unexpectedly.
@@ -95,7 +110,7 @@ export function HintEmptyModal({
         setError(null);
         if (open) {
           onClose();
-          onHintEarned();
+          consumeHintOnce();
         }
       } else if (resolvedIntent.status === 'rejected' || resolvedIntent.status === 'expired') {
         setPendingIntentId(null);
@@ -110,7 +125,7 @@ export function HintEmptyModal({
     };
 
     void applyResolved();
-  }, [clearResolved, onClose, onHintEarned, open, resolvedIntent]);
+  }, [clearResolved, consumeHintOnce, onClose, open, resolvedIntent, syncHintBalance]);
 
   const handleWatchAd = async () => {
     if (loading || pendingIntentId) return;
@@ -128,9 +143,9 @@ export function HintEmptyModal({
       // Ad completed — apply reward immediately without waiting for server.
       if (result.outcome === 'completed') {
         const currentBalance = useAppStore.getState().user?.hintBalance ?? 0;
-        useAppStore.getState().updateUser({ hintBalance: currentBalance + 3 });
+        useAppStore.getState().updateUser({ hintBalance: currentBalance + hintRewardAmount });
         onClose();
-        onHintEarned();
+        consumeHintOnce();
         return;
       }
 
@@ -166,7 +181,7 @@ export function HintEmptyModal({
         if (result.failureCode === 'HINT_BALANCE_NOT_ZERO') {
           await syncHintBalance();
           onClose();
-          onHintEarned();
+          consumeHintOnce();
           return;
         }
         clearPendingRewardIntent('reward_hint', result.intentId ?? undefined);
@@ -182,7 +197,7 @@ export function HintEmptyModal({
       }
       clearPendingRewardIntent('reward_hint', result.intentId ?? undefined);
       onClose();
-      onHintEarned();
+      consumeHintOnce();
     } catch {
       setError('Не удалось связаться с сервером. Попробуйте еще раз.');
     } finally {
@@ -215,7 +230,7 @@ export function HintEmptyModal({
               Подсказки закончились
             </h3>
             <p className="text-sm text-white/60 mb-5">
-              Смотрите рекламу — получите 3 подсказки.
+              Смотрите рекламу — получите {hintRewardAmount} подсказки.
             </p>
 
             {infoMessage && <p className="text-sm text-amber-300 mb-3">{infoMessage}</p>}

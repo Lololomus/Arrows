@@ -11,6 +11,7 @@ import { BottomNav, type TabId } from './components/BottomNav';
 import { HomeScreen } from './screens/HomeScreen';
 import { GameScreen } from './screens/GameScreen';
 import nonGameBackgroundUrl from './assets/background.webp?url';
+import gameBackgroundUrl from './assets/game-bg.webp?url';
 import { bootstrapAuth, hasUsableTelegramInitData, markAuthExpired } from './services/authSession';
 import { startRewardReconciler, stopRewardReconciler } from './services/rewardReconciler';
 import { extractReferralCode, getSavedReferralCode, clearSavedReferralCode } from './utils/referralLaunch';
@@ -146,43 +147,52 @@ export default function App() {
   useEffect(() => {
     if (!ENABLE_NON_GAME_BACKGROUND) return;
 
+    const images: HTMLImageElement[] = [];
     let disposed = false;
-    const img = new Image();
-    img.decoding = 'async';
-    img.src = nonGameBackgroundUrl;
 
-    const waitForLoad = () => new Promise<void>((resolve) => {
-      if (img.complete) {
-        resolve();
-        return;
-      }
+    const preload = async (src: string) => {
+      const img = new Image();
+      images.push(img);
+      img.decoding = 'async';
+      img.src = src;
 
-      const done = () => {
-        img.onload = null;
-        img.onerror = null;
-        resolve();
-      };
+      await new Promise<void>((resolve) => {
+        if (img.complete) {
+          resolve();
+          return;
+        }
 
-      img.onload = done;
-      img.onerror = done;
-    });
+        const done = () => {
+          img.onload = null;
+          img.onerror = null;
+          resolve();
+        };
 
-    void (async () => {
-      await waitForLoad();
+        img.onload = done;
+        img.onerror = done;
+      });
+
       if (disposed) return;
       if (typeof img.decode === 'function') {
         try {
           await img.decode();
         } catch {
-          // ignore decode failures: loaded image is enough for warm cache
+          // Ignore decode failures: loaded image is enough for warm cache.
         }
       }
-    })();
+    };
+
+    void Promise.allSettled([
+      preload(nonGameBackgroundUrl),
+      preload(gameBackgroundUrl),
+    ]);
 
     return () => {
       disposed = true;
-      img.onload = null;
-      img.onerror = null;
+      for (const img of images) {
+        img.onload = null;
+        img.onerror = null;
+      }
     };
   }, []);
 

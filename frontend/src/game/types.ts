@@ -423,6 +423,7 @@ export interface AdsStatusResponse {
   currentLevel: number;
   dailyCoins: DailyCoinsStatus;
   hintAdAvailable: boolean;
+  hintAdReward: number;
 }
 
 export interface ClaimDailyCoinsResponse {

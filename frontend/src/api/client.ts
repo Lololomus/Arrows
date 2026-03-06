@@ -595,6 +595,7 @@ export const adsApi = {
         resetsAt: (dc?.resets_at ?? dc?.resetsAt ?? '') as string,
       },
       hintAdAvailable: (raw.hint_ad_available ?? raw.hintAdAvailable ?? false) as boolean,
+      hintAdReward: Number(raw.hint_ad_reward ?? raw.hintAdReward ?? 3),
     };
   },
 
