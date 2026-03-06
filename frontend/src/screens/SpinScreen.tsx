@@ -98,6 +98,19 @@ const SECTORS: Sector[] = [
 const SECTOR_COUNT = SECTORS.length;
 const SECTOR_ANGLE = 360 / SECTOR_COUNT;
 
+function formatTimeLeft(targetIso: string | null, nowTs: number): string | null {
+  if (!targetIso) return null;
+  const targetTs = Date.parse(targetIso);
+  if (!Number.isFinite(targetTs)) return null;
+  const diffMs = targetTs - nowTs;
+  if (diffMs <= 0) return null;
+  const mins = Math.ceil(diffMs / 60_000);
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h <= 0) return `${Math.max(1, m)} мин`;
+  return `${h}ч ${String(m).padStart(2, '0')}мин`;
+}
+
 // ============================================
 // УТИЛИТЫ ДЛЯ SVG
 // ============================================
@@ -422,6 +435,7 @@ function PrizeResult({
   result,
   retryAvailable,
   isRetryingAd,
+  adStatusMessage,
   isCollecting,
   onRetry,
   onCollect,
@@ -429,6 +443,7 @@ function PrizeResult({
   result: ExtendedSpinResult;
   retryAvailable: boolean;
   isRetryingAd: boolean;
+  adStatusMessage: string | null;
   isCollecting: boolean;
   onRetry: () => void;
   onCollect: () => void;
@@ -484,7 +499,7 @@ function PrizeResult({
               }`}
             >
               <RotateCcw size={18} />
-              {isRetryingAd ? 'Загрузка рекламы...' : 'РЕСПИН ЗА РЕКЛАМУ'}
+              {isRetryingAd ? (adStatusMessage ?? 'Загрузка рекламы...') : 'РЕСПИН ЗА РЕКЛАМУ'}
               <motion.div
                 className="absolute inset-0 w-1/2 h-full bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-12"
                 initial={{ x: '-200%' }} animate={{ x: '300%' }}
@@ -495,7 +510,7 @@ function PrizeResult({
 
           <button
             onClick={onCollect}
-            disabled={isCollecting}
+            disabled={isCollecting || isRetryingAd}
             className={`relative w-full py-4 rounded-2xl text-white font-black text-[16px] transition-all overflow-hidden shadow-lg flex items-center justify-center gap-2
               ${isCollecting
                 ? 'bg-slate-800 text-slate-400 scale-95'
@@ -521,7 +536,15 @@ function PrizeResult({
 // ============================================
 
 export function SpinScreen({ onClose }: { onClose: () => void }) {
-  const { setSpinStatus, loginStreak, updateUser, spinPendingPrize, spinRetryAvailable, spinAvailable } = useAppStore();
+  const {
+    setSpinStatus,
+    loginStreak,
+    updateUser,
+    spinPendingPrize,
+    spinRetryAvailable,
+    spinAvailable,
+    spinNextAvailableAt,
+  } = useAppStore();
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const SHOW_DEV_TOOLS = import.meta.env.DEV;
 
@@ -532,12 +555,14 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
   const [result, setResult] = useState<ExtendedSpinResult | null>(null);
   const [retryAvailable, setRetryAvailable] = useState(false);
   const [isRetryingAd, setIsRetryingAd] = useState(false);
+  const [adStatusMessage, setAdStatusMessage] = useState<string | null>(null);
   const [isCollecting, setIsCollecting] = useState(false);
   const [wheelSize, setWheelSize] = useState(() => Math.min(320, Math.max(260, window.innerWidth - 40)));
   const [activeIndex, setActiveIndex] = useState(0);
   const [isSlowMo, setIsSlowMo] = useState(false);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [timeNow, setTimeNow] = useState(() => Date.now());
 
   const pointerControls = useAnimation();
   const screenControls = useAnimation();
@@ -555,6 +580,78 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
     setRetryAvailable(spinRetryAvailable);
     setResult({ prizeType, prizeAmount, streak: loginStreak, tier: 0, retryAvailable: spinRetryAvailable, label: sector.label, icon: sector.icon, color: sector.color, rarity: sector.rarity });
   }, [spinPendingPrize, spinRetryAvailable, loginStreak, result, spinning, isPreparing]);
+
+  // Race condition fix: HomeScreen fetches getStatus() async; if SpinScreen mounted first,
+  // spinRetryAvailable may arrive after result is already set. Sync it here.
+  useEffect(() => {
+    if (result && !retryAvailable && spinRetryAvailable) {
+      setRetryAvailable(true);
+    }
+  }, [result, spinRetryAvailable, retryAvailable]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setTimeNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncSpinStatus = async () => {
+      try {
+        const s = await spinApi.getStatus();
+        if (cancelled) return;
+        setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt);
+        if (!result) {
+          setRetryAvailable(s.retryAvailable);
+        }
+      } catch {
+        // ignore background sync errors
+      }
+    };
+
+    const onFocus = () => { void syncSpinStatus(); };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void syncSpinStatus();
+      }
+    };
+
+    void syncSpinStatus();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    let cooldownWakeTimer: number | null = null;
+    if (!spinAvailable && spinNextAvailableAt) {
+      const wakeInMs = Date.parse(spinNextAvailableAt) - Date.now();
+      if (Number.isFinite(wakeInMs) && wakeInMs > 0) {
+        cooldownWakeTimer = window.setTimeout(() => {
+          void syncSpinStatus();
+        }, wakeInMs + 250);
+      }
+    }
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (cooldownWakeTimer !== null) {
+        window.clearTimeout(cooldownWakeTimer);
+      }
+    };
+  }, [result, setSpinStatus, spinAvailable, spinNextAvailableAt]);
+
+  // Progressive status messages while the ad is loading/playing.
+  useEffect(() => {
+    if (!isRetryingAd) {
+      setAdStatusMessage(null);
+      return;
+    }
+    const t1 = setTimeout(() => setAdStatusMessage('Загружаем рекламу...'), 100);
+    const t2 = setTimeout(() => setAdStatusMessage('Почти готово...'), 6_000);
+    const t3 = setTimeout(() => setAdStatusMessage('Медленное соединение, подождите...'), 16_000);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, [isRetryingAd]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -678,7 +775,14 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
       const sector = SECTORS[targetIdx >= 0 ? targetIdx : 0];
       const extendedResult: ExtendedSpinResult = { ...res, label: sector.label, icon: sector.icon, color: sector.color, rarity: sector.rarity };
 
-      setSpinStatus(false, res.streak, res.retryAvailable, { prizeType: res.prizeType, prizeAmount: res.prizeAmount });
+      const nextAvailableAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      setSpinStatus(
+        false,
+        res.streak,
+        res.retryAvailable,
+        { prizeType: res.prizeType, prizeAmount: res.prizeAmount },
+        nextAvailableAt,
+      );
       setRetryAvailable(res.retryAvailable);
 
       const currentRot = rotation;
@@ -695,8 +799,8 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
         if (err instanceof ApiError) {
           if (err.message.includes('Collect pending prize')) {
             setError('Сначала заберите приз.');
-          } else if (err.message.includes('Spin already used today')) {
-            setError('Сегодня спин уже был.');
+          } else if (err.message.includes('Spin already used today') || err.message.includes('Spin on cooldown')) {
+            setError('Спин на кулдауне. Подождите.');
           } else {
             setError(err.message);
           }
@@ -716,9 +820,71 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
 
     const previousResult = result;
     try {
-      const rewardResult = await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardSpinRetry, {
-        placement: 'reward_spin_retry',
-      });
+      const rewardResult = await runRewardedFlow(
+        ADSGRAM_BLOCK_IDS.rewardSpinRetry,
+        { placement: 'reward_spin_retry' },
+        { optimistic: true },
+      );
+
+      // Optimistic path: ad completed, clientComplete fires in background.
+      if (rewardResult.outcome === 'completed') {
+        if (rewardResult.intentId) {
+          rememberPendingRewardIntent({ intentId: rewardResult.intentId, placement: 'reward_spin_retry' });
+        }
+        setResult(null);
+        setSpinning(true);
+        setIsSlowMo(false);
+        triggerHaptic('medium');
+
+        // spinApi.retry() requires the server to know the ad was watched.
+        // clientComplete runs in background, so retry a few times to handle the race window.
+        let res: SpinRollResponse | null = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            if (attempt > 0) await new Promise(r => setTimeout(r, 1500));
+            res = await spinApi.retry();
+            break;
+          } catch (err) {
+            if (!(err instanceof ApiError) || err.code !== 'SPIN_RETRY_AD_REQUIRED') {
+              break;
+            }
+          }
+        }
+
+        if (!res) {
+          if (isMountedRef.current) {
+            setSpinning(false);
+            if (previousResult) setResult(previousResult);
+            setError('Не удалось запустить респин. Попробуй позже.');
+          }
+          return;
+        }
+
+        await new Promise(r => setTimeout(r, 650));
+        if (!isMountedRef.current) return;
+
+        const targetIdx = SECTORS.findIndex(s => s.prizeType === res!.prizeType && s.prizeAmount === res!.prizeAmount);
+        const sector = SECTORS[targetIdx >= 0 ? targetIdx : 0];
+        const extendedResult: ExtendedSpinResult = { ...res!, label: sector.label, icon: sector.icon, color: sector.color, rarity: sector.rarity };
+
+        setSpinStatus(
+          false,
+          res!.streak,
+          false,
+          { prizeType: res!.prizeType, prizeAmount: res!.prizeAmount },
+          spinNextAvailableAt,
+        );
+        setRetryAvailable(false);
+
+        const currentRot = rotation;
+        runWheelAnimation(currentRot, res!.prizeType, res!.prizeAmount, () => {
+          if (!isMountedRef.current) return;
+          setResult(extendedResult);
+          setSpinning(false);
+          setIsSlowMo(false);
+        });
+        return;
+      }
 
       if (rewardResult.outcome === 'timeout' || (rewardResult.outcome === 'provider_error' && rewardResult.intentId)) {
         if (rewardResult.intentId) {
@@ -756,6 +922,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
         clearPendingRewardIntent('reward_spin_retry', rewardResult.intentId ?? undefined);
       }
 
+      // Fallback for 'granted' or 'SPIN_RETRY_ALREADY_GRANTED'.
       setResult(null);
       setSpinning(true);
       setIsSlowMo(false);
@@ -771,7 +938,13 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
       const sector = SECTORS[targetIdx >= 0 ? targetIdx : 0];
       const extendedResult: ExtendedSpinResult = { ...res, label: sector.label, icon: sector.icon, color: sector.color, rarity: sector.rarity };
 
-      setSpinStatus(false, res.streak, false, { prizeType: res.prizeType, prizeAmount: res.prizeAmount });
+      setSpinStatus(
+        false,
+        res.streak,
+        false,
+        { prizeType: res.prizeType, prizeAmount: res.prizeAmount },
+        spinNextAvailableAt,
+      );
       setRetryAvailable(false);
 
       const currentRot = rotation;
@@ -816,7 +989,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
         }
       }
       // Reset pending in store
-      setSpinStatus(false, result.streak, false, null);
+      setSpinStatus(false, result.streak, false, null, spinNextAvailableAt);
       onClose();
     } catch {
       if (isMountedRef.current) {
@@ -825,6 +998,9 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
       }
     }
   };
+  const spinCooldownLabel = !spinAvailable
+    ? formatTimeLeft(spinNextAvailableAt, timeNow)
+    : null;
 
   if (typeof document === 'undefined' || !portalTarget) return null;
 
@@ -859,6 +1035,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
               result={result}
               retryAvailable={retryAvailable}
               isRetryingAd={isRetryingAd}
+              adStatusMessage={adStatusMessage}
               isCollecting={isCollecting}
               onRetry={handleRetry}
               onCollect={handleCollect}
@@ -894,11 +1071,11 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
                 setActiveIndex(0);
                 setResult(null);
                 setRetryAvailable(false);
-                setSpinStatus(true, 0, false, null);
+                setSpinStatus(true, 0, false, null, null);
                 try {
                   await spinApi.devReset();
                   const s = await spinApi.getStatus();
-                  setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize);
+                  setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt);
                   setRetryAvailable(s.retryAvailable);
                 } catch {
                   setError('Dev reset failed');
@@ -915,7 +1092,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
                   try {
                     await spinApi.devSetStreak(5);
                     const s = await spinApi.getStatus();
-                    setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize);
+                    setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt);
                     setRetryAvailable(s.retryAvailable);
                     setResult(null);
                   } catch {
@@ -932,7 +1109,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
                   try {
                     await spinApi.devSetStreak(13);
                     const s = await spinApi.getStatus();
-                    setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize);
+                    setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt);
                     setRetryAvailable(s.retryAvailable);
                     setResult(null);
                   } catch {
@@ -963,6 +1140,11 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
                 />
               )}
             </button>
+            {!spinAvailable && spinCooldownLabel && (
+              <p className="text-center text-white/60 text-sm -mt-1">
+                Доступно через {spinCooldownLabel}
+              </p>
+            )}
 
             <button onClick={onClose} className="w-full py-2.5 text-white/50 hover:text-white font-semibold text-[15px] transition-colors">
               Позже

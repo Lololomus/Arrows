@@ -8,6 +8,27 @@ import { useAppStore } from '../stores/store';
 import { useRewardStore } from '../stores/rewardStore';
 
 const RECONCILE_INTERVAL_MS = 5_000;
+const PENDING_INTENTS_LS_KEY = 'arrows_pending_intents';
+
+type PersistedIntent = Pick<ActiveRewardIntentResponse, 'intentId' | 'placement' | 'level' | 'sessionId'>;
+
+function loadPersistedIntents(): PersistedIntent[] {
+  try {
+    const raw = localStorage.getItem(PENDING_INTENTS_LS_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as PersistedIntent[];
+  } catch {
+    return [];
+  }
+}
+
+function savePersistedIntents(intents: PersistedIntent[]): void {
+  try {
+    localStorage.setItem(PENDING_INTENTS_LS_KEY, JSON.stringify(intents));
+  } catch {
+    // Private mode or storage quota — ignore.
+  }
+}
 
 let started = false;
 let intervalId: number | null = null;
@@ -74,6 +95,10 @@ async function handleResolvedIntent(status: RewardIntentStatusResponse): Promise
   if (status.status === 'granted') {
     await syncGrantedReward(status);
   }
+
+  // Remove from localStorage now that it's resolved.
+  const persisted = loadPersistedIntents().filter((i) => i.intentId !== status.intentId);
+  savePersistedIntents(persisted);
 
   useRewardStore.getState().markResolved(status);
   const toast = getRewardToastMessage(status);
@@ -158,10 +183,26 @@ export function rememberPendingRewardIntent(
     level: intent.level,
     sessionId: intent.sessionId,
   });
+
+  // Persist so the intent survives app reloads.
+  const existing = loadPersistedIntents().filter((i) => i.intentId !== intent.intentId);
+  savePersistedIntents([...existing, {
+    intentId: intent.intentId,
+    placement: intent.placement,
+    level: intent.level,
+    sessionId: intent.sessionId,
+  }]);
 }
 
 export function clearPendingRewardIntent(placement: RewardPlacement, intentId?: string): void {
   useRewardStore.getState().clearActiveIntent(placement, intentId);
+
+  // Remove from localStorage.
+  const existing = loadPersistedIntents();
+  const filtered = intentId
+    ? existing.filter((i) => i.intentId !== intentId)
+    : existing.filter((i) => i.placement !== placement);
+  savePersistedIntents(filtered);
 }
 
 export function startRewardReconciler(): void {
@@ -169,6 +210,18 @@ export function startRewardReconciler(): void {
     return;
   }
   started = true;
+
+  // Restore any intents that were pending when the app was last closed.
+  for (const intent of loadPersistedIntents()) {
+    useRewardStore.getState().upsertActiveIntent({
+      intentId: intent.intentId,
+      placement: intent.placement,
+      status: 'pending',
+      reviveGranted: false,
+      level: intent.level,
+      sessionId: intent.sessionId,
+    });
+  }
 
   visibilityHandler = () => {
     if (document.visibilityState === 'visible') {

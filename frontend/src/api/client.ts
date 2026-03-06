@@ -957,6 +957,7 @@ export const socialApi = {
 
 export interface SpinStatusResponse {
   available: boolean;
+  nextAvailableAt: string | null;
   streak: number;
   tier: number;
   nextTierInDays: number;
@@ -983,6 +984,7 @@ export const spinApi = {
     const rawPending = raw.pending_prize as Record<string, unknown> | null | undefined;
     return {
       available: Boolean(raw.available),
+      nextAvailableAt: (raw.next_available_at ?? raw.nextAvailableAt ?? null) as string | null,
       streak: Number(raw.streak ?? 0),
       tier: Number(raw.tier ?? 0),
       nextTierInDays: Number(raw.next_tier_in_days ?? raw.nextTierInDays ?? 0),

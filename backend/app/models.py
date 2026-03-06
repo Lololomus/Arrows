@@ -60,9 +60,14 @@ class User(Base):
     # Ежедневная рулетка
     login_streak = Column(Integer, default=0)
     last_spin_date = Column(Date, nullable=True)
+    last_spin_at = Column(DateTime, nullable=True)
     pending_spin_prize_type = Column(String(16), nullable=True)   # "coins"|"hints"|"revive"
     pending_spin_prize_amount = Column(Integer, nullable=True)
-    spin_retry_used_date = Column(Date, nullable=True)            # если == today, retry уже использован
+    spin_retry_used_date = Column(Date, nullable=True)
+    spin_retry_used_at = Column(DateTime, nullable=True)
+    spin_ready_notified_for_spin_at = Column(DateTime, nullable=True)
+    streak_warning_notified_for_spin_at = Column(DateTime, nullable=True)
+    streak_reset_notified_for_spin_at = Column(DateTime, nullable=True)
     
     
     # Ban система (для anti-cheat)
@@ -372,3 +377,4 @@ class AdRewardIntent(Base):
     __table_args__ = (
         UniqueConstraint("intent_id", name="uq_ad_reward_intents_intent_id"),
     )
+

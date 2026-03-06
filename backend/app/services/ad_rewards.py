@@ -51,6 +51,8 @@ FAILURE_SPIN_RETRY_ALREADY_GRANTED = "SPIN_RETRY_ALREADY_GRANTED"
 
 MSK = timezone(timedelta(hours=3))
 REVIVE_LIMIT_PER_LEVEL = 3
+DAILY_COINS_WINDOW = timedelta(hours=24)
+SPIN_COOLDOWN = timedelta(hours=24)
 
 
 def utcnow() -> datetime:
@@ -91,14 +93,71 @@ def mark_expired(intent: AdRewardIntent) -> None:
 
 
 async def count_daily_coins_used(db: AsyncSession, user_id: int) -> int:
+    status = await get_daily_coins_status(db, user_id)
+    return status["used"]
+
+
+def _fallback_last_spin_at(user: User) -> datetime | None:
+    if user.last_spin_at is not None:
+        return user.last_spin_at
+    if user.last_spin_date is not None:
+        return datetime(
+            user.last_spin_date.year,
+            user.last_spin_date.month,
+            user.last_spin_date.day,
+        )
+    return None
+
+
+def _is_spin_retry_used_for_current_spin(user: User, last_spin_at: datetime) -> bool:
+    if user.spin_retry_used_at is not None and user.spin_retry_used_at >= last_spin_at:
+        return True
+    # Backward-compat fallback for older rows that only had Date fields.
+    if user.spin_retry_used_date is not None and user.last_spin_date is not None:
+        return user.spin_retry_used_date >= user.last_spin_date
+    return False
+
+
+async def get_daily_coins_status(db: AsyncSession, user_id: int) -> dict[str, int | datetime | None]:
+    now = utcnow()
+    lookback_from = now - timedelta(hours=48)
+
     result = await db.execute(
-        select(func.count(AdRewardClaim.id)).where(
+        select(AdRewardClaim.created_at)
+        .where(
             AdRewardClaim.user_id == user_id,
             AdRewardClaim.placement == PLACEMENT_DAILY_COINS,
-            AdRewardClaim.claim_day_msk == today_msk(),
+            AdRewardClaim.created_at >= lookback_from,
         )
+        .order_by(AdRewardClaim.created_at.asc(), AdRewardClaim.id.asc())
     )
-    return int(result.scalar_one())
+
+    claim_times = [created_at for created_at in result.scalars().all() if created_at is not None]
+
+    window_start: datetime | None = None
+    used_in_window = 0
+    for claim_time in claim_times:
+        if window_start is None or claim_time >= window_start + DAILY_COINS_WINDOW:
+            window_start = claim_time
+            used_in_window = 1
+        else:
+            used_in_window += 1
+
+    resets_at: datetime | None = None
+    if window_start is not None:
+        candidate = window_start + DAILY_COINS_WINDOW
+        if now < candidate:
+            resets_at = candidate
+        else:
+            window_start = None
+            used_in_window = 0
+
+    return {
+        "used": min(used_in_window, settings.AD_DAILY_COINS_LIMIT),
+        "limit": settings.AD_DAILY_COINS_LIMIT,
+        "window_start": window_start,
+        "resets_at": resets_at,
+    }
 
 
 async def count_revives_used_for_level(db: AsyncSession, user_id: int, level: int) -> int:
@@ -129,7 +188,7 @@ def serialize_intent(
     revives_used: int | None = None,
     revives_limit: int | None = None,
 ) -> RewardIntentStatusResponse:
-    resets_at = intent.resets_at.replace(tzinfo=MSK).isoformat() if intent.resets_at else None
+    resets_at = intent.resets_at.replace(tzinfo=timezone.utc).isoformat() if intent.resets_at else None
     expires_at = intent.expires_at.replace(tzinfo=timezone.utc).isoformat() if intent.expires_at else None
     created_at = intent.created_at.replace(tzinfo=timezone.utc).isoformat() if intent.created_at else None
     return RewardIntentStatusResponse(
@@ -248,11 +307,9 @@ async def create_reward_intent(
 
     ensure_eligible_for_placement(locked_user, placement)
     await expire_stale_pending_intents(db, locked_user.id, placement, auto_commit=False)
-    today_spin = today_msk()
-
     if placement == PLACEMENT_DAILY_COINS:
-        used_today = await count_daily_coins_used(db, locked_user.id)
-        if used_today >= settings.AD_DAILY_COINS_LIMIT:
+        daily_status = await get_daily_coins_status(db, locked_user.id)
+        if int(daily_status["used"]) >= settings.AD_DAILY_COINS_LIMIT:
             raise HTTPException(status_code=409, detail={"error": FAILURE_DAILY_LIMIT_REACHED})
     elif placement == PLACEMENT_HINT:
         if locked_user.hint_balance != 0:
@@ -273,14 +330,12 @@ async def create_reward_intent(
         if used_for_level >= REVIVE_LIMIT_PER_LEVEL:
             raise HTTPException(status_code=409, detail={"error": FAILURE_REVIVE_LIMIT_REACHED})
     elif placement == PLACEMENT_SPIN_RETRY:
-        if locked_user.last_spin_date != today_spin:
-            raise HTTPException(status_code=409, detail={"error": FAILURE_SPIN_RETRY_NOT_AVAILABLE})
         if locked_user.pending_spin_prize_type is None:
             raise HTTPException(status_code=409, detail={"error": FAILURE_SPIN_RETRY_NOT_AVAILABLE})
-        if locked_user.spin_retry_used_date == today_spin:
+        last_spin_at = _fallback_last_spin_at(locked_user)
+        if last_spin_at is None:
             raise HTTPException(status_code=409, detail={"error": FAILURE_SPIN_RETRY_NOT_AVAILABLE})
-        used_today = await count_spin_retry_used_today(db, locked_user.id)
-        if used_today >= 1:
+        if _is_spin_retry_used_for_current_spin(locked_user, last_spin_at):
             raise HTTPException(status_code=409, detail={"error": FAILURE_SPIN_RETRY_ALREADY_GRANTED})
     else:
         raise HTTPException(status_code=400, detail={"error": "UNKNOWN_PLACEMENT"})
@@ -338,10 +393,18 @@ async def _grant_daily_coins(
     *,
     ad_reference: str | None,
 ) -> AdRewardIntent:
-    used_today = await count_daily_coins_used(db, user.id)
+    daily_status = await get_daily_coins_status(db, user.id)
+    used_today = int(daily_status["used"])
+    if used_today >= settings.AD_DAILY_COINS_LIMIT:
+        raise HTTPException(status_code=409, detail={"error": FAILURE_DAILY_LIMIT_REACHED})
 
     reward = settings.AD_DAILY_COINS_REWARD
     user.coins += reward
+    now = utcnow()
+    window_start = daily_status["window_start"] if isinstance(daily_status["window_start"], datetime) else None
+    if window_start is None:
+        window_start = now
+    resets_at = window_start + DAILY_COINS_WINDOW
 
     claim = AdRewardClaim(
         user_id=user.id,
@@ -349,6 +412,7 @@ async def _grant_daily_coins(
         ad_reference=ad_reference,
         reward_amount=reward,
         claim_day_msk=today_msk(),
+        created_at=now,
     )
     tx = Transaction(
         user_id=user.id,
@@ -368,7 +432,7 @@ async def _grant_daily_coins(
     intent.coins = user.coins
     intent.used_today = used_today + 1
     intent.limit_today = settings.AD_DAILY_COINS_LIMIT
-    intent.resets_at = next_reset_datetime()
+    intent.resets_at = resets_at
     intent.claim_day_msk = today_msk()
 
     await db.commit()
@@ -453,12 +517,15 @@ async def _grant_spin_retry(
     *,
     ad_reference: str | None,
 ) -> AdRewardIntent:
+    now = utcnow()
+    last_spin_at = _fallback_last_spin_at(user)
     claim = AdRewardClaim(
         user_id=user.id,
         placement=PLACEMENT_SPIN_RETRY,
         ad_reference=ad_reference,
         reward_amount=1,
         claim_day_msk=today_msk(),
+        created_at=now,
     )
     db.add(claim)
 
@@ -467,7 +534,7 @@ async def _grant_spin_retry(
     intent.fulfilled_at = utcnow()
     intent.used_today = 1
     intent.limit_today = 1
-    intent.resets_at = next_reset_datetime()
+    intent.resets_at = (last_spin_at + SPIN_COOLDOWN) if last_spin_at is not None else None
     intent.claim_day_msk = today_msk()
 
     await db.commit()

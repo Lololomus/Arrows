@@ -33,9 +33,22 @@ export function HintEmptyModal({
   const resolvedIntent = useRewardStore((s) => s.lastResolved.reward_hint ?? null);
   const clearResolved = useRewardStore((s) => s.clearResolved);
   const [loading, setLoading] = useState(false);
+  const [adStatusMessage, setAdStatusMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [pendingIntentId, setPendingIntentId] = useState<string | null>(null);
+
+  // Progressive status messages while the ad is loading/playing.
+  useEffect(() => {
+    if (!loading) {
+      setAdStatusMessage(null);
+      return;
+    }
+    const t1 = setTimeout(() => setAdStatusMessage('Загружаем рекламу...'), 100);
+    const t2 = setTimeout(() => setAdStatusMessage('Почти готово...'), 6_000);
+    const t3 = setTimeout(() => setAdStatusMessage('Медленное соединение, подождите...'), 16_000);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, [loading]);
 
   const syncHintBalance = async () => {
     try {
@@ -47,6 +60,16 @@ export function HintEmptyModal({
       useAppStore.getState().updateUser({ hintBalance: Math.max(currentHintBalance, 3) });
     }
   };
+
+  // Clear stale resolved state from a previous session when the modal opens fresh,
+  // so it never auto-closes or fires onHintEarned unexpectedly.
+  useEffect(() => {
+    if (!open) return;
+    const stale = useRewardStore.getState().lastResolved.reward_hint;
+    if (stale && !pendingIntentId) {
+      clearResolved('reward_hint', stale.intentId);
+    }
+  }, [open, clearResolved, pendingIntentId]);
 
   useEffect(() => {
     if (!trackedIntent) {
@@ -96,42 +119,37 @@ export function HintEmptyModal({
     setInfoMessage(null);
 
     try {
-      const result = await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardHint, {
-        placement: 'reward_hint',
-      });
+      const result = await runRewardedFlow(
+        ADSGRAM_BLOCK_IDS.rewardHint,
+        { placement: 'reward_hint' },
+        { optimistic: true },
+      );
 
-      if (result.outcome === 'timeout') {
-        setPendingIntentId(result.intentId);
-        rememberPendingRewardIntent({
-          intentId: result.intentId!,
-          placement: 'reward_hint',
-        });
-        setInfoMessage(getRewardedFlowMessage('reward_hint', result));
+      // Ad completed — apply reward immediately without waiting for server.
+      if (result.outcome === 'completed') {
+        const currentBalance = useAppStore.getState().user?.hintBalance ?? 0;
+        useAppStore.getState().updateUser({ hintBalance: currentBalance + 3 });
+        onClose();
+        onHintEarned();
         return;
       }
 
-      if (result.outcome === 'provider_error' && result.intentId) {
-        setPendingIntentId(result.intentId);
-        rememberPendingRewardIntent({
-          intentId: result.intentId,
-          placement: 'reward_hint',
-        });
-        setInfoMessage(getRewardedFlowMessage('reward_hint', result));
+      // Background-confirmation cases: track and let reconciler finish the job.
+      if (result.outcome === 'timeout' || result.outcome === 'provider_error') {
+        if (result.intentId) {
+          setPendingIntentId(result.intentId);
+          rememberPendingRewardIntent({ intentId: result.intentId, placement: 'reward_hint' });
+          setInfoMessage(getRewardedFlowMessage('reward_hint', result));
+        } else {
+          setError(getRewardedFlowMessage('reward_hint', result));
+        }
         return;
       }
 
-      if (result.outcome === 'unavailable' || result.outcome === 'not_completed') {
-        setPendingIntentId(null);
-        setError(getRewardedFlowMessage('reward_hint', result));
-        return;
-      }
       if (result.outcome === 'error') {
         if (result.intentId) {
           setPendingIntentId(result.intentId);
-          rememberPendingRewardIntent({
-            intentId: result.intentId,
-            placement: 'reward_hint',
-          });
+          rememberPendingRewardIntent({ intentId: result.intentId, placement: 'reward_hint' });
           setInfoMessage('Связь с сервером прервалась. Мы продолжим проверку автоматически.');
         } else {
           setError(getRewardedFlowMessage('reward_hint', result));
@@ -139,28 +157,29 @@ export function HintEmptyModal({
         return;
       }
 
+      if (result.outcome === 'unavailable' || result.outcome === 'not_completed') {
+        setError(getRewardedFlowMessage('reward_hint', result));
+        return;
+      }
+
       if (result.outcome === 'rejected') {
         if (result.failureCode === 'HINT_BALANCE_NOT_ZERO') {
           await syncHintBalance();
-          setPendingIntentId(null);
           onClose();
           onHintEarned();
           return;
         }
-
-        setPendingIntentId(null);
         clearPendingRewardIntent('reward_hint', result.intentId ?? undefined);
         setError(getRewardedFlowMessage('reward_hint', result));
         return;
       }
 
+      // 'granted' — non-optimistic fallback (shouldn't reach here with optimistic: true).
       if (result.status?.hintBalance != null) {
         useAppStore.getState().updateUser({ hintBalance: result.status.hintBalance });
       } else {
         await syncHintBalance();
       }
-
-      setPendingIntentId(null);
       clearPendingRewardIntent('reward_hint', result.intentId ?? undefined);
       onClose();
       onHintEarned();
@@ -210,7 +229,11 @@ export function HintEmptyModal({
                   className="w-full py-3.5 bg-gradient-to-b from-amber-500 to-orange-600 rounded-xl text-white font-bold flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <Play size={18} />
-                  {loading ? 'Загрузка...' : pendingIntentId ? 'Проверить награду' : 'Смотреть рекламу'}
+                  {loading
+                    ? (adStatusMessage ?? 'Загрузка...')
+                    : pendingIntentId
+                      ? 'Проверить награду'
+                      : 'Смотреть рекламу'}
                 </button>
               )}
 

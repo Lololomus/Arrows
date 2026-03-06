@@ -184,7 +184,23 @@ function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: 
     if (loading || pendingId || used >= limit) return;
     setLoading(true); setError(null); setInfoMsg(null);
     try {
-      const result = await runRewardedFlow(ADSGRAM_BLOCK_IDS.rewardDailyCoins, { placement: 'reward_daily_coins' });
+      const result = await runRewardedFlow(
+        ADSGRAM_BLOCK_IDS.rewardDailyCoins,
+        { placement: 'reward_daily_coins' },
+        { optimistic: true },
+      );
+
+      // Ad completed — apply reward immediately, confirm in background.
+      // No setPendingId: button stays unlocked so user can watch the next slot right away.
+      if (result.outcome === 'completed') {
+        const currentCoins = useAppStore.getState().user?.coins ?? 0;
+        updateUser({ coins: currentCoins + 20 });
+        setUsed(used + 1);
+        onReward(20, triggerEl);
+        // Reconciler will correct usedToday / coins from server once confirmed.
+        rememberPendingRewardIntent({ intentId: result.intentId!, placement: 'reward_daily_coins' });
+        return;
+      }
 
       if (result.outcome === 'timeout' || (result.outcome === 'provider_error' && result.intentId)) {
         setPendingId(result.intentId!);
@@ -210,6 +226,7 @@ function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: 
         await loadStatus(); return;
       }
 
+      // 'granted' — non-optimistic fallback, shouldn't reach with optimistic: true.
       setPendingId(null);
       clearPendingRewardIntent('reward_daily_coins', result.intentId ?? undefined);
       setUsed(result.status?.usedToday ?? used + 1);
@@ -229,11 +246,14 @@ function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: 
   const limitReached = used >= limit;
   const waiting      = pendingId !== null;
   const isDisabled   = loading || waiting || limitReached;
+  const resetHint = used > 0 && resetsAt
+    ? ` | сброс через ${formatResetTime(resetsAt, now)}`
+    : '';
 
   const subtitle = limitReached
     ? `Сброс через ${formatResetTime(resetsAt, now)}`
     : waiting ? (infoMsg ?? 'Проверяем награду...')
-    : (error ?? `+20 монет · осталось ${remaining} из ${limit}`);
+    : (error ?? `+20 монет | осталось ${remaining} из ${limit}${resetHint}`);
 
   return (
     <motion.div

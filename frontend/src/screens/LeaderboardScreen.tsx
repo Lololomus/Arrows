@@ -65,34 +65,97 @@ const TWO_LINE_CLAMP_STYLE: CSSProperties = {
 type PrizeTier = {
   label: string;
   badgeClass: string;
-  icon?: string;
 };
 
-const PRIZE_BADGE_BASE_CLASS = 'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wide';
+const PRIZE_BADGE_BASE_CLASS = 'inline-flex items-center justify-center min-w-[56px] px-3 py-1 rounded-full border text-[12px] font-black tracking-tight whitespace-nowrap shrink-0 leading-none';
+
+const PRIZE_TIERS_BY_RANK: Record<number, PrizeTier> = {
+  1: { label: '$80', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  2: { label: '$30', badgeClass: 'text-gray-200 border-gray-400/40 bg-black/20' },
+  3: { label: '$25', badgeClass: 'text-orange-300 border-orange-500/40 bg-black/20' },
+  4: { label: '1000 Stars', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  5: { label: '500 Stars', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  6: { label: '350 Stars', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  7: { label: '350 Stars', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  8: { label: '300 Stars', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  9: { label: '250 Stars', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  10: { label: '200 Stars', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+};
+
+type SeasonPrizeRow = {
+  icon: string;
+  placeLabel: string;
+  rewardLabel: string;
+  borderClass: string;
+  rewardClass: string;
+};
+
+type SeasonStarsPrize = {
+  rankLabel: string;
+  stars: string;
+};
+
+const SEASON_TOP_PRIZE_ROWS: readonly SeasonPrizeRow[] = [
+  { icon: '🥇', placeLabel: '1 место', rewardLabel: '$80', borderClass: 'border-yellow-500/30', rewardClass: 'text-yellow-300' },
+  { icon: '🥈', placeLabel: '2 место', rewardLabel: '$30', borderClass: 'border-gray-400/30', rewardClass: 'text-gray-300' },
+  { icon: '🥉', placeLabel: '3 место', rewardLabel: '$25', borderClass: 'border-orange-500/30', rewardClass: 'text-orange-300' },
+];
+
+const SEASON_STARS_PRIZES: readonly SeasonStarsPrize[] = [
+  { rankLabel: '4', stars: '1000' },
+  { rankLabel: '5', stars: '500' },
+  { rankLabel: '6–7', stars: '350' },
+  { rankLabel: '8', stars: '300' },
+  { rankLabel: '9', stars: '250' },
+  { rankLabel: '10', stars: '200' },
+];
 
 const getPrizeTierByRank = (rank: number): PrizeTier | null => {
-  if (rank === 1) {
-    return { label: '$75', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' };
-  }
-  if (rank === 2) {
-    return { label: '$30', badgeClass: 'text-gray-200 border-gray-400/40 bg-black/20' };
-  }
-  if (rank === 3) {
-    return { label: '$25', badgeClass: 'text-orange-300 border-orange-500/40 bg-black/20' };
-  }
-  if (rank >= 4 && rank <= 10) {
-    return { label: '350 TG STARS', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20', icon: '⭐' };
-  }
-  return null;
+  return PRIZE_TIERS_BY_RANK[rank] ?? null;
 };
 
 const PrizeBadge = memo(({ tier }: { tier: PrizeTier }) => (
   <span className={`${PRIZE_BADGE_BASE_CLASS} ${tier.badgeClass}`}>
-    {tier.icon && <span className="text-[11px]">{tier.icon}</span>}
     <span>{tier.label}</span>
   </span>
 ));
 PrizeBadge.displayName = 'PrizeBadge';
+
+interface ScoreRewardStackProps {
+  score: number;
+  prizeTier: PrizeTier | null;
+  scoreClassName: string;
+  wrapperClassName?: string;
+  reservePrizeRow?: boolean;
+}
+
+const ScoreRewardStack = memo(({
+  score,
+  prizeTier,
+  scoreClassName,
+  wrapperClassName,
+  reservePrizeRow = true,
+}: ScoreRewardStackProps) => (
+  <div className={`${wrapperClassName ?? ''} shrink-0 pl-2`}>
+    {prizeTier || reservePrizeRow ? (
+      <div className="grid w-[110px] grid-rows-[20px_24px] justify-items-end content-center gap-1 leading-none">
+        <span className={scoreClassName}>{score.toLocaleString()}</span>
+        <div className="h-[24px] w-full flex items-center justify-end">
+          {prizeTier ? (
+            <PrizeBadge tier={prizeTier} />
+          ) : (
+            <span className="inline-block h-[24px] min-w-[56px] opacity-0 select-none" aria-hidden="true">.</span>
+          )}
+        </div>
+      </div>
+    ) : (
+      <div className="flex h-[45px] w-[110px] items-center justify-end leading-none">
+        <span className={scoreClassName}>{score.toLocaleString()}</span>
+      </div>
+    )}
+  </div>
+));
+ScoreRewardStack.displayName = 'ScoreRewardStack';
 
 // Live mode must define boardType. Coming-soon mode must not trigger leaderboard requests.
 const LEADERBOARD_MODES: readonly LeaderboardModeConfig[] = [
@@ -156,6 +219,52 @@ function mapApiToPlayers(entries: { rank: number; userId: number; username: stri
       userId: entry.userId,
     };
   });
+}
+
+const DEV_LEADERBOARD_MIN_RANK = 20;
+
+function ensureDevLeaderboardHasTopTen(players: Player[]): Player[] {
+  if (!import.meta.env.DEV) return players;
+
+  const existingByRank = new Map<number, Player>();
+  for (const player of players) {
+    if (player.rank >= 1 && player.rank <= DEV_LEADERBOARD_MIN_RANK) {
+      existingByRank.set(player.rank, player);
+    }
+  }
+
+  if (existingByRank.size >= DEV_LEADERBOARD_MIN_RANK) {
+    return players;
+  }
+
+  const seededTop: Player[] = [];
+  const firstKnownScore = players.find((p) => Number.isFinite(p.score))?.score ?? 1000;
+  let fallbackScore = Math.max(0, firstKnownScore - 30);
+
+  for (let rank = 1; rank <= DEV_LEADERBOARD_MIN_RANK; rank += 1) {
+    const existing = existingByRank.get(rank);
+    if (existing) {
+      seededTop.push(existing);
+      fallbackScore = Math.max(0, existing.score - 30);
+      continue;
+    }
+
+    seededTop.push({
+      rank,
+      displayName: `Dev Rank ${rank}`,
+      username: `dev_rank_${rank}`,
+      score: fallbackScore,
+      avatarSeed: 900000 + rank,
+      userId: -(900000 + rank),
+    });
+    fallbackScore = Math.max(0, fallbackScore - 30);
+  }
+
+  const tail = players
+    .filter((player) => player.rank > DEV_LEADERBOARD_MIN_RANK || player.rank < 1)
+    .sort((a, b) => a.rank - b.rank);
+
+  return [...seededTop, ...tail];
 }
 
 const INITIAL_VISIBLE_COUNT = 15;
@@ -261,33 +370,30 @@ const SeasonInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose: (
                 <div className="bg-gradient-to-br from-yellow-900/30 to-orange-900/10 rounded-2xl p-4 border border-yellow-500/30 shadow-lg">
                   <h4 className="text-yellow-400 font-bold text-base mb-3 text-center uppercase tracking-wider drop-shadow-sm">Призовой фонд</h4>
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between bg-black/20 rounded-xl p-3 border border-yellow-500/30">
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl drop-shadow-md">🥇</span>
-                        <span className="text-white font-medium">1 место</span>
+                    {SEASON_TOP_PRIZE_ROWS.map((row) => (
+                      <div key={row.placeLabel} className={`flex items-center justify-between bg-black/20 rounded-xl p-2.5 border ${row.borderClass}`}>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xl drop-shadow-md">{row.icon}</span>
+                          <span className="text-white font-medium">{row.placeLabel}</span>
+                        </div>
+                        <span className={`${row.rewardClass} font-black text-base whitespace-nowrap`}>{row.rewardLabel}</span>
                       </div>
-                      <span className="text-yellow-300 font-black text-lg drop-shadow-glow">$75</span>
-                    </div>
-                    <div className="flex items-center justify-between bg-black/20 rounded-xl p-3 border border-gray-400/30">
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl drop-shadow-md">🥈</span>
-                        <span className="text-white font-medium">2 место</span>
+                    ))}
+
+                    <div className="bg-black/20 rounded-xl p-3 border border-yellow-500/25">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-lg drop-shadow-sm">⭐</span>
+                        <span className="text-white font-semibold text-sm">4–10 места</span>
+                        <span className="ml-auto text-yellow-300/90 text-[11px] font-bold uppercase tracking-wide">Stars</span>
                       </div>
-                      <span className="text-gray-300 font-black text-lg">$30</span>
-                    </div>
-                    <div className="flex items-center justify-between bg-black/20 rounded-xl p-3 border border-orange-500/30">
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl drop-shadow-md">🥉</span>
-                        <span className="text-white font-medium">3 место</span>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {SEASON_STARS_PRIZES.map((row) => (
+                          <div key={row.rankLabel} className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-2 py-1.5 flex items-center justify-between">
+                            <span className="text-white/75 text-[11px] font-semibold leading-none">#{row.rankLabel}</span>
+                            <span className="text-yellow-300 font-black text-[13px] leading-none">{row.stars}</span>
+                          </div>
+                        ))}
                       </div>
-                      <span className="text-orange-300 font-black text-lg">$25</span>
-                    </div>
-                    <div className="flex items-center justify-between bg-black/20 rounded-xl p-3 border border-yellow-500/25">
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl drop-shadow-md">⭐</span>
-                        <span className="text-white font-medium">4–10 место</span>
-                      </div>
-                      <span className="text-yellow-300 font-black text-base">350 TG STARS</span>
                     </div>
                   </div>
                 </div>
@@ -413,12 +519,15 @@ const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Play
         <PlayerIdentityText
           displayName={player.displayName}
           username={player.username}
-          badge={prizeTier ? <PrizeBadge tier={prizeTier} /> : undefined}
         />
       </div>
-      <div className="font-mono text-base font-black relative z-20 text-yellow-400 drop-shadow-md shrink-0 pl-2 text-right">
-        {player.score.toLocaleString()}
-      </div>
+      <ScoreRewardStack
+        score={player.score}
+        prizeTier={prizeTier}
+        wrapperClassName="relative z-20"
+        reservePrizeRow={Boolean(prizeTier)}
+        scoreClassName="font-mono text-base font-black text-yellow-400 drop-shadow-md text-right tabular-nums"
+      />
     </motion.div>
   );
 });
@@ -445,12 +554,15 @@ const RegularLeaderboardItem = memo(({ player, isCurrentUser }: { player: Player
           displayName={player.displayName}
           username={player.username}
           usernameClassName="text-[11px] leading-tight text-white/50 truncate"
-          badge={prizeTier ? <PrizeBadge tier={prizeTier} /> : undefined}
         />
       </div>
-      <div className="font-mono text-base font-black relative z-10 text-yellow-400/80 shrink-0 pl-2 text-right">
-        {player.score.toLocaleString()}
-      </div>
+      <ScoreRewardStack
+        score={player.score}
+        prizeTier={prizeTier}
+        wrapperClassName="relative z-10"
+        reservePrizeRow={Boolean(prizeTier)}
+        scoreClassName="font-mono text-base font-black text-yellow-400/80 text-right tabular-nums"
+      />
     </div>
   );
 });
@@ -569,9 +681,13 @@ const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger, myPosition, mySc
         <PlayerIdentityText displayName={currentUserRank.displayName} username={currentUserRank.username} />
       </div>
 
-      <div className={`font-mono text-xl font-black drop-shadow-md relative z-10 transition-colors ${isDocked ? 'text-blue-200' : 'text-cyan-300'}`}>
-        {currentUserRank.score.toLocaleString()}
-      </div>
+      <ScoreRewardStack
+        score={currentUserRank.score}
+        prizeTier={null}
+        wrapperClassName="relative z-10"
+        reservePrizeRow={false}
+        scoreClassName={`font-mono text-xl font-black drop-shadow-md text-right tabular-nums transition-colors ${isDocked ? 'text-blue-200' : 'text-cyan-300'}`}
+      />
     </motion.div>
   );
 });
@@ -640,7 +756,7 @@ export function LeaderboardScreen() {
     try {
       const data = await socialApi.getLeaderboard(mode.boardType, 100);
       applyLeaderboardMeta(data);
-      return mapApiToPlayers(data.leaders);
+      return ensureDevLeaderboardHasTopTen(mapApiToPlayers(data.leaders));
     } catch (error) {
       console.error('Leaderboard fetch error:', error);
       resetLeaderboardMeta();

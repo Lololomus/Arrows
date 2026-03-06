@@ -39,9 +39,36 @@ export function HomeScreen() {
     ?? 1;
 
   useEffect(() => {
-    spinApi.getStatus()
-      .then(s => setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize))
-      .catch(() => {/* не критично */});
+    let cancelled = false;
+
+    const syncSpinStatus = async () => {
+      try {
+        const s = await spinApi.getStatus();
+        if (cancelled) return;
+        setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt);
+      } catch {
+        // not critical
+      }
+    };
+
+    const onFocus = () => { void syncSpinStatus(); };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void syncSpinStatus();
+      }
+    };
+
+    void syncSpinStatus();
+    const poll = window.setInterval(() => { void syncSpinStatus(); }, 30_000);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(poll);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [setSpinStatus]);
 
   const handlePlayArcade = () => {
@@ -221,3 +248,4 @@ export function HomeScreen() {
     </div>
   );
 }
+

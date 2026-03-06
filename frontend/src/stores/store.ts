@@ -52,10 +52,17 @@ interface AppState {
   clearError: () => void;
 
   spinAvailable: boolean;
+  spinNextAvailableAt: string | null;
   loginStreak: number;
   spinRetryAvailable: boolean;
   spinPendingPrize: { prizeType: 'coins' | 'hints' | 'revive'; prizeAmount: number } | null;
-  setSpinStatus: (available: boolean, streak: number, retryAvailable?: boolean, pendingPrize?: { prizeType: 'coins' | 'hints' | 'revive'; prizeAmount: number } | null) => void;
+  setSpinStatus: (
+    available: boolean,
+    streak: number,
+    retryAvailable?: boolean,
+    pendingPrize?: { prizeType: 'coins' | 'hints' | 'revive'; prizeAmount: number } | null,
+    nextAvailableAt?: string | null,
+  ) => void;
 
   isDailyMode: boolean;
   setDailyMode: (isDailyMode: boolean) => void;
@@ -110,10 +117,17 @@ export const useAppStore = create<AppState>()(
       clearError: () => set({ error: null }),
 
       spinAvailable: false,
+      spinNextAvailableAt: null,
       loginStreak: 0,
       spinRetryAvailable: false,
       spinPendingPrize: null,
-      setSpinStatus: (available, streak, retryAvailable, pendingPrize) => set({ spinAvailable: available, loginStreak: streak, spinRetryAvailable: retryAvailable ?? false, spinPendingPrize: pendingPrize ?? null }),
+      setSpinStatus: (available, streak, retryAvailable, pendingPrize, nextAvailableAt) => set({
+        spinAvailable: available,
+        spinNextAvailableAt: nextAvailableAt ?? null,
+        loginStreak: streak,
+        spinRetryAvailable: retryAvailable ?? false,
+        spinPendingPrize: pendingPrize ?? null,
+      }),
 
       isDailyMode: false,
       setDailyMode: (isDailyMode) => set({ isDailyMode }),

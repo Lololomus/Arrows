@@ -17,7 +17,9 @@ export type RewardedFlowOutcome =
   | 'not_completed'
   | 'provider_error'
   | 'unavailable'
-  | 'error';
+  | 'error'
+  // Ad completed; reward applied optimistically — server confirm runs in background.
+  | 'completed';
 
 export interface RewardedFlowResult {
   outcome: RewardedFlowOutcome;
@@ -106,9 +108,20 @@ export async function pollRewardIntent(
   }
 }
 
+export interface RewardedFlowOptions {
+  /**
+   * When true, grant the reward to the UI immediately after the ad completes
+   * and confirm with the server in the background (fire-and-forget).
+   * Use for time-critical UX like hints and lives.
+   * When false (default), block until server confirms before returning 'granted'.
+   */
+  optimistic?: boolean;
+}
+
 export async function runRewardedFlow(
   blockId: string,
   payload: RewardIntentCreateRequest,
+  options: RewardedFlowOptions = {},
 ): Promise<RewardedFlowResult> {
   const preflight = preflightAdsgramAd('rewarded', blockId);
   if (!preflight.ok) {
@@ -146,6 +159,16 @@ export async function runRewardedFlow(
 
   const adResult = await showRewardedAd(blockId);
   if (adResult.success) {
+    if (options.optimistic) {
+      // Give the reward to the UI immediately. Server confirmation runs in
+      // the background — the webhook or reconciler will finalise it.
+      void adsApi.clientCompleteRewardIntent(intent.intentId).catch(() => {
+        // Network failure: the webhook may have already granted the intent.
+        // The reconciler will pick it up via getActiveRewardIntents().
+      });
+      return { outcome: 'completed', intentId: intent.intentId, retriable: false };
+    }
+
     try {
       const status = await adsApi.clientCompleteRewardIntent(intent.intentId);
       if (status.status === 'granted') {

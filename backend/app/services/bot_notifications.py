@@ -1,11 +1,11 @@
 """
 Arrow Puzzle - Bot Notifications
 
-Сервис отправки Telegram-уведомлений из API (без циклического импорта).
-Создаёт собственный Bot-инстанс только для отправки сообщений.
+Telegram notification sender service used by background jobs.
 """
 
 import logging
+from typing import Literal
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
@@ -16,6 +16,7 @@ from ..config import settings
 logger = logging.getLogger(__name__)
 
 _bot: Bot | None = None
+NotificationDelivery = Literal["sent", "blocked", "failed"]
 
 
 def _get_bot() -> Bot:
@@ -37,15 +38,15 @@ def _spin_keyboard() -> InlineKeyboardMarkup:
 
 
 def _tier_name(tier: int) -> str:
-    return {0: "Тир 1", 1: "Тир 2", 2: "Тир 3"}.get(tier, "Тир 1")
+    return {0: "Tier 1", 1: "Tier 2", 2: "Tier 3"}.get(tier, "Tier 1")
 
 
-async def notify_spin_streak_reset(telegram_id: int, old_streak: int) -> None:
-    """Уведомление: стрик сгорел после пропуска дня."""
+async def notify_spin_ready(telegram_id: int) -> NotificationDelivery:
+    """Notification: spin is available again (24h cooldown completed)."""
     text = (
-        f"😔 <b>Стрик сгорел</b>\n\n"
-        f"Ты пропустил день и стрик сбросился (был: <b>{old_streak} дней</b>).\n\n"
-        f"Возвращайся каждый день, чтобы получать лучшие призы!"
+        "🎰 <b>Рулетка снова доступна!</b>\n\n"
+        "Прошло 24 часа — самое время крутить.\n"
+        "Не прерывай серию 🔥"
     )
     try:
         await _get_bot().send_message(
@@ -54,20 +55,42 @@ async def notify_spin_streak_reset(telegram_id: int, old_streak: int) -> None:
             parse_mode="HTML",
             reply_markup=_spin_keyboard(),
         )
+        return "sent"
     except (TelegramForbiddenError, TelegramBadRequest):
-        pass  # Бот заблокирован или чат не найден
+        return "blocked"
+    except Exception as e:
+        logger.warning("Failed to send spin-ready notification to %s: %s", telegram_id, e)
+        return "failed"
+
+
+async def notify_spin_streak_reset(telegram_id: int, old_streak: int) -> NotificationDelivery:
+    """Notification: streak has been reset after missing the window."""
+    text = (
+        f"💔 <b>Серия прервана</b>\n\n"
+        f"Пропустил день — серия сброшена (была: <b>{old_streak} дн.</b>).\n\n"
+        "Возвращайся каждый день — чем длиннее серия, тем круче призы."
+    )
+    try:
+        await _get_bot().send_message(
+            chat_id=telegram_id,
+            text=text,
+            parse_mode="HTML",
+            reply_markup=_spin_keyboard(),
+        )
+        return "sent"
+    except (TelegramForbiddenError, TelegramBadRequest):
+        return "blocked"
     except Exception as e:
         logger.warning("Failed to send streak reset notification to %s: %s", telegram_id, e)
+        return "failed"
 
 
-async def notify_streak_warning(telegram_id: int, streak: int, tier: int) -> None:
-    """Уведомление: стрик сгорит через 6 часов (рассылка в 18:00 MSK)."""
+async def notify_streak_warning(telegram_id: int, streak: int, tier: int) -> NotificationDelivery:
+    """Notification: streak will reset in ~6 hours."""
     tier_name = _tier_name(tier)
     text = (
-        f"⚠️ <b>Стрик {streak} дней сгорит через 6 часов!</b>\n\n"
-        f"Ты ещё не крутил рулетку сегодня.\n"
-        f"До полуночи осталось ~6 часов — не теряй <b>{tier_name}</b>!\n\n"
-        f"Потеряешь стрик — призы станут хуже 💎"
+        f"⏰ <b>Серия {streak} дн. сгорит через ~6 часов</b>\n\n"
+        f"Не теряй <b>{tier_name}</b> — зайди и крути пока не поздно."
     )
     try:
         await _get_bot().send_message(
@@ -76,7 +99,9 @@ async def notify_streak_warning(telegram_id: int, streak: int, tier: int) -> Non
             parse_mode="HTML",
             reply_markup=_spin_keyboard(),
         )
+        return "sent"
     except (TelegramForbiddenError, TelegramBadRequest):
-        pass
+        return "blocked"
     except Exception as e:
         logger.warning("Failed to send streak warning to %s: %s", telegram_id, e)
+        return "failed"

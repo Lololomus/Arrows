@@ -1,7 +1,7 @@
 """
 Arrow Puzzle - Telegram Bot
 
-Обработчик команд бота и точка входа в Mini App.
+Bot handlers + background personal spin notifications.
 """
 
 import asyncio
@@ -21,15 +21,19 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from app.config import settings
 from app.database import AsyncSessionLocal, close_redis
 from app.models import User
-from app.services.bot_notifications import notify_spin_streak_reset, notify_streak_warning
+from app.services.ad_rewards import utcnow
+from app.services.bot_notifications import notify_spin_ready, notify_spin_streak_reset, notify_streak_warning
 from app.services.referrals import extract_referral_code, store_pending_referral_code
 
-MSK = timezone(timedelta(hours=3))
+SPIN_READY_DELAY = timedelta(hours=24)
+STREAK_WARNING_DELAY = timedelta(hours=42)
+STREAK_RESET_DELAY = timedelta(hours=48)
+NOTIFICATIONS_SWEEP_INTERVAL_SECONDS = 60
 
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
@@ -41,22 +45,16 @@ dp = Dispatcher()
 def get_player_name(user: types.User) -> str:
     if user.username:
         return user.username
-    return user.first_name or "игрок"
+    return user.first_name or "player"
 
 
 def build_welcome_text(user: types.User) -> str:
     player_name = html.escape(get_player_name(user))
     return (
-        f"Привет, <b>{player_name}</b>! 👋\n\n"
-        "ArrowReward – это увлекательная логическая головоломка, "
-        "которая награждает своих игроков. 🏆\n\n"
-        "Как играть: 🕹️\n"
-        "• Нажми на стрелку и она полетит;\n"
-        "• Избегай столкновений;\n"
-        "• Проходи уровни и соревнуйся с друзьями!\n\n"
-        "Получай монеты за игру. 💰\n"
-        "Поднимайся в топ и забирай призы. 🥇\n\n"
-        "Нажми кнопку ниже, чтобы начать! 👇"
+        f"Hi, <b>{player_name}</b>!\n\n"
+        "ArrowReward is a puzzle game with rewards.\n"
+        "Pass levels, earn coins, and climb leaderboard.\n\n"
+        "Tap the button below to start."
     )
 
 
@@ -65,13 +63,13 @@ def build_start_keyboard(webapp_url: str) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Запустить ArrowReward",
+                    text="Launch ArrowReward",
                     web_app=WebAppInfo(url=webapp_url),
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="ℹ️ Инфо",
+                    text="Info",
                     callback_data="info",
                 )
             ],
@@ -84,7 +82,7 @@ def build_info_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Назад",
+                    text="Back",
                     callback_data="back_to_start",
                 )
             ],
@@ -94,16 +92,13 @@ def build_info_keyboard() -> InlineKeyboardMarkup:
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    """
-    Обработчик /start команды.
-    Открывает Web App игры.
-    """
+    """Handle /start command and open Mini App."""
     args = message.text.split()
     start_param = None
 
     if len(args) > 1 and args[1].startswith("ref_"):
         start_param = args[1]
-        logger.info(f"User {message.from_user.id} has referral: {start_param}")
+        logger.info("User %s has referral: %s", message.from_user.id, start_param)
         referral_code = extract_referral_code(start_param)
         if referral_code:
             for attempt in range(3):
@@ -116,9 +111,14 @@ async def cmd_start(message: types.Message):
                     break
                 except Exception as exc:
                     if attempt == 2:
-                        logger.error(f"Referral save FAILED after 3 attempts for {message.from_user.id}: {exc}")
+                        logger.error("Referral save FAILED after 3 attempts for %s: %s", message.from_user.id, exc)
                     else:
-                        logger.warning(f"Referral save attempt {attempt + 1} failed for {message.from_user.id}: {exc}")
+                        logger.warning(
+                            "Referral save attempt %s failed for %s: %s",
+                            attempt + 1,
+                            message.from_user.id,
+                            exc,
+                        )
                         await asyncio.sleep(0.5 * (attempt + 1))
 
     webapp_url = settings.WEBAPP_URL
@@ -134,9 +134,9 @@ async def cmd_start(message: types.Message):
 
 @dp.callback_query(lambda c: c.data == "info")
 async def process_info(callback: types.CallbackQuery):
-    """Обработчик кнопки 'Инфо'."""
+    """Handle info button."""
     await callback.message.edit_text(
-        "Обратная связь и поддержка:\n\n@ArrowRewardSupport",
+        "Support: @ArrowRewardSupport",
         reply_markup=build_info_keyboard(),
         parse_mode="HTML",
     )
@@ -145,7 +145,7 @@ async def process_info(callback: types.CallbackQuery):
 
 @dp.callback_query(lambda c: c.data == "back_to_start")
 async def process_back(callback: types.CallbackQuery):
-    """Возврат к стартовому сообщению."""
+    """Return to start card."""
     await callback.message.edit_text(
         build_welcome_text(callback.from_user),
         reply_markup=build_start_keyboard(settings.WEBAPP_URL),
@@ -156,85 +156,151 @@ async def process_back(callback: types.CallbackQuery):
 
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):
-    """Статистика бота."""
+    """Basic bot stats placeholder."""
     stats_text = (
-        f"<b>Статистика {settings.APP_NAME}</b>\n\n"
-        "Игроков: ???\n"
-        "Сыграно уровней: ???\n"
-        "Получено звезд: ???\n\n"
-        "Присоединяйся! /start"
+        f"<b>{settings.APP_NAME} stats</b>\n\n"
+        "Players: ???\n"
+        "Levels played: ???\n"
+        "Stars earned: ???\n\n"
+        "Join now: /start"
     )
 
     await message.answer(stats_text, parse_mode="HTML")
 
 
-async def _send_streak_notifications() -> None:
-    """Рассылка двух типов уведомлений в 18:00 MSK:
-    - warn: стрик цел (last_spin == вчера), но сегодня ещё не крутили
-    - expired: стрик уже сгорел (last_spin == позавчера, пропустили вчера)
-    """
+def _fallback_last_spin_at(user: User) -> datetime | None:
+    if user.last_spin_at is not None:
+        return user.last_spin_at
+    if user.last_spin_date is not None:
+        return datetime(
+            user.last_spin_date.year,
+            user.last_spin_date.month,
+            user.last_spin_date.day,
+        )
+    return None
+
+
+def _to_naive_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _already_notified(user: User, event: str, anchor_spin_at: datetime) -> bool:
+    if event == "ready":
+        return user.spin_ready_notified_for_spin_at == anchor_spin_at
+    if event == "warning":
+        return user.streak_warning_notified_for_spin_at == anchor_spin_at
+    if event == "reset":
+        return user.streak_reset_notified_for_spin_at == anchor_spin_at
+    return False
+
+
+def _mark_notification_sent(user: User, event: str, anchor_spin_at: datetime) -> None:
+    if event == "ready":
+        user.spin_ready_notified_for_spin_at = anchor_spin_at
+    elif event == "warning":
+        user.streak_warning_notified_for_spin_at = anchor_spin_at
+    elif event == "reset":
+        user.streak_reset_notified_for_spin_at = anchor_spin_at
+
+
+async def _send_personal_spin_notifications() -> None:
+    """Send due personal notifications for spin lifecycle."""
     from app.api.spin import _get_tier  # local import to avoid top-level cycle
 
-    today = datetime.now(MSK).date()
-    yesterday = today - timedelta(days=1)
-    two_days_ago = today - timedelta(days=2)
+    now = utcnow()
+    sent_ready = 0
+    sent_warning = 0
+    sent_reset = 0
 
     try:
         async with AsyncSessionLocal() as db:
-            warn_result = await db.execute(
-                select(User.telegram_id, User.login_streak)
-                .where(User.login_streak >= 2)
-                .where(User.last_spin_date == yesterday)
+            result = await db.execute(
+                select(User)
+                .where(User.telegram_id.is_not(None))
                 .where(User.is_banned == False)
+                .where(User.login_streak >= 1)
             )
-            warn_users = warn_result.fetchall()
+            users = result.scalars().all()
 
-            expired_result = await db.execute(
-                select(User.telegram_id, User.login_streak)
-                .where(User.login_streak >= 2)
-                .where(User.last_spin_date == two_days_ago)
-                .where(User.is_banned == False)
-            )
-            expired_users = expired_result.fetchall()
+            for user in users:
+                if user.telegram_id is None:
+                    continue
+
+                anchor = _fallback_last_spin_at(user)
+                if anchor is None:
+                    continue
+                anchor = _to_naive_utc(anchor)
+
+                ready_at = anchor + SPIN_READY_DELAY
+                warn_at = anchor + STREAK_WARNING_DELAY
+                reset_at = anchor + STREAK_RESET_DELAY
+
+                if (
+                    now >= ready_at
+                    and user.pending_spin_prize_type is None
+                    and not _already_notified(user, "ready", anchor)
+                ):
+                    delivery = await notify_spin_ready(user.telegram_id)
+                    if delivery in ("sent", "blocked"):
+                        _mark_notification_sent(user, "ready", anchor)
+                        if delivery == "sent":
+                            sent_ready += 1
+
+                streak = int(user.login_streak or 0)
+                if streak < 2:
+                    continue
+
+                if now >= warn_at and now < reset_at and not _already_notified(user, "warning", anchor):
+                    delivery = await notify_streak_warning(user.telegram_id, streak, _get_tier(streak))
+                    if delivery in ("sent", "blocked"):
+                        _mark_notification_sent(user, "warning", anchor)
+                        if delivery == "sent":
+                            sent_warning += 1
+
+                if now >= reset_at and not _already_notified(user, "reset", anchor):
+                    delivery = await notify_spin_streak_reset(user.telegram_id, streak)
+                    if delivery in ("sent", "blocked"):
+                        _mark_notification_sent(user, "reset", anchor)
+                        if delivery == "sent":
+                            sent_reset += 1
+
+            await db.commit()
     except Exception as e:
-        logger.error("streak notifications: DB query failed: %s", e)
+        logger.error("personal notifications: sweep failed: %s", e)
         return
 
-    logger.info("streak notifications: %d warnings, %d expired", len(warn_users), len(expired_users))
+    logger.info(
+        "personal notifications: sent ready=%d warning=%d reset=%d",
+        sent_ready,
+        sent_warning,
+        sent_reset,
+    )
 
-    for telegram_id, streak in warn_users:
-        await notify_streak_warning(telegram_id, streak, _get_tier(streak))
 
-    for telegram_id, streak in expired_users:
-        await notify_spin_streak_reset(telegram_id, streak)
-
-
-async def streak_warning_scheduler() -> None:
-    """Фоновый loop: ждёт 18:00 MSK и рассылает предупреждения (за 6ч до сброса)."""
+async def personal_notifications_scheduler() -> None:
+    """Background loop: checks due notifications every minute."""
     while True:
-        now = datetime.now(MSK)
-        next_18 = now.replace(hour=18, minute=0, second=0, microsecond=0)
-        if now >= next_18:
-            next_18 += timedelta(days=1)
-        wait_seconds = (next_18 - now).total_seconds()
-        logger.info("streak warning scheduler: next run in %.0f seconds", wait_seconds)
-        await asyncio.sleep(wait_seconds)
+        started = datetime.now(timezone.utc)
         try:
-            await _send_streak_notifications()
+            await _send_personal_spin_notifications()
         except Exception as e:
-            logger.error("streak warning scheduler error: %s", e)
+            logger.error("personal notifications scheduler error: %s", e)
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+        await asyncio.sleep(max(5, NOTIFICATIONS_SWEEP_INTERVAL_SECONDS - elapsed))
 
 
 async def main():
-    """Запуск бота."""
-    logger.info(f"Starting {settings.APP_NAME} Bot...")
-    logger.info(f"Web App URL: {settings.WEBAPP_URL}")
+    """Start bot polling + background notification scheduler."""
+    logger.info("Starting %s bot", settings.APP_NAME)
+    logger.info("Web app URL: %s", settings.WEBAPP_URL)
 
     await bot.delete_webhook(drop_pending_updates=True)
 
-    asyncio.create_task(streak_warning_scheduler())
+    asyncio.create_task(personal_notifications_scheduler())
 
-    logger.info("Bot is running!")
+    logger.info("Bot is running")
     try:
         await dp.start_polling(bot)
     finally:

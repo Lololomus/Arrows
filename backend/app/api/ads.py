@@ -5,6 +5,8 @@ Rewarded ads now use server-authoritative reward intents.
 Legacy /ads/claim/* endpoints remain for temporary compatibility.
 """
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
@@ -40,16 +42,15 @@ from ..services.ad_rewards import (
     PLACEMENT_REVIVE,
     REWARDED_PLACEMENTS,
     cancel_pending_intent,
-    count_daily_coins_used,
     create_reward_intent,
     ensure_eligible,
     expire_stale_pending_intents,
+    get_daily_coins_status,
     get_intent_by_public_id,
     get_revive_limit_status,
     grant_intent,
     list_active_pending_intents,
     mark_expired,
-    next_reset_iso,
     serialize_create_intent,
     serialize_intent,
     today_msk,
@@ -67,14 +68,19 @@ async def get_ads_status(
     db: AsyncSession = Depends(get_db),
 ):
     eligible = user.current_level >= settings.AD_FIRST_ELIGIBLE_LEVEL
-    used_today = await count_daily_coins_used(db, user.id) if eligible else 0
+    daily_status = await get_daily_coins_status(db, user.id) if eligible else {
+        "used": 0,
+        "limit": settings.AD_DAILY_COINS_LIMIT,
+        "resets_at": None,
+    }
+    resets_at = daily_status["resets_at"]
     return AdsStatusResponse(
         eligible=eligible,
         current_level=user.current_level,
         daily_coins=DailyCoinsStatus(
-            used=used_today,
-            limit=settings.AD_DAILY_COINS_LIMIT,
-            resets_at=next_reset_iso(),
+            used=int(daily_status["used"]),
+            limit=int(daily_status["limit"]),
+            resets_at=resets_at.replace(tzinfo=timezone.utc).isoformat() if isinstance(resets_at, datetime) else "",
         ),
         hint_ad_available=eligible and user.hint_balance == 0,
     )
@@ -245,12 +251,18 @@ async def claim_daily_coins(
     db: AsyncSession = Depends(get_db),
 ):
     ensure_eligible(user)
-    used_today = await count_daily_coins_used(db, user.id)
+    daily_status = await get_daily_coins_status(db, user.id)
+    used_today = int(daily_status["used"])
     if used_today >= settings.AD_DAILY_COINS_LIMIT:
         raise HTTPException(status_code=409, detail={"error": FAILURE_DAILY_LIMIT_REACHED})
 
     reward = settings.AD_DAILY_COINS_REWARD
+    now = utcnow()
     user.coins += reward
+    window_start = daily_status["window_start"] if isinstance(daily_status.get("window_start"), datetime) else None
+    if window_start is None:
+        window_start = now
+    resets_at = window_start + timedelta(hours=24)
     db.add(
         AdRewardClaim(
             user_id=user.id,
@@ -258,6 +270,7 @@ async def claim_daily_coins(
             ad_reference=request.ad_reference,
             reward_amount=reward,
             claim_day_msk=today_msk(),
+            created_at=now,
         )
     )
     db.add(
@@ -278,7 +291,7 @@ async def claim_daily_coins(
         reward_coins=reward,
         used_today=used_today + 1,
         limit_today=settings.AD_DAILY_COINS_LIMIT,
-        resets_at=next_reset_iso(),
+        resets_at=resets_at.replace(tzinfo=timezone.utc).isoformat(),
     )
 
 
