@@ -44,7 +44,7 @@ export function DefeatScreen({
   const cfg = DEFEAT_CONFIG;
   const IconComponent = cfg.icon;
 
-  const isReviveLoading = reviveLoading || revivePending;
+  const isReviveLoading = reviveLoading;
 
   return (
     <motion.div
@@ -143,12 +143,12 @@ export function DefeatScreen({
               <motion.button
                 whileTap={{ scale: 0.96 }}
                 onClick={onAdRevive}
-                disabled={isReviveLoading}
+                disabled={reviveLoading}
                 className="w-full py-5 rounded-[20px] bg-gradient-to-b from-emerald-500 to-emerald-700 text-white font-black text-xl uppercase tracking-widest hover:brightness-110 transition-all border border-emerald-400/30 shadow-xl flex items-center justify-center gap-3 disabled:opacity-50"
               >
                 <Tv2 size={22} />
-                {isReviveLoading ? 'Загрузка...' : revivePending ? 'Проверить награду' : 'Смотреть рекламу'}
-                {!isReviveLoading && <Play size={16} className="opacity-70" />}
+                {reviveLoading ? 'Загрузка...' : revivePending ? 'Проверить награду' : 'Смотреть рекламу'}
+                {!reviveLoading && <Play size={16} className="opacity-70" />}
               </motion.button>
               <p className="text-xs font-medium text-white/50 -mt-2">
                 Бесплатное воскрешение — 1 раз за уровень

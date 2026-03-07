@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Lightbulb, Play } from 'lucide-react';
-import { authApi } from '../../api/client';
+import { adsApi, authApi } from '../../api/client';
 import { ADSGRAM_BLOCK_IDS } from '../../config/constants';
 import { useAppStore } from '../../stores/store';
 import { useRewardStore } from '../../stores/rewardStore';
@@ -94,7 +94,7 @@ export function HintEmptyModal({
       setPendingIntentId(trackedIntent.intentId);
     }
     setError(null);
-    setInfoMessage('Проверяем подсказку...');
+    setInfoMessage('Проверяем просмотр (до 1 мин)...');
   }, [pendingIntentId, trackedIntent]);
 
   useEffect(() => {
@@ -127,8 +127,61 @@ export function HintEmptyModal({
     void applyResolved();
   }, [clearResolved, consumeHintOnce, onClose, open, resolvedIntent, syncHintBalance]);
 
+  // Auto-timeout: if pending hint intent lives longer than 60s, cancel and unblock
+  useEffect(() => {
+    if (!pendingIntentId) return;
+    const timer = setTimeout(() => {
+      void adsApi.cancelRewardIntent(pendingIntentId).catch(() => {});
+      clearPendingRewardIntent('reward_hint', pendingIntentId);
+      setPendingIntentId(null);
+      setInfoMessage(null);
+      setError('Подтверждение не получено. Нажмите ещё раз — подсказки гарантированы.');
+    }, 60_000);
+    return () => clearTimeout(timer);
+  }, [pendingIntentId]);
+
   const handleWatchAd = async () => {
-    if (loading || pendingIntentId) return;
+    if (loading) return;
+
+    // Pending intent exists — check its status instead of starting new ad
+    if (pendingIntentId) {
+      setLoading(true);
+      setError(null);
+      setInfoMessage(null);
+      try {
+        const status = await adsApi.getRewardIntentStatus(pendingIntentId);
+        if (status.status === 'granted') {
+          if (status.hintBalance != null) {
+            useAppStore.getState().updateUser({ hintBalance: status.hintBalance });
+          } else {
+            await syncHintBalance();
+          }
+          clearPendingRewardIntent('reward_hint', pendingIntentId);
+          setPendingIntentId(null);
+          onClose();
+          consumeHintOnce();
+          return;
+        }
+        if (status.status !== 'pending') {
+          clearPendingRewardIntent('reward_hint', pendingIntentId);
+        } else {
+          void adsApi.cancelRewardIntent(pendingIntentId).catch(() => {});
+          clearPendingRewardIntent('reward_hint', pendingIntentId);
+        }
+        setPendingIntentId(null);
+        setInfoMessage(null);
+        setError('Нажмите ещё раз — подсказки гарантированы.');
+      } catch {
+        clearPendingRewardIntent('reward_hint', pendingIntentId);
+        setPendingIntentId(null);
+        setInfoMessage(null);
+        setError('Нажмите ещё раз — подсказки гарантированы.');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setInfoMessage(null);
@@ -240,7 +293,7 @@ export function HintEmptyModal({
               {adAllowed && (
                 <button
                   onClick={handleWatchAd}
-                  disabled={loading || pendingIntentId !== null}
+                  disabled={loading}
                   className="w-full py-3.5 bg-gradient-to-b from-amber-500 to-orange-600 rounded-xl text-white font-bold flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <Play size={18} />

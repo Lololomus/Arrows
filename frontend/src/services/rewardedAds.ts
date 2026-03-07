@@ -216,7 +216,7 @@ export function getRewardedFlowMessage(
   result: Pick<RewardedFlowResult, 'outcome' | 'failureCode' | 'error'>,
 ): string {
   if (result.outcome === 'timeout') {
-    return 'Подтверждение рекламы задерживается. Мы продолжим проверку автоматически.';
+    return 'Проверяем просмотр рекламы (до 1 мин). Или нажмите «Проверить награду».';
   }
 
   if (result.outcome === 'unavailable') {
@@ -228,7 +228,7 @@ export function getRewardedFlowMessage(
   }
 
   if (result.outcome === 'provider_error') {
-    return 'Мы ждём подтверждение от AdsGram. Награда начислится автоматически, как только просмотр подтвердится.';
+    return 'Проверяем просмотр рекламы (до 1 мин). Или нажмите «Проверить награду».';
   }
 
   if (result.outcome === 'error') {

@@ -818,7 +818,7 @@ export function GameScreen() {
     if (pendingReviveIntentId !== trackedReviveIntent.intentId) {
       setPendingReviveIntentId(trackedReviveIntent.intentId);
     }
-    setReviveMessage('Подтверждаем продолжение...');
+    setReviveMessage('Проверяем просмотр (до 1 мин)...');
   }, [pendingReviveIntentId, trackedReviveIntent]);
 
   useEffect(() => {
@@ -864,6 +864,18 @@ export function GameScreen() {
     pendingReviveIntentId,
     resolvedReviveIntent,
   ]);
+
+  // Auto-timeout: if pending revive intent lives longer than 60s, cancel and unblock
+  useEffect(() => {
+    if (!pendingReviveIntentId) return;
+    const timer = setTimeout(() => {
+      void adsApi.cancelRewardIntent(pendingReviveIntentId).catch(() => {});
+      clearPendingRewardIntent('reward_revive', pendingReviveIntentId);
+      setPendingReviveIntentId(null);
+      setReviveMessage('Подтверждение не получено. Нажмите ещё раз — воскрешение гарантировано.');
+    }, 60_000);
+    return () => clearTimeout(timer);
+  }, [pendingReviveIntentId]);
 
   const setVictoryAction = useCallback((action: PendingVictoryAction) => {
     pendingVictoryActionRef.current = action;
@@ -1440,7 +1452,41 @@ export function GameScreen() {
   // разрешаем одну ещё попытку. Попытка 2: полуслепой оптимистик — воскрешаем
   // независимо от ответа SDK, подтверждение в фоне.
   const handleRevive = useCallback(async () => {
-    if (reviveLoading || adReviveUsedThisLevel || pendingReviveIntentId) return;
+    if (reviveLoading || adReviveUsedThisLevel) return;
+
+    // Pending intent exists — check its status instead of creating a new one
+    if (pendingReviveIntentId) {
+      setReviveLoading(true);
+      setReviveMessage(null);
+      try {
+        const status = await adsApi.getRewardIntentStatus(pendingReviveIntentId);
+        if (status.status === 'granted') {
+          useGameStore.getState().revivePlayer();
+          setAdReviveUsedThisLevel(true);
+          clearPendingRewardIntent('reward_revive', pendingReviveIntentId);
+          setPendingReviveIntentId(null);
+          setReviveMessage(null);
+          applyReviveQuotaFromStatus(status);
+          return;
+        }
+        if (status.status !== 'pending') {
+          clearPendingRewardIntent('reward_revive', pendingReviveIntentId);
+        } else {
+          void adsApi.cancelRewardIntent(pendingReviveIntentId).catch(() => {});
+          clearPendingRewardIntent('reward_revive', pendingReviveIntentId);
+        }
+        setPendingReviveIntentId(null);
+        setReviveMessage('Нажмите ещё раз — воскрешение гарантировано.');
+      } catch {
+        clearPendingRewardIntent('reward_revive', pendingReviveIntentId);
+        setPendingReviveIntentId(null);
+        setReviveMessage('Нажмите ещё раз — воскрешение гарантировано.');
+      } finally {
+        setReviveLoading(false);
+      }
+      return;
+    }
+
     setReviveLoading(true);
     setReviveMessage(null);
 
@@ -1484,7 +1530,7 @@ export function GameScreen() {
       if (adResult.outcome === 'provider_error') {
         // Технический сбой AdsGram — intent оставляем (webhook может прийти позже)
         rememberPendingRewardIntent({ intentId: intent.intentId, placement: 'reward_revive' });
-        setReviveMessage('Ошибка загрузки рекламы. Попробуйте ещё раз.');
+        setReviveMessage('Проверяем просмотр рекламы (до 1 мин). Или нажмите «Проверить награду».');
       } else {
         // not_completed — пользователь закрыл рекламу, отменяем intent
         void adsApi.cancelRewardIntent(intent.intentId).catch(() => {});
