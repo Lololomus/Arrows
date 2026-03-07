@@ -45,16 +45,21 @@ dp = Dispatcher()
 def get_player_name(user: types.User) -> str:
     if user.username:
         return user.username
-    return user.first_name or "player"
+    return user.first_name or "игрок"
 
 
 def build_welcome_text(user: types.User) -> str:
     player_name = html.escape(get_player_name(user))
     return (
-        f"Hi, <b>{player_name}</b>!\n\n"
-        "ArrowReward is a puzzle game with rewards.\n"
-        "Pass levels, earn coins, and climb leaderboard.\n\n"
-        "Tap the button below to start."
+        f"Привет, <b>{player_name}</b>! 👋\n\n"
+        "ArrowReward – это увлекательная логическая головоломка, которая награждает своих игроков. 🏆\n\n"
+        "Как играть: 🕹️\n"
+        "• Нажми на стрелку и она полетит;\n"
+        "• Избегай столкновений;\n"
+        "• Проходи уровни и соревнуйся с друзьями!\n\n"
+        "Получай монеты за игру. 💰\n"
+        "Поднимайся в топ и забирай призы. 🥇\n\n"
+        "Нажми кнопку ниже, чтобы начать! 👇"
     )
 
 
@@ -63,13 +68,13 @@ def build_start_keyboard(webapp_url: str) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Launch ArrowReward",
+                    text="Запустить ArrowReward",
                     web_app=WebAppInfo(url=webapp_url),
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="Info",
+                    text="инфо",
                     callback_data="info",
                 )
             ],
@@ -82,7 +87,7 @@ def build_info_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Back",
+                    text="Назад",
                     callback_data="back_to_start",
                 )
             ],
@@ -136,7 +141,7 @@ async def cmd_start(message: types.Message):
 async def process_info(callback: types.CallbackQuery):
     """Handle info button."""
     await callback.message.edit_text(
-        "Support: @ArrowRewardSupport",
+        "Обратная связь и поддержка:\n\n@ArrowRewardSupport",
         reply_markup=build_info_keyboard(),
         parse_mode="HTML",
     )
