@@ -40,7 +40,7 @@ ARROW_SKINS = [
     {"id": "cyber", "name": "Киберпанк", "price_ton": 2.0, "preview": "🤖"},
 ]
 
-BETA_VISIBLE_BOOST_IDS = {"hints_3", "hints_10", "revive_1", "revive_3"}
+BETA_VISIBLE_BOOST_IDS = {"hints_1", "revive_1"}
 
 # Темы оформления
 THEMES = [
@@ -55,10 +55,8 @@ THEMES = [
 
 # Бусты
 BOOSTS = [
-    {"id": "hints_3", "name": "+3 подсказки", "price_coins": 50, "preview": "💡"},
-    {"id": "hints_10", "name": "+10 подсказок", "price_coins": 150, "preview": "💡"},
-    {"id": "revive_1", "name": "+1 воскрешение", "price_coins": 100, "preview": "💚"},
-    {"id": "revive_3", "name": "+3 воскрешения", "price_coins": 250, "preview": "💚"},
+    {"id": "hints_1", "name": "+1 подсказка", "price_coins": 25, "preview": "💡"},
+    {"id": "revive_1", "name": "+1 возрождение", "price_coins": 50, "preview": "❤️"},
     {"id": "life_1", "name": "+1 жизнь", "price_coins": 100, "preview": "❤️"},
     {"id": "energy_5", "name": "+5 энергии", "price_stars": 20, "preview": "⚡"},
     {"id": "energy_full", "name": "Полная энергия", "price_stars": 40, "preview": "⚡"},
@@ -166,7 +164,10 @@ async def purchase_item(
         return PurchaseResponse(success=False, error="Item is free")
     
     # Проверяем баланс
-    if user.coins < price:
+    quantity = request.quantity if request.item_type == "boosts" else 1
+    total_price = price * quantity
+
+    if user.coins < total_price:
         return PurchaseResponse(success=False, error="Not enough coins")
     
     # Проверяем что ещё не куплен (для не-бустов)
@@ -182,12 +183,12 @@ async def purchase_item(
             return PurchaseResponse(success=False, error="Already owned")
     
     # Списываем монеты
-    user.coins -= price
+    user.coins -= total_price
     
     # Добавляем в инвентарь или применяем буст
     if request.item_type == "boosts":
         # Применяем буст сразу
-        await apply_boost(user, request.item_id, db)
+        await apply_boost(user, request.item_id, db, quantity=quantity)
     else:
         inv = Inventory(
             user_id=user.id,
@@ -201,7 +202,7 @@ async def purchase_item(
         user_id=user.id,
         type="purchase",
         currency="coins",
-        amount=-price,
+        amount=-total_price,
         item_type=request.item_type,
         item_id=request.item_id
     )
@@ -456,16 +457,12 @@ async def equip_item(
 # HELPERS
 # ============================================
 
-async def apply_boost(user: User, boost_id: str, db: AsyncSession):
+async def apply_boost(user: User, boost_id: str, db: AsyncSession, quantity: int = 1):
     """Применить буст к пользователю."""
-    if boost_id == "hints_3":
-        user.hint_balance += 3
-    elif boost_id == "hints_10":
-        user.hint_balance += 10
+    if boost_id == "hints_1":
+        user.hint_balance += quantity
     elif boost_id == "revive_1":
-        user.revive_balance += 1
-    elif boost_id == "revive_3":
-        user.revive_balance += 3
+        user.revive_balance += quantity
     elif boost_id == "life_1":
         pass  # lives client-side only
     elif boost_id == "energy_5":

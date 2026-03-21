@@ -36,6 +36,7 @@ type Rarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
 
 interface Sector {
   label: string;
+  wheelLabel: string;
   icon: string;
   color: string;
   rarity: Rarity;
@@ -84,15 +85,19 @@ const RARITY_CONFIG: Record<Rarity, { color: string; bg: string; glow: string; l
 };
 
 // Порядок секторов на колесе
+const COIN_SECTOR_COLOR = '#f59e0b';
+const HINT_SECTOR_COLOR = '#06b6d4';
+const REVIVE_SECTOR_COLOR = '#f43f5e';
+
 const SECTORS: Sector[] = [
-  { label: '10 монет',  icon: '🪙', color: '#0f766e', rarity: 'common',    prizeType: 'coins',  prizeAmount: 10  },
-  { label: '25 монет',  icon: '🪙', color: '#047857', rarity: 'common',    prizeType: 'coins',  prizeAmount: 25  },
-  { label: '1 хинт',    icon: '💡', color: '#1d4ed8', rarity: 'uncommon',  prizeType: 'hints',  prizeAmount: 1   },
-  { label: '50 монет',  icon: '💰', color: '#2563eb', rarity: 'uncommon',  prizeType: 'coins',  prizeAmount: 50  },
-  { label: '100 монет', icon: '💰', color: '#7e22ce', rarity: 'rare',      prizeType: 'coins',  prizeAmount: 100 },
-  { label: '3 хинта',   icon: '💡', color: '#9333ea', rarity: 'rare',      prizeType: 'hints',  prizeAmount: 3   },
-  { label: '250 монет', icon: '💎', color: '#b45309', rarity: 'epic',      prizeType: 'coins',  prizeAmount: 250 },
-  { label: '1 ревайв',  icon: '❤️', color: '#be123c', rarity: 'legendary', prizeType: 'revive', prizeAmount: 1   },
+  { label: '10 монет',      wheelLabel: '🪙 10',  icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'common',    prizeType: 'coins',  prizeAmount: 10  },
+  { label: '25 монет',      wheelLabel: '🪙 25',  icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'common',    prizeType: 'coins',  prizeAmount: 25  },
+  { label: '1 подсказка',   wheelLabel: '💡 1',   icon: '💡', color: HINT_SECTOR_COLOR,   rarity: 'uncommon',  prizeType: 'hints',  prizeAmount: 1   },
+  { label: '50 монет',      wheelLabel: '🪙 50',  icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'uncommon',  prizeType: 'coins',  prizeAmount: 50  },
+  { label: '100 монет',     wheelLabel: '🪙 100', icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'rare',      prizeType: 'coins',  prizeAmount: 100 },
+  { label: '3 подсказки',   wheelLabel: '💡 3',   icon: '💡', color: HINT_SECTOR_COLOR,   rarity: 'rare',      prizeType: 'hints',  prizeAmount: 3   },
+  { label: '250 монет',     wheelLabel: '🪙 250', icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'epic',      prizeType: 'coins',  prizeAmount: 250 },
+  { label: '1 возрождение', wheelLabel: '❤️ 1',  icon: '❤️', color: REVIVE_SECTOR_COLOR, rarity: 'legendary', prizeType: 'revive', prizeAmount: 1   },
 ];
 
 const SECTOR_COUNT = SECTORS.length;
@@ -125,6 +130,26 @@ function sectorPath(cx: number, cy: number, r: number, startAngle: number, endAn
   const e = polarToCartesian(cx, cy, r, endAngle);
   const large = endAngle - startAngle > 180 ? 1 : 0;
   return `M ${cx} ${cy} L ${s.x} ${s.y} A ${r} ${r} 0 ${large} 1 ${e.x} ${e.y} Z`;
+}
+
+function getSectorFill(sector: Sector): string {
+  if (sector.prizeType === 'coins') {
+    if (sector.prizeAmount >= 250) return '#fbbf24';
+    if (sector.prizeAmount >= 100 || sector.prizeAmount === 10) return '#d97706';
+    return '#f59e0b';
+  }
+
+  if (sector.prizeType === 'hints') {
+    return sector.prizeAmount >= 3 ? '#0891b2' : '#06b6d4';
+  }
+
+  return '#f43f5e';
+}
+
+function getSectorAmountFontSize(amount: number): number {
+  if (amount >= 100) return 18;
+  if (amount >= 10) return 22;
+  return 24;
 }
 
 // ============================================
@@ -187,7 +212,7 @@ function SpinInfoModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
                   <span className="text-yellow-200/60 text-[11px] font-bold bg-yellow-500/10 px-2 py-1 rounded-md">14+ ДНЕЙ</span>
                 </div>
                 <h4 className="text-white font-bold mb-1 text-base relative z-10">Максимальная удача</h4>
-                <p className="text-yellow-100/70 text-xs leading-relaxed relative z-10">Доступ к редким призам. Ревайвы, джекпоты и связки подсказок выпадают чаще всего!</p>
+                <p className="text-yellow-100/70 text-xs leading-relaxed relative z-10">Доступ к редким призам. Возрождения, джекпоты и связки подсказок выпадают чаще всего!</p>
               </div>
             </div>
 
@@ -268,20 +293,20 @@ function SpinWheel({
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="absolute inset-0 pointer-events-none drop-shadow-2xl overflow-visible">
         <defs>
           <linearGradient id="wheelOuter" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.8" />
-            <stop offset="100%" stopColor="#ec4899" stopOpacity="0.6" />
+            <stop offset="0%" stopColor="#7c3aed" stopOpacity="0.34" />
+            <stop offset="100%" stopColor="#c084fc" stopOpacity="0.16" />
           </linearGradient>
         </defs>
-        <circle cx={cx} cy={cy} r={r + 14} fill="url(#wheelOuter)" filter="blur(8px)" opacity={isSpinning ? 0.8 : 0.5} className="transition-opacity duration-300" />
-        <circle cx={cx} cy={cy} r={r + 6} fill="#0a0c1a" stroke="url(#wheelOuter)" strokeWidth={4} />
+        <circle cx={cx} cy={cy} r={r + 12} fill="url(#wheelOuter)" filter="blur(6px)" opacity={isSpinning ? 0.42 : 0.24} className="transition-opacity duration-300" />
+        <circle cx={cx} cy={cy} r={r + 6} fill="#0a0c1a" stroke="url(#wheelOuter)" strokeWidth={3} />
       </svg>
 
       {/* Динамический вращающийся слой с will-change-transform */}
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="absolute inset-0 pointer-events-none overflow-visible">
         <defs>
           <linearGradient id="activeGlow" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.4" />
-            <stop offset="100%" stopColor="#fbcfe8" stopOpacity="0.1" />
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="#f8fafc" stopOpacity="0.06" />
           </linearGradient>
         </defs>
 
@@ -290,8 +315,10 @@ function SpinWheel({
             const start = i * SECTOR_ANGLE;
             const end = start + SECTOR_ANGLE;
             const mid = start + SECTOR_ANGLE / 2;
-            const textPt = polarToCartesian(cx, cy, r * 0.73, mid);
-            const iconPt = polarToCartesian(cx, cy, r * 0.43, mid);
+            const iconPt = polarToCartesian(cx, cy, r * 0.5, mid);
+            const amountPt = polarToCartesian(cx, cy, r * 0.68, mid);
+            const fill = getSectorFill(s);
+            const amountFontSize = getSectorAmountFontSize(s.prizeAmount);
 
             const isActive = i === activeIndex;
             const sectorOpacity = isSpinning && !isActive ? 0.6 : 1;
@@ -300,9 +327,9 @@ function SpinWheel({
               <g key={i} style={{ opacity: sectorOpacity, transition: 'opacity 0.1s' }}>
                 <path
                   d={sectorPath(cx, cy, r, start, end)}
-                  fill={s.color}
-                  stroke={isActive && isSpinning ? "#ffffff" : "#1e1b4b"}
-                  strokeWidth={isActive && isSpinning ? 3 : 2}
+                  fill={fill}
+                  stroke={isActive && isSpinning ? "#f8fafc" : "#181629"}
+                  strokeWidth={isActive && isSpinning ? 3 : 2.5}
                 />
                 {isActive && isSpinning && (
                   <path d={sectorPath(cx, cy, r, start, end)} fill="url(#activeGlow)" />
@@ -313,23 +340,26 @@ function SpinWheel({
                   y={iconPt.y}
                   textAnchor="middle"
                   dominantBaseline="central"
-                  fontSize={26}
+                  fontSize={18}
+                  fill="#ffffff"
                   style={{ transform: `rotate(${mid}deg)`, transformOrigin: `${iconPt.x}px ${iconPt.y}px` }}
                 >
                   {s.icon}
                 </text>
                 <text
-                  x={textPt.x}
-                  y={textPt.y}
+                  x={amountPt.x}
+                  y={amountPt.y}
                   textAnchor="middle"
                   dominantBaseline="central"
-                  fontSize={11}
+                  fontSize={amountFontSize}
                   fill="#ffffff"
-                  fontWeight="800"
-                  letterSpacing="0.5"
-                  style={{ transform: `rotate(${mid}deg)`, transformOrigin: `${textPt.x}px ${textPt.y}px` }}
+                  fontWeight="900"
+                  stroke="rgba(10,12,26,0.28)"
+                  strokeWidth={2}
+                  paintOrder="stroke fill"
+                  style={{ transform: `rotate(${mid}deg)`, transformOrigin: `${amountPt.x}px ${amountPt.y}px` }}
                 >
-                  {s.label}
+                  {s.prizeAmount}
                 </text>
               </g>
             );

@@ -183,6 +183,7 @@ class PurchaseRequest(BaseModel):
     """Запрос покупки."""
     item_type: str  # 'arrow_skins', 'themes', 'boosts'
     item_id: str
+    quantity: int = Field(default=1, ge=1, le=10)
 
 
 class PurchaseResponse(BaseModel):

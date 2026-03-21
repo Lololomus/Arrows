@@ -1173,7 +1173,7 @@ export function GameScreen() {
 
   // === ZOOM / PAN HANDLERS ===
   const handleWheel = useCallback((e: React.WheelEvent) => {
-    if (isIntroAnimating) return;
+    if (isIntroAnimating || noMoreLevels) return;
     if (e.cancelable) e.preventDefault();
     cancelPanTween();
 
@@ -1183,7 +1183,7 @@ export function GameScreen() {
     const currentScale = cameraScale.get();
     const targetScale = currentScale * Math.pow(1.12, normalized);
     applyScaleImmediate(targetScale);
-  }, [cameraScale, isIntroAnimating, cancelPanTween, applyScaleImmediate]);
+  }, [cameraScale, isIntroAnimating, noMoreLevels, cancelPanTween, applyScaleImmediate]);
 
   const getTouchMidpointInContainer = useCallback((
     a: { clientX: number; clientY: number },
@@ -1198,7 +1198,7 @@ export function GameScreen() {
   }, []);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if (isIntroAnimating) return;
+    if (isIntroAnimating || noMoreLevels) return;
     cancelPanTween();
 
     if (e.touches.length === 2) {
@@ -1213,10 +1213,10 @@ export function GameScreen() {
       dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       lastTransform.current = { x: cameraX.get(), y: cameraY.get() };
     }
-  }, [cameraScale, cameraX, cameraY, isIntroAnimating, cancelPanTween, getTouchMidpointInContainer]);
+  }, [cameraScale, cameraX, cameraY, isIntroAnimating, noMoreLevels, cancelPanTween, getTouchMidpointInContainer]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (isIntroAnimating) return;
+    if (isIntroAnimating || noMoreLevels) return;
 
     if (e.touches.length === 2 && pinchStartDist.current) {
       const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -1261,6 +1261,7 @@ export function GameScreen() {
     cameraX,
     cameraY,
     isIntroAnimating,
+    noMoreLevels,
     applyScaleImmediate,
     clampPanToBounds,
     getTouchMidpointInContainer,
@@ -1271,6 +1272,13 @@ export function GameScreen() {
   ]);
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (noMoreLevels) {
+      setIsDragging(false);
+      pinchStartDist.current = null;
+      pinchLastMidpoint.current = null;
+      return;
+    }
+
     if (e.touches.length === 1) {
       setIsDragging(true);
       dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
@@ -1283,10 +1291,10 @@ export function GameScreen() {
     setIsDragging(false);
     pinchStartDist.current = null;
     pinchLastMidpoint.current = null;
-  }, [cameraX, cameraY]);
+  }, [cameraX, cameraY, noMoreLevels]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (isIntroAnimating) return;
+    if (isIntroAnimating || noMoreLevels) return;
     if (e.ctrlKey && e.button === 0) {
       cancelPanTween();
       setIsDragging(true);
@@ -1294,17 +1302,17 @@ export function GameScreen() {
       lastTransform.current = { x: cameraX.get(), y: cameraY.get() };
       e.preventDefault();
     }
-  }, [cameraX, cameraY, isIntroAnimating, cancelPanTween]);
+  }, [cameraX, cameraY, isIntroAnimating, noMoreLevels, cancelPanTween]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (isDragging && !isIntroAnimating) {
+    if (isDragging && !isIntroAnimating && !noMoreLevels) {
       const dx = e.clientX - dragStart.current.x;
       const dy = e.clientY - dragStart.current.y;
       const pan = clampPanToBounds(lastTransform.current.x + dx, lastTransform.current.y + dy, cameraScale.get());
       cameraX.set(pan.x);
       cameraY.set(pan.y);
     }
-  }, [isDragging, cameraX, cameraY, cameraScale, isIntroAnimating, clampPanToBounds]);
+  }, [isDragging, cameraX, cameraY, cameraScale, isIntroAnimating, noMoreLevels, clampPanToBounds]);
 
   const handleMouseUp = useCallback(() => setIsDragging(false), []);
   // === КЛИК ПО СТРЕЛКЕ ===
@@ -1714,10 +1722,22 @@ export function GameScreen() {
         >
           {noMoreLevels ? (
             <div className="flex h-full items-center justify-center">
-                <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="text-center bg-slate-900/80 backdrop-blur-xl p-8 rounded-3xl border border-white/20 shadow-2xl max-w-xs">
+                <motion.div
+                  data-allow-select="true"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="text-center bg-slate-900/80 backdrop-blur-xl p-8 rounded-3xl border border-white/20 shadow-2xl max-w-xs"
+                >
                   <div className="text-5xl mb-4">🎉</div>
                   <h2 className="text-2xl font-bold text-white mb-2">Скоро новые уровни!</h2>
-                  <button onClick={() => setScreen('home')} className="w-full py-3 bg-blue-600 rounded-xl text-white font-bold mt-4">В меню</button>
+                  <button
+                    type="button"
+                    data-allow-select="true"
+                    onClick={confirmMenu}
+                    className="w-full py-3 bg-blue-600 rounded-xl text-white font-bold mt-4"
+                  >
+                    В меню
+                  </button>
                 </motion.div>
             </div>
           ) : status === 'loading' ? (

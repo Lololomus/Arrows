@@ -857,11 +857,12 @@ export const shopApi = {
 
   purchaseCoins: (
     itemType: string,
-    itemId: string
+    itemId: string,
+    quantity = 1,
   ): Promise<PurchaseCoinsResponse> =>
     request<Record<string, unknown>>(API_ENDPOINTS.shop.purchaseCoins, {
       method: 'POST',
-      body: JSON.stringify({ item_type: itemType, item_id: itemId }),
+      body: JSON.stringify({ item_type: itemType, item_id: itemId, quantity }),
     }).then((raw) => ({
       success: Boolean(raw.success),
       coins: Number(raw.coins ?? 0),
