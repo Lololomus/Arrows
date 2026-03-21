@@ -57,6 +57,10 @@ class User(Base):
     active_arrow_skin = Column(String(64), default="default")
     active_theme = Column(String(64), default="light")
 
+    # TON Wallet
+    wallet_address = Column(String(128), nullable=True, unique=True, index=True)
+    wallet_connected_at = Column(DateTime, nullable=True)
+
     # Ежедневная рулетка
     login_streak = Column(Integer, default=0)
     last_spin_date = Column(Date, nullable=True)
@@ -105,6 +109,7 @@ class User(Base):
             "active_theme": self.active_theme,
             "referrals_count": self.referrals_count,
             "referrals_pending": self.referrals_pending,
+            "wallet_address": self.wallet_address,
         }
 
 
@@ -166,7 +171,7 @@ class Inventory(Base):
     user = relationship("User", back_populates="inventory")
     
     __table_args__ = (
-        # Уникальность: user + item_type + item_id
+        UniqueConstraint("user_id", "item_type", "item_id", name="uq_inventory_user_item"),
     )
 
 

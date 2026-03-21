@@ -890,13 +890,59 @@ export const shopApi = {
   purchaseTon: (
     itemType: string,
     itemId: string
-  ): Promise<{ transaction_id: number; address: string; amount: number; comment: string }> =>
-    request<{ transaction_id: number; address: string; amount: number; comment: string }>(
+  ): Promise<{ transaction_id: number; address: string; amount: number; amount_nano: string; comment: string }> =>
+    request<{ transaction_id: number; address: string; amount: number; amount_nano: string; comment: string }>(
       API_ENDPOINTS.shop.purchaseTon,
       {
         method: 'POST',
         body: JSON.stringify({ item_type: itemType, item_id: itemId }),
       }
+    ),
+
+  getTransactionStatus: (
+    txId: number
+  ): Promise<{ transaction_id: number; status: string }> =>
+    request<{ transaction_id: number; status: string }>(
+      API_ENDPOINTS.shop.transactionStatus(txId)
+    ),
+
+  confirmTransaction: (
+    txId: number,
+  ): Promise<{ transaction_id: number; status: string; verified: boolean }> =>
+    request<{ transaction_id: number; status: string; verified: boolean }>(
+      API_ENDPOINTS.shop.transactionConfirm(txId),
+      { method: 'POST' }
+    ),
+};
+
+// ============================================
+// WALLET API (TON Connect)
+// ============================================
+
+export const walletApi = {
+  getProofPayload: (): Promise<{ payload: string }> =>
+    request<{ payload: string }>(API_ENDPOINTS.wallet.proofPayload),
+
+  connect: (
+    address: string,
+    proof: Record<string, unknown>
+  ): Promise<{ success: boolean; wallet_address?: string; error?: string }> =>
+    request<{ success: boolean; wallet_address?: string; error?: string }>(
+      API_ENDPOINTS.wallet.connect,
+      {
+        method: 'POST',
+        body: JSON.stringify({ address, proof }),
+      }
+    ),
+
+  disconnect: (): Promise<{ success: boolean }> =>
+    request<{ success: boolean }>(API_ENDPOINTS.wallet.disconnect, {
+      method: 'POST',
+    }),
+
+  getStatus: (): Promise<{ connected: boolean; wallet_address?: string }> =>
+    request<{ connected: boolean; wallet_address?: string }>(
+      API_ENDPOINTS.wallet.status
     ),
 };
 

@@ -44,6 +44,7 @@ Set these values before first deploy:
 
 - `.env`
   - `POSTGRES_PASSWORD=<long random password, 16+ chars>`
+  - `REDIS_PASSWORD=<long random password, 16+ chars>`
 - `backend/.env.production`
   - `ENVIRONMENT=production`
   - `DEBUG=false`

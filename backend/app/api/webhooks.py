@@ -6,6 +6,7 @@ Telegram Payments, TON, AdsGram and Telegram bot updates.
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.shop import apply_boost, get_item_by_id
@@ -44,19 +45,42 @@ async def handle_telegram_payment(
     if "message" in body and "successful_payment" in body["message"]:
         payment = body["message"]["successful_payment"]
         user_id = body["message"]["from"]["id"]
+        charge_id = payment.get("telegram_payment_charge_id") or payment.get("provider_payment_charge_id", "")
         item_type, item_id = payment["invoice_payload"].split(":")
 
-        result = await db.execute(select(User).where(User.telegram_id == user_id))
+        result = await db.execute(
+            select(User)
+            .where(User.telegram_id == user_id)
+            .with_for_update()
+        )
         user = result.scalar_one_or_none()
         if not user:
             return {"ok": False, "error": "User not found"}
+
+        # Idempotency: after locking the user row, skip if this charge_id
+        # was already processed by a previous webhook retry.
+        if charge_id:
+            existing = await db.execute(
+                select(Transaction).where(
+                    Transaction.currency == "stars",
+                    Transaction.ton_tx_hash == charge_id,
+                    Transaction.status == "completed",
+                )
+            )
+            if existing.scalar_one_or_none():
+                return {"ok": True}
 
         item = get_item_by_id(item_type, item_id)
         if item:
             if item_type == "boosts":
                 await apply_boost(user, item_id, db)
             else:
-                db.add(Inventory(user_id=user.id, item_type=item_type, item_id=item_id))
+                try:
+                    async with db.begin_nested():
+                        db.add(Inventory(user_id=user.id, item_type=item_type, item_id=item_id))
+                        await db.flush()
+                except IntegrityError:
+                    pass
 
             db.add(
                 Transaction(
@@ -67,7 +91,7 @@ async def handle_telegram_payment(
                     item_type=item_type,
                     item_id=item_id,
                     status="completed",
-                    external_id=payment.get("telegram_payment_charge_id"),
+                    ton_tx_hash=charge_id,
                 )
             )
             await db.commit()
@@ -82,7 +106,19 @@ async def handle_ton_payment(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Webhook for TON payments."""
+    """
+    Webhook for TON payments (external service / block scanner).
+
+    Protected by API key header. The primary confirmation path is
+    POST /shop/transaction/{tx_id}/confirm called by the authenticated
+    frontend after sendTransaction. This webhook is a secondary
+    fallback for block-scanner integrations.
+    """
+    # Require API key for external callers
+    api_key = request.headers.get("x-api-key", "")
+    if not settings.ADMIN_API_KEY or api_key != settings.ADMIN_API_KEY:
+        return {"ok": False, "error": "Unauthorized"}
+
     body = await request.json()
     tx_hash = body.get("tx_hash") or body.get("hash")
     comment = body.get("comment") or body.get("memo", "")
@@ -98,16 +134,26 @@ async def handle_ton_payment(
     except (ValueError, IndexError):
         return {"ok": False, "error": "Invalid comment format"}
 
+    # Lock the row to prevent concurrent grant
     result = await db.execute(
-        select(Transaction).where(
+        select(Transaction)
+        .where(
             Transaction.id == pending_tx_id,
             Transaction.user_id == user_id,
-            Transaction.status == "pending",
         )
+        .with_for_update()
     )
     tx = result.scalar_one_or_none()
     if not tx:
         return {"ok": False, "error": "Transaction not found"}
+
+    # Already completed — idempotent
+    if tx.status == "completed":
+        return {"ok": True}
+
+    if tx.status != "pending":
+        return {"ok": False, "error": f"Transaction status is '{tx.status}'"}
+
     if amount < tx.amount:
         return {"ok": False, "error": "Insufficient amount"}
 
@@ -121,10 +167,15 @@ async def handle_ton_payment(
         if tx.item_type == "boosts":
             await apply_boost(user, tx.item_id, db)
         else:
-            db.add(Inventory(user_id=user.id, item_type=tx.item_type, item_id=tx.item_id))
+            try:
+                async with db.begin_nested():
+                    db.add(Inventory(user_id=user.id, item_type=tx.item_type, item_id=tx.item_id))
+                    await db.flush()
+            except IntegrityError:
+                pass
 
     tx.status = "completed"
-    tx.external_id = tx_hash
+    tx.ton_tx_hash = tx_hash
     await db.commit()
     return {"ok": True}
 

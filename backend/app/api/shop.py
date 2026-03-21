@@ -8,14 +8,16 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from ..config import settings
 from ..database import get_db
 from ..models import User, Inventory, Transaction
 from ..schemas import (
     ShopItem, ShopCatalog, PurchaseRequest, PurchaseResponse,
-    TonPaymentInfo
+    TonPaymentInfo, TransactionStatusResponse
 )
+from ..services.ton_verify import verify_ton_transaction
 from .auth import get_current_user
 
 
@@ -66,6 +68,15 @@ BOOSTS = [
 ]
 
 
+def ton_payments_enabled() -> bool:
+    """Whether TON purchases should be exposed to clients."""
+    return (
+        settings.TON_PAYMENTS_ENABLED
+        and bool(settings.TON_WALLET_ADDRESS)
+        and bool(settings.TON_API_KEY)
+    )
+
+
 def get_item_by_id(item_type: str, item_id: str) -> Optional[dict]:
     """Найти товар по типу и ID."""
     catalog = {
@@ -113,8 +124,16 @@ async def get_catalog(
         )
     
     return ShopCatalog(
-        arrow_skins=[],
-        themes=[],
+        arrow_skins=[
+            make_shop_item(s, "arrow_skins")
+            for s in ARROW_SKINS
+            if ton_payments_enabled() and s.get("price_ton") is not None
+        ],
+        themes=[
+            make_shop_item(t, "themes")
+            for t in THEMES
+            if ton_payments_enabled() and t.get("price_ton") is not None
+        ],
         boosts=[
             make_shop_item(b, "boosts")
             for b in BOOSTS
@@ -234,14 +253,49 @@ async def purchase_with_ton(
     """
     Получить данные для оплаты TON.
     """
+    if not ton_payments_enabled():
+        raise HTTPException(status_code=403, detail="TON payments are currently disabled")
+
     item = get_item_by_id(request.item_type, request.item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    
+
     price = item.get("price_ton")
     if price is None:
         raise HTTPException(status_code=400, detail="Item not available for TON")
-    
+
+    # Non-consumable: check if already owned
+    if request.item_type != "boosts":
+        existing = await db.execute(
+            select(Inventory).where(
+                Inventory.user_id == user.id,
+                Inventory.item_type == request.item_type,
+                Inventory.item_id == request.item_id,
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Item already owned")
+
+        # Also check for existing pending tx to avoid duplicates
+        pending = await db.execute(
+            select(Transaction).where(
+                Transaction.user_id == user.id,
+                Transaction.item_type == request.item_type,
+                Transaction.item_id == request.item_id,
+                Transaction.status == "pending",
+            )
+        )
+        existing_tx = pending.scalar_one_or_none()
+        if existing_tx:
+            comment = f"arrow_{user.id}_{existing_tx.id}"
+            return TonPaymentInfo(
+                transaction_id=existing_tx.id,
+                address=settings.TON_WALLET_ADDRESS,
+                amount=price,
+                amount_nano=str(int(price * 1_000_000_000)),
+                comment=comment
+            )
+
     # Создаём pending транзакцию
     tx = Transaction(
         user_id=user.id,
@@ -263,8 +317,102 @@ async def purchase_with_ton(
         transaction_id=tx.id,
         address=settings.TON_WALLET_ADDRESS,
         amount=price,
+        amount_nano=str(int(price * 1_000_000_000)),
         comment=comment
     )
+
+
+@router.get("/transaction/{tx_id}/status", response_model=TransactionStatusResponse)
+async def get_transaction_status(
+    tx_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Получить статус транзакции."""
+    result = await db.execute(
+        select(Transaction).where(
+            Transaction.id == tx_id,
+            Transaction.user_id == user.id,
+        )
+    )
+    tx = result.scalar_one_or_none()
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    return TransactionStatusResponse(
+        transaction_id=tx.id,
+        status=tx.status,
+    )
+
+
+@router.post("/transaction/{tx_id}/confirm")
+async def confirm_ton_transaction(
+    tx_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Фронтенд вызывает после sendTransaction.
+    Сканирует блокчейн на наличие транзакции с нужным comment+amount.
+    Использует SELECT FOR UPDATE для защиты от параллельных запросов.
+    """
+    # Lock the row to prevent concurrent grant
+    result = await db.execute(
+        select(Transaction)
+        .where(
+            Transaction.id == tx_id,
+            Transaction.user_id == user.id,
+        )
+        .with_for_update()
+    )
+    tx = result.scalar_one_or_none()
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    # Already completed — idempotent response
+    if tx.status == "completed":
+        return {"transaction_id": tx.id, "status": "completed", "verified": True}
+
+    if tx.status != "pending":
+        raise HTTPException(status_code=409, detail=f"Transaction status is '{tx.status}'")
+
+    comment = f"arrow_{user.id}_{tx.id}"
+    amount_nano = int(float(tx.amount) * 1_000_000_000)
+
+    # On-chain verification: scan recent txs by comment + amount
+    match = await verify_ton_transaction(
+        expected_address=settings.TON_WALLET_ADDRESS,
+        expected_amount_nano=amount_nano,
+        expected_comment=comment,
+    )
+
+    if not match:
+        # Not yet on-chain — frontend should retry later
+        return {"transaction_id": tx.id, "status": "pending", "verified": False}
+
+    # Verified — grant item
+    item = get_item_by_id(tx.item_type, tx.item_id)
+    if item:
+        if tx.item_type == "boosts":
+            await apply_boost(user, tx.item_id, db)
+        else:
+            try:
+                async with db.begin_nested():
+                    db.add(Inventory(
+                        user_id=user.id,
+                        item_type=tx.item_type,
+                        item_id=tx.item_id,
+                    ))
+                    await db.flush()
+            except IntegrityError:
+                # Already owns this item (UniqueConstraint) — OK
+                pass
+
+    tx.status = "completed"
+    tx.ton_tx_hash = match["tx_hash"]
+    await db.commit()
+
+    return {"transaction_id": tx.id, "status": "completed", "verified": True}
 
 
 @router.post("/equip/{item_type}/{item_id}")

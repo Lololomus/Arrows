@@ -53,7 +53,8 @@ class UserResponse(BaseModel):
     is_premium: bool
     active_arrow_skin: str
     active_theme: str
-    
+    wallet_address: Optional[str] = None
+
     class Config:
         from_attributes = True
 
@@ -130,7 +131,7 @@ class CompleteResponse(BaseModel):
 
 
 class CompleteAndNextResponse(BaseModel):
-    """РћС‚РІРµС‚ Р°С‚РѕРјР°СЂРЅРѕРіРѕ complete + next."""
+    """Ответ атомарного complete + next."""
     completion: CompleteResponse
     next_level: Optional[LevelResponse] = None
     next_level_exists: bool = False
@@ -198,7 +199,39 @@ class TonPaymentInfo(BaseModel):
     transaction_id: int
     address: str
     amount: float
+    amount_nano: str  # nanoTON string for TonConnect sendTransaction
     comment: str
+
+
+class TransactionStatusResponse(BaseModel):
+    """Статус транзакции."""
+    transaction_id: int
+    status: str
+
+
+# ============================================
+# WALLET (TON Connect)
+# ============================================
+
+class WalletConnectRequest(BaseModel):
+    """TON Connect proof для привязки кошелька."""
+    address: str
+    proof: dict
+
+class WalletConnectResponse(BaseModel):
+    """Результат подключения кошелька."""
+    success: bool
+    wallet_address: Optional[str] = None
+    error: Optional[str] = None
+
+class WalletStatusResponse(BaseModel):
+    """Статус кошелька."""
+    connected: bool
+    wallet_address: Optional[str] = None
+
+class WalletDisconnectResponse(BaseModel):
+    """Результат отключения кошелька."""
+    success: bool
 
 
 # ============================================
@@ -449,14 +482,14 @@ RewardIntentStatus = Literal["pending", "granted", "rejected", "expired"]
 
 
 class RewardIntentCreateRequest(BaseModel):
-    """Р—Р°РїСЂРѕСЃ РЅР° СЃРѕР·РґР°РЅРёРµ pending reward intent."""
+    """Запрос на создание pending reward intent."""
     placement: RewardPlacement
     level: Optional[int] = None
     session_id: Optional[str] = None
 
 
 class RewardIntentCreateResponse(BaseModel):
-    """РћС‚РІРµС‚ СЃРѕР·РґР°РЅРёСЏ reward intent."""
+    """Ответ создания reward intent."""
     intent_id: str
     placement: RewardPlacement
     status: RewardIntentStatus
@@ -464,7 +497,7 @@ class RewardIntentCreateResponse(BaseModel):
 
 
 class RewardIntentStatusResponse(BaseModel):
-    """РЎС‚Р°С‚СѓСЃ reward intent РґР»СЏ polling РЅР° С„СЂРѕРЅС‚Рµ."""
+    """Статус reward intent для polling на фронте."""
     intent_id: str
     placement: RewardPlacement
     status: RewardIntentStatus

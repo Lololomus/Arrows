@@ -117,11 +117,13 @@ def normalize_duplicate_ids(arrows: list[dict[str, Any]]) -> tuple[bool, list[tu
     return (len(changes) > 0, changes)
 
 
-def process_level(path: Path, apply_fix: bool) -> tuple[bool, list[tuple[int, Any, Any]]]:
+def process_level(path: Path, apply_fix: bool) -> tuple[bool, list[tuple[int, Any, Any]], bool]:
     raw = json.loads(path.read_text(encoding="utf-8"))
     arrows = raw.get("arrows")
     if not isinstance(arrows, list):
-        return False, []
+        return False, [], False
+
+    is_empty_level = len(arrows) == 0
 
     changed, changes = normalize_duplicate_ids(arrows)
     if changed and apply_fix:
@@ -129,7 +131,7 @@ def process_level(path: Path, apply_fix: bool) -> tuple[bool, list[tuple[int, An
             json.dumps(raw, ensure_ascii=False, indent="\t") + "\n",
             encoding="utf-8",
         )
-    return changed, changes
+    return changed, changes, is_empty_level
 
 
 def should_apply_fix(path: Path, changes: list[tuple[int, Any, Any]]) -> bool:
@@ -235,6 +237,7 @@ def main() -> int:
     processed = 0
     found = 0
     fixed = 0
+    empty_levels = 0
 
     for path in sorted(LEVELS_DIR.glob("level_*.json")):
         level_number = level_number_from_path(path)
@@ -242,7 +245,10 @@ def main() -> int:
             continue
 
         processed += 1
-        changed, changes = process_level(path, apply_fix=False)
+        changed, changes, is_empty_level = process_level(path, apply_fix=False)
+        if is_empty_level:
+            empty_levels += 1
+            print(f"{path.name}: warning - level has 0 arrows")
         if not changed:
             continue
 
@@ -256,7 +262,8 @@ def main() -> int:
             print(f"{path.name}: skipped")
 
     print(
-        f"Processed {processed} level files, found issues in {found} file(s), fixed {fixed} file(s)."
+        f"Processed {processed} level files, found duplicate-id issues in {found} file(s), "
+        f"fixed {fixed} file(s), empty levels warning(s): {empty_levels}."
     )
 
     if args.sync_missing:

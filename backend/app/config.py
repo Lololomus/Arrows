@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://arrow:password@localhost:5432/arrowpuzzle"
     
     # Redis
-    REDIS_URL: str = "redis://localhost:6379"
+    REDIS_URL: str = "redis://:password@localhost:6379/0"
     
     # JWT
     JWT_SECRET: str = "your-super-secret-key-change-in-production"
@@ -49,8 +49,14 @@ class Settings(BaseSettings):
     OFFICIAL_CHANNEL_REWARD: int = 50
     
     # TON
+    TON_PAYMENTS_ENABLED: bool = False
     TON_API_KEY: str = ""
     TON_WALLET_ADDRESS: str = ""
+
+    # TON Connect
+    TON_CONNECT_PROOF_TTL: int = 300
+    TON_CONNECT_ALLOWED_DOMAINS: str = "arrowreward.ru.tuna.am"
+    TON_CONNECT_PAYLOAD_TTL: int = 600
     
     # Adsgram
     ADSGRAM_SECRET: str = ""

@@ -244,6 +244,14 @@ export const API_ENDPOINTS = {
     purchaseCoins: '/shop/purchase',
     purchaseStars: '/shop/purchase/stars',
     purchaseTon: '/shop/purchase/ton',
+    transactionStatus: (txId: number) => `/shop/transaction/${txId}/status`,
+    transactionConfirm: (txId: number) => `/shop/transaction/${txId}/confirm`,
+  },
+  wallet: {
+    proofPayload: '/wallet/proof-payload',
+    connect: '/wallet/connect',
+    disconnect: '/wallet/disconnect',
+    status: '/wallet/status',
   },
   social: {
     referralCode: '/social/referral/code',

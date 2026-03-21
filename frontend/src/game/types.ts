@@ -162,6 +162,9 @@ export interface User {
   // Рефералы
   referrals_count?: number;
   referrals_pending?: number;
+
+  // TON Wallet
+  walletAddress?: string | null;
 }
 
 /** Статистика пользователя */

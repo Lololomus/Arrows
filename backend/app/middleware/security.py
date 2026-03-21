@@ -137,14 +137,12 @@ def validate_telegram_payment_signature(data: str, signature: str) -> bool:
 
 
 def validate_ton_payment_signature(data: str, signature: str) -> bool:
-    """Валидация подписи TON Payment."""
-    try:
-        # TON использует другой механизм - нужно уточнить у провайдера
-        # Placeholder
-        return True
-    except Exception as e:
-        print(f"❌ [Security] TON signature error: {e}")
-        return False
+    """
+    Deprecated stub — TON payment verification is now done on-chain
+    via ton_verify.verify_ton_transaction(). This function is kept
+    only to avoid import errors in case any code still references it.
+    """
+    return False
 
 
 def validate_adsgram_signature(user_id: int, reward_type: str, signature: str) -> bool:
@@ -219,7 +217,7 @@ async def add_security_headers(request: Request, call_next: Callable):
             "script-src 'self' https://telegram.org; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: https:; "
-            "connect-src 'self' https://api.telegram.org"
+            "connect-src 'self' https://api.telegram.org https://bridge.tonapi.io wss://bridge.tonapi.io"
         )
     
     return response

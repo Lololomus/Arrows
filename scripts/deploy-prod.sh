@@ -66,6 +66,7 @@ require_file "backend/.env.production"
 require_file "frontend/.env.production"
 require_file "docker-compose.yml"
 require_file "docker-compose.prod.yml"
+require_file "redis/redis.conf"
 
 if [[ "$MODE" == "tls" ]]; then
   require_file "nginx/ssl/fullchain.pem"
@@ -75,6 +76,12 @@ fi
 POSTGRES_PASSWORD="$(env_value ".env" "POSTGRES_PASSWORD")"
 [[ ${#POSTGRES_PASSWORD} -ge 16 ]] || die "POSTGRES_PASSWORD in .env must be at least 16 characters"
 [[ "$POSTGRES_PASSWORD" != "changeme123" ]] || die "POSTGRES_PASSWORD must not be changeme123"
+
+REDIS_PASSWORD="$(env_value ".env" "REDIS_PASSWORD")"
+[[ ${#REDIS_PASSWORD} -ge 16 ]] || die "REDIS_PASSWORD in .env must be at least 16 characters"
+[[ "$REDIS_PASSWORD" != "CHANGE_ME_LONG_RANDOM_REDIS_PASSWORD" ]] || die "REDIS_PASSWORD placeholder is not allowed"
+[[ "$REDIS_PASSWORD" != "changeme123" ]] || die "REDIS_PASSWORD must not be changeme123"
+[[ "$REDIS_PASSWORD" != "password" ]] || die "REDIS_PASSWORD must not be password"
 
 ENVIRONMENT="$(env_value "backend/.env.production" "ENVIRONMENT")"
 DEBUG_VALUE="$(env_value "backend/.env.production" "DEBUG")"

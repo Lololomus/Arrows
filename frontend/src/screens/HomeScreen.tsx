@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '../stores/store';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { CoinStashCard } from '../components/ui/CoinStashCard';
+import { WalletButton } from '../components/WalletButton';
 import { SpinScreen } from './SpinScreen';
 import { spinApi } from '../api/client';
 
@@ -112,6 +113,7 @@ export function HomeScreen() {
 
         <div className="flex-1 flex flex-col justify-center space-y-4 pb-8">
           <CoinStashCard balance={coinBalance} />
+          <WalletButton delay={0.35} />
 
           <motion.button
             type="button"

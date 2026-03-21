@@ -63,6 +63,7 @@ def serialize_user(user: User) -> dict:
         "active_theme": user.active_theme,
         "referrals_count": user.referrals_count,
         "referrals_pending": user.referrals_pending,
+        "wallet_address": user.wallet_address,
     }
 
 

@@ -28,6 +28,8 @@ export interface RawUserResponse {
   isPremium?: boolean;
   referrals_count?: number;
   referrals_pending?: number;
+  wallet_address?: string | null;
+  walletAddress?: string | null;
 }
 
 export interface RawAuthResponse {
@@ -56,6 +58,7 @@ export function normalizeUserResponse(raw: RawUserResponse): User {
     isPremium: raw.isPremium ?? raw.is_premium ?? false,
     referrals_count: raw.referrals_count ?? 0,
     referrals_pending: raw.referrals_pending ?? 0,
+    walletAddress: raw.walletAddress ?? raw.wallet_address ?? null,
   };
 }
 

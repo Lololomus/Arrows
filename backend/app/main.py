@@ -12,7 +12,7 @@ from slowapi.errors import RateLimitExceeded
 
 from .config import settings
 from .database import init_db, close_redis
-from .api import ads, auth, game, shop, social, spin, tasks, webhooks
+from .api import ads, auth, game, shop, social, spin, tasks, wallet, webhooks
 from .middleware.security import (
     limiter, 
     add_security_headers,
@@ -141,9 +141,10 @@ app.include_router(shop.router, prefix=api_prefix)
 app.include_router(social.router, prefix=api_prefix)
 app.include_router(spin.router, prefix=api_prefix)
 app.include_router(tasks.router, prefix=api_prefix)
+app.include_router(wallet.router, prefix=api_prefix)
 app.include_router(webhooks.router, prefix=api_prefix)
 
-print(f"✅ All routers activated: {api_prefix}")
+print(f"[Startup] All routers activated: {api_prefix}")
 
 
 # ============================================

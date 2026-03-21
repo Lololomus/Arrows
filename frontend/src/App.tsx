@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { TonConnectUIProvider } from '@tonconnect/ui-react';
 import '@fontsource/bungee-inline';
 import { useAppStore } from './stores/store';
 import { authApi, socialApi } from './api/client';
@@ -33,8 +34,17 @@ const DEV_AUTH_ENABLED = ['1', 'true', 'yes', 'on'].includes(
   String(import.meta.env.VITE_ENABLE_DEV_AUTH || '').toLowerCase()
 );
 const ENABLE_NON_GAME_BACKGROUND = true; // one-line toggle
+const TON_CONNECT_MANIFEST_URL = `${window.location.origin}/tonconnect-manifest.json`;
 
 export default function App() {
+  return (
+    <TonConnectUIProvider manifestUrl={TON_CONNECT_MANIFEST_URL}>
+      <AppInner />
+    </TonConnectUIProvider>
+  );
+}
+
+function AppInner() {
   const {
     screen,
     authStatus,
