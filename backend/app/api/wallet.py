@@ -121,7 +121,7 @@ async def connect_wallet(
 
     # 7. Bind wallet
     user.wallet_address = canonical_address
-    user.wallet_connected_at = datetime.now(timezone.utc)
+    user.wallet_connected_at = datetime.utcnow()
     await db.commit()
 
     return WalletConnectResponse(
