@@ -3,9 +3,21 @@ TON Connect proof verification.
 
 Verifies wallet ownership via the TON Connect proof protocol.
 Spec: https://docs.ton.org/develop/dapps/ton-connect/sign
+
+Wallet data cell layouts (skip_bits before 256-bit public key):
+  v1/v2: seqno(32)                                              → skip 32
+  v3:    seqno(32) + subwallet_id(32)                            → skip 64
+  v4:    seqno(32) + subwallet_id(32)                            → skip 64
+  v5:    is_signature_allowed(1) + seqno(32) + subwallet_id(32)  → skip 65
+
+Confirmed from pytoniq_core source:
+  WalletV3Data.deserialize: load_uint(32) + load_uint(32) + load_bytes(32)
+  WalletV4Data.deserialize: load_uint(32) + load_uint(32) + load_bytes(32) + load_maybe_ref()
 """
 
+import base64
 import hashlib
+import logging
 import struct
 import time
 from typing import Optional
@@ -13,9 +25,14 @@ from typing import Optional
 from nacl.signing import VerifyKey
 from nacl.exceptions import BadSignatureError
 
-from pytoniq_core import Address
+from pytoniq_core import Address, Cell
 
 from ..config import settings
+
+logger = logging.getLogger(__name__)
+
+# Offsets to try, ordered by frequency (v3/v4 are ~95% of wallets)
+_PUBKEY_SKIP_BITS = (64, 65, 32)
 
 
 def verify_ton_proof(
@@ -34,7 +51,7 @@ def verify_ton_proof(
             - domain: { lengthBytes (int), value (str) }
             - payload (str)
             - signature (str, base64)
-            - state_init (str, optional) — base64 BOC of the wallet StateInit
+            - state_init (str) — base64 BOC of the wallet StateInit
         expected_payload: Server-issued challenge string.
         allowed_domains: List of allowed domain values.
 
@@ -53,7 +70,7 @@ def verify_ton_proof(
         if not all([timestamp, domain_value, payload, signature_b64]):
             return False
 
-        # 2. Timestamp freshness check
+        # 2. Timestamp freshness
         now = int(time.time())
         if abs(now - timestamp) > settings.TON_CONNECT_PROOF_TTL:
             return False
@@ -68,136 +85,88 @@ def verify_ton_proof(
 
         # 5. Parse address
         addr = Address(address)
-        workchain = addr.wc
-        addr_hash = addr.hash_part  # 32 bytes
 
-        # 6. Build the message to verify
-        # "ton-proof-item-v2/" prefix
-        wc_bytes = struct.pack(">i", workchain)  # 4 bytes, big-endian int32
-        ts_bytes = struct.pack("<q", timestamp)  # 8 bytes, little-endian int64
-        dl_bytes = struct.pack("<I", domain_length)  # 4 bytes, little-endian uint32
-        domain_bytes = domain_value.encode("utf-8")
-        payload_bytes = payload.encode("utf-8")
+        # 6. Build the message (TON Connect proof spec v2)
+        message = (
+            b"ton-proof-item-v2/"
+            + struct.pack(">i", addr.wc)                    # workchain, 4B BE
+            + addr.hash_part                                 # address hash, 32B
+            + struct.pack("<I", domain_length)               # domain len, 4B LE
+            + domain_value.encode("utf-8")                   # domain
+            + struct.pack("<q", timestamp)                   # timestamp, 8B LE
+            + payload.encode("utf-8")                        # payload
+        )
 
-        message = b"ton-proof-item-v2/"
-        message += wc_bytes
-        message += addr_hash
-        message += dl_bytes
-        message += domain_bytes
-        message += ts_bytes
-        message += payload_bytes
+        # 7. Double hash: sha256(0xffff || "ton-connect" || sha256(message))
+        final_hash = hashlib.sha256(
+            b"\xff\xff" + b"ton-connect" + hashlib.sha256(message).digest()
+        ).digest()
 
-        message_hash = hashlib.sha256(message).digest()
-
-        # 7. Prepend "ton-connect" prefix and hash again
-        full_message = b"\xff\xff" + b"ton-connect" + message_hash
-        final_hash = hashlib.sha256(full_message).digest()
-
-        # 8. Verify Ed25519 signature
-        import base64
+        # 8. Decode signature
         signature = base64.b64decode(signature_b64)
 
-        # Get public key from state_init if provided
-        public_key = _extract_public_key(proof, addr)
-        if public_key is None:
+        # 9. Extract public key candidates and verify signature
+        data_cell = _parse_data_cell(proof, addr)
+        if data_cell is None:
             return False
 
-        verify_key = VerifyKey(public_key)
-        verify_key.verify(final_hash, signature)
+        for skip_bits in _PUBKEY_SKIP_BITS:
+            public_key = _try_extract_pubkey(data_cell, skip_bits)
+            if public_key is None:
+                continue
+            try:
+                VerifyKey(public_key).verify(final_hash, signature)
+                return True
+            except BadSignatureError:
+                continue
 
-        return True
+        return False
 
-    except (BadSignatureError, Exception) as e:
-        print(f"⚠️ [TonProof] Verification failed: {e}")
+    except Exception as e:
+        logger.warning("TonProof verification failed: %s", e)
         return False
 
 
-def _extract_public_key(proof: dict, addr: Address) -> Optional[bytes]:
+def _parse_data_cell(proof: dict, addr: Address) -> Optional[Cell]:
     """
-    Extract the public key from the wallet state_init.
-
-    For standard wallet contracts (v3r2, v4r2, v5), the public key
-    is stored in the data cell of the state_init.
+    Decode state_init BOC, validate address hash, extract the data cell.
     """
-    import base64
-    from pytoniq_core import Cell
-
     state_init_b64 = proof.get("state_init")
     if not state_init_b64:
         return None
 
     try:
-        state_init_boc = base64.b64decode(state_init_b64)
-        state_init_cell = Cell.one_from_boc(state_init_boc)
+        state_init_cell = Cell.one_from_boc(base64.b64decode(state_init_b64))
 
-        # Verify that the state_init corresponds to the claimed address
-        state_init_hash = state_init_cell.hash
-        if state_init_hash != addr.hash_part:
-            print("⚠️ [TonProof] state_init hash does not match address")
+        # state_init hash must match the claimed address
+        if state_init_cell.hash != addr.hash_part:
             return None
 
-        # Parse StateInit: code (ref 0), data (ref 1)
-        state_init_slice = state_init_cell.begin_parse()
+        # StateInit TLB:
+        #   split_depth:Maybe ^Cell  special:Maybe TickTock
+        #   code:Maybe ^Cell  data:Maybe ^Cell  library:Maybe ^Cell
+        si = state_init_cell.begin_parse()
 
-        # StateInit TLB: split_depth:Maybe ^Cell special:Maybe TickTock code:Maybe ^Cell data:Maybe ^Cell library:Maybe ^Cell
-        # Skip split_depth
-        if state_init_slice.load_bit():
-            state_init_slice.load_ref()
-        # Skip special
-        if state_init_slice.load_bit():
-            state_init_slice.load_ref()
-        # Code
-        if state_init_slice.load_bit():
-            state_init_slice.load_ref()
-        # Data
-        if not state_init_slice.load_bit():
+        if si.load_bit():  # split_depth
+            si.load_ref()
+        if si.load_bit():  # special
+            si.load_ref()
+        if si.load_bit():  # code
+            si.load_ref()
+        if not si.load_bit():  # data — must be present
             return None
 
-        data_cell = state_init_slice.load_ref()
-        data_slice = data_cell.begin_parse()
-
-        # For wallet v3/v4: first 32 bits = seqno (or subwallet_id), next 256 bits = public key
-        # For wallet v5: first 33 bits = is_signature_allowed(1) + seqno(32), then subwallet(32), then public key(256)
-        # Common approach: try to find 256-bit public key
-
-        # Most wallets: skip first 32 bits (seqno/subwallet), read 256 bits as pubkey
-        # wallet v4r2: skip 64 bits (seqno + subwallet_id)
-        # We try both patterns
-
-        bits_remaining = data_slice.remaining_bits
-
-        if bits_remaining >= 32 + 256:
-            # Try wallet v3r2 pattern: 32-bit seqno + 256-bit pubkey
-            data_slice_copy = data_cell.begin_parse()
-            data_slice_copy.load_uint(32)  # seqno or subwallet_id
-
-            if data_slice_copy.remaining_bits >= 256:
-                pubkey_candidate = data_slice_copy.load_bytes(32)
-
-                # Verify: reconstruct address from state_init to validate
-                # If the pubkey works for signature verification, it's correct
-                # We'll return it and let the caller verify the signature
-                return pubkey_candidate
-
-        if bits_remaining >= 64 + 256:
-            # Try wallet v4r2 pattern: 32-bit seqno + 32-bit subwallet_id + 256-bit pubkey
-            data_slice_v4 = data_cell.begin_parse()
-            data_slice_v4.load_uint(64)  # seqno + subwallet_id
-
-            if data_slice_v4.remaining_bits >= 256:
-                return data_slice_v4.load_bytes(32)
-
-        if bits_remaining >= 33 + 32 + 256:
-            # Try wallet v5 pattern: 1-bit flag + 32-bit seqno + 32-bit subwallet + 256-bit pubkey
-            data_slice_v5 = data_cell.begin_parse()
-            data_slice_v5.load_uint(33)  # is_signature_allowed + seqno
-            data_slice_v5.load_uint(32)  # subwallet_id
-
-            if data_slice_v5.remaining_bits >= 256:
-                return data_slice_v5.load_bytes(32)
-
-        return None
+        return si.load_ref()
 
     except Exception as e:
-        print(f"⚠️ [TonProof] Failed to extract public key: {e}")
+        logger.warning("TonProof failed to parse state_init: %s", e)
         return None
+
+
+def _try_extract_pubkey(data_cell: Cell, skip_bits: int) -> Optional[bytes]:
+    """Extract a 256-bit public key after skipping `skip_bits` bits."""
+    ds = data_cell.begin_parse()
+    if ds.remaining_bits < skip_bits + 256:
+        return None
+    ds.load_uint(skip_bits)
+    return ds.load_bytes(32)

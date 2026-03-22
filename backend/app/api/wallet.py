@@ -8,6 +8,7 @@ import secrets
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from pytoniq_core import Address
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -22,6 +23,11 @@ from ..schemas import (
 )
 from ..services.ton_proof import verify_ton_proof
 from .auth import get_current_user
+
+
+def _normalize_address(address: str) -> str:
+    """Normalize any TON address form to raw format (e.g. '0:abcdef...')."""
+    return Address(address).to_str(is_user_friendly=False).lower()
 
 
 router = APIRouter(prefix="/wallet", tags=["wallet"])
@@ -91,10 +97,18 @@ async def connect_wallet(
     # 4. Delete used challenge (single-use)
     await redis.delete(key)
 
-    # 5. Check if wallet already bound to another user
+    # 5. Normalize address to canonical raw format to prevent
+    #    the same wallet being linked via different string representations
+    #    (bounceable, non-bounceable, testnet, raw hex, etc.)
+    try:
+        canonical_address = _normalize_address(request.address)
+    except Exception:
+        return WalletConnectResponse(success=False, error="Invalid address format")
+
+    # 6. Check if wallet already bound to another user
     result = await db.execute(
         select(User).where(
-            User.wallet_address == request.address,
+            User.wallet_address == canonical_address,
             User.id != user.id,
         )
     )
@@ -105,14 +119,14 @@ async def connect_wallet(
             error="Wallet already connected to another account",
         )
 
-    # 6. Bind wallet
-    user.wallet_address = request.address
+    # 7. Bind wallet
+    user.wallet_address = canonical_address
     user.wallet_connected_at = datetime.now(timezone.utc)
     await db.commit()
 
     return WalletConnectResponse(
         success=True,
-        wallet_address=request.address,
+        wallet_address=canonical_address,
     )
 
 

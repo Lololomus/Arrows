@@ -8,7 +8,9 @@
       "Bash(npx tsc --noEmit --pretty)",
       "Bash(redis-cli ping)",
       "Bash(node -e \"const { Tv2 } = require\\(''lucide-react''\\); console.log\\(typeof Tv2\\);\")",
-      "Bash(npx tsc --noEmit)"
+      "Bash(npx tsc --noEmit)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:pypi.org)"
     ]
   }
 }
