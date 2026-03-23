@@ -469,6 +469,7 @@ function PrizeResult({
   isCollecting,
   onRetry,
   onCollect,
+  onSkip,
 }: {
   result: ExtendedSpinResult;
   retryAvailable: boolean;
@@ -477,6 +478,7 @@ function PrizeResult({
   isCollecting: boolean;
   onRetry: () => void;
   onCollect: () => void;
+  onSkip?: () => void;
 }) {
   const config = RARITY_CONFIG[result.rarity];
   const isHighTier = result.rarity === 'epic' || result.rarity === 'legendary';
@@ -555,6 +557,16 @@ function PrizeResult({
               />
             )}
           </button>
+
+          {retryAvailable && onSkip && (
+            <button
+              onClick={onSkip}
+              disabled={isCollecting || isRetryingAd}
+              className="w-full py-2.5 text-white/50 hover:text-white font-semibold text-[15px] transition-colors"
+            >
+              Забрать позже
+            </button>
+          )}
         </div>
       </div>
     </motion.div>
@@ -1069,6 +1081,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
               isCollecting={isCollecting}
               onRetry={handleRetry}
               onCollect={handleCollect}
+              onSkip={onClose}
             />
           ) : (
             <SpinWheel

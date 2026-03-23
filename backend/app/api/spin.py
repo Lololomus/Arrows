@@ -62,6 +62,32 @@ def _to_iso_utc(dt: datetime | None) -> str | None:
     return dt.replace(tzinfo=timezone.utc).isoformat()
 
 
+async def _auto_collect_pending(locked_user: User, db: AsyncSession) -> None:
+    """Зачислить pending приз спина (строка уже залочена)."""
+    if locked_user.pending_spin_prize_type is None:
+        return
+    prize_type = locked_user.pending_spin_prize_type
+    prize_amount = locked_user.pending_spin_prize_amount or 0
+    if prize_type == "coins":
+        locked_user.coins = (locked_user.coins or 0) + prize_amount
+    elif prize_type == "hints":
+        locked_user.hint_balance = (locked_user.hint_balance or 0) + prize_amount
+    elif prize_type == "revive":
+        locked_user.revive_balance = (locked_user.revive_balance or 0) + prize_amount
+    tx = Transaction(
+        user_id=locked_user.id,
+        type="reward",
+        currency=prize_type if prize_type == "coins" else "item",
+        amount=prize_amount,
+        item_type="spin",
+        item_id=f"daily_spin_{prize_type}",
+        status="completed",
+    )
+    db.add(tx)
+    locked_user.pending_spin_prize_type = None
+    locked_user.pending_spin_prize_amount = None
+
+
 # ============================================
 # PRIZES
 # ============================================
@@ -151,8 +177,31 @@ def _ensure_dev() -> None:
 @router.get("/status", response_model=SpinStatusResponse)
 async def get_spin_status(
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     now = _spin_now()
+    last_spin_at = _fallback_last_spin_at(user)
+    next_available_at = (last_spin_at + SPIN_COOLDOWN) if last_spin_at is not None else None
+
+    # Автозачисление просроченного pending приза (кулдаун истёк, а приз не забрали)
+    if (
+        user.pending_spin_prize_type is not None
+        and next_available_at is not None
+        and now >= next_available_at
+    ):
+        lock_result = await db.execute(
+            select(User).where(User.id == user.id).with_for_update()
+        )
+        locked_user = lock_result.scalar_one_or_none()
+        if locked_user is not None and locked_user.pending_spin_prize_type is not None:
+            locked_last = _fallback_last_spin_at(locked_user)
+            locked_next = (locked_last + SPIN_COOLDOWN) if locked_last is not None else None
+            if locked_next is not None and now >= locked_next:
+                await _auto_collect_pending(locked_user, db)
+                await db.commit()
+                user = locked_user
+
+    # Пересчитываем после возможного автозачисления
     last_spin_at = _fallback_last_spin_at(user)
     next_available_at = (last_spin_at + SPIN_COOLDOWN) if last_spin_at is not None else None
 
@@ -203,12 +252,21 @@ async def roll_spin(
     if locked_user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if locked_user.pending_spin_prize_type is not None:
-        raise HTTPException(status_code=409, detail="Collect pending prize first")
-
     now = _spin_now()
     today = _spin_today()
     last_spin_at = _fallback_last_spin_at(locked_user)
+
+    if locked_user.pending_spin_prize_type is not None:
+        # Если кулдаун уже истёк — автозачисляем (пользователь не забрал вовремя)
+        pending_expired = (
+            last_spin_at is not None and now >= last_spin_at + SPIN_COOLDOWN
+        )
+        if pending_expired:
+            await _auto_collect_pending(locked_user, db)
+            await db.commit()
+            last_spin_at = _fallback_last_spin_at(locked_user)
+        else:
+            raise HTTPException(status_code=409, detail="Collect pending prize first")
 
     if last_spin_at is not None and now < last_spin_at + SPIN_COOLDOWN:
         raise HTTPException(status_code=409, detail="Spin on cooldown")
