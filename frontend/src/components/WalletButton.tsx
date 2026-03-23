@@ -1,16 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Wallet } from 'lucide-react';
-import { useTonAddress, useTonConnectUI, useTonWallet } from '@tonconnect/ui-react';
-import { walletApi } from '../api/client';
-import { useAppStore } from '../stores/store';
-
-type ConnectionState = 'idle' | 'loading' | 'confirming';
-
-function truncateAddress(address: string): string {
-  if (address.length <= 10) return address;
-  return `${address.slice(0, 4)}...${address.slice(-4)}`;
-}
+import { useWalletConnectionController } from '../hooks/useWalletConnectionController';
 
 interface WalletButtonProps {
   className?: string;
@@ -23,111 +13,9 @@ export function WalletButton({
   animated = true,
   delay = 0.3,
 }: WalletButtonProps) {
-  const [tonConnectUI] = useTonConnectUI();
-  const wallet = useTonWallet();
-  const userFriendlyAddress = useTonAddress(true);
-  const { user, setUser } = useAppStore();
-
-  const [state, setState] = useState<ConnectionState>('idle');
-  const [error, setError] = useState<string | null>(null);
-  const [showDisconnect, setShowDisconnect] = useState(false);
-
-  const isConnected = !!wallet && !!user?.walletAddress;
-
-  const prepareProofPayload = useCallback(async () => {
-    const { payload } = await walletApi.getProofPayload();
-    tonConnectUI.setConnectRequestParameters({
-      state: 'ready',
-      value: { tonProof: payload },
-    });
-  }, [tonConnectUI]);
-
-  useEffect(() => {
-    const unsubscribe = tonConnectUI.onStatusChange(async (nextWallet) => {
-      if (!nextWallet) {
-        setState('idle');
-        return;
-      }
-
-      const proof = nextWallet.connectItems?.tonProof;
-      if (!proof || !('proof' in proof)) {
-        console.warn('[Wallet] No tonProof in connect result');
-        setState('idle');
-        return;
-      }
-
-      setState('confirming');
-      setError(null);
-
-      try {
-        const result = await walletApi.connect(nextWallet.account.address, {
-          ...proof.proof,
-          state_init: nextWallet.account.walletStateInit,
-        });
-
-        if (result.success && result.wallet_address) {
-          if (user) {
-            setUser({ ...user, walletAddress: result.wallet_address });
-          }
-          setState('idle');
-          return;
-        }
-
-        setError(result.error || 'Не удалось подтвердить кошелек');
-        await tonConnectUI.disconnect();
-        setState('idle');
-      } catch (e) {
-        console.error('[Wallet] Backend verification failed:', e);
-        setError('Ошибка подтверждения');
-        await tonConnectUI.disconnect();
-        setState('idle');
-      }
-    });
-
-    return () => unsubscribe();
-  }, [tonConnectUI, user, setUser]);
-
-  useEffect(() => {
-    const unsubscribe = tonConnectUI.onModalStateChange((modalState) => {
-      if (
-        modalState.status === 'closed' &&
-        modalState.closeReason === 'action-cancelled'
-      ) {
-        setState('idle');
-      }
-    });
-
-    return () => unsubscribe();
-  }, [tonConnectUI]);
-
-  const handleConnect = useCallback(async () => {
-    setError(null);
-    setState('loading');
-
-    try {
-      await prepareProofPayload();
-      await tonConnectUI.openModal();
-    } catch (e) {
-      console.error('[Wallet] Failed to start connection:', e);
-      setError('Не удалось подготовить подключение');
-      setState('idle');
-    }
-  }, [tonConnectUI, prepareProofPayload]);
-
-  const handleDisconnect = useCallback(async () => {
-    try {
-      await tonConnectUI.disconnect();
-      await walletApi.disconnect();
-      if (user) {
-        setUser({ ...user, walletAddress: null });
-      }
-      setState('idle');
-      setError(null);
-    } catch (e) {
-      console.error('[Wallet] Disconnect failed:', e);
-    }
-    setShowDisconnect(false);
-  }, [tonConnectUI, user, setUser]);
+  const walletController = useWalletConnectionController();
+  const isConnected = walletController.walletMode === 'connected';
+  const isBusy = walletController.walletMode === 'loading' || walletController.walletMode === 'confirming';
 
   const animationProps = animated
     ? {
@@ -137,12 +25,12 @@ export function WalletButton({
       }
     : {};
 
-  if (isConnected && user) {
+  if (isConnected) {
     return (
       <motion.div {...animationProps} className={`relative ${className}`}>
         <motion.button
           type="button"
-          onClick={() => setShowDisconnect((prev) => !prev)}
+          onClick={walletController.onWalletClick}
           className="relative w-full overflow-hidden rounded-2xl border border-emerald-400/20 bg-[#14162a]/65 backdrop-blur-xl shadow-[0_8px_28px_rgba(0,0,0,0.45)]"
         >
           <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/10 via-teal-400/10 to-emerald-500/10" />
@@ -157,7 +45,7 @@ export function WalletButton({
                   TON Wallet
                 </p>
                 <p className="text-lg font-bold text-emerald-200 drop-shadow-[0_0_12px_rgba(52,211,153,0.35)]">
-                  {truncateAddress(userFriendlyAddress || user.walletAddress || '')}
+                  {walletController.walletDisplay || '...'}
                 </p>
               </div>
             </div>
@@ -167,7 +55,7 @@ export function WalletButton({
           </div>
         </motion.button>
 
-        {showDisconnect && (
+        {walletController.showDisconnectAction && (
           <motion.div
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
@@ -175,10 +63,10 @@ export function WalletButton({
           >
             <button
               type="button"
-              onClick={handleDisconnect}
+              onClick={walletController.onDisconnect}
               className="w-full rounded-xl border border-red-400/20 bg-[#1a1c30]/90 px-4 py-2.5 text-sm font-medium text-red-300 transition-colors hover:bg-red-500/10"
             >
-              Отключить кошелек
+              Disconnect Wallet
             </button>
           </motion.div>
         )}
@@ -190,8 +78,8 @@ export function WalletButton({
     <motion.div {...animationProps} className={`relative ${className}`}>
       <motion.button
         type="button"
-        onClick={handleConnect}
-        disabled={state !== 'idle'}
+        onClick={walletController.onWalletClick}
+        disabled={isBusy}
         whileTap={{ scale: 0.98 }}
         className="relative w-full overflow-hidden rounded-2xl border border-blue-400/20 bg-[#14162a]/65 backdrop-blur-xl shadow-[0_8px_28px_rgba(0,0,0,0.45)] disabled:opacity-60"
       >
@@ -207,11 +95,13 @@ export function WalletButton({
                 TON Wallet
               </p>
               <p className="text-lg font-bold text-blue-200">
-                {state === 'loading'
-                  ? 'Подключение...'
-                  : state === 'confirming'
-                    ? 'Подтверждение...'
-                    : 'Connect Wallet'}
+                {walletController.walletMode === 'loading'
+                  ? 'Connecting...'
+                  : walletController.walletMode === 'confirming'
+                    ? 'Confirming...'
+                    : walletController.walletMode === 'reconnect_required'
+                      ? 'Reconnect Wallet'
+                      : 'Connect Wallet'}
               </p>
             </div>
           </div>
@@ -221,8 +111,8 @@ export function WalletButton({
         </div>
       </motion.button>
 
-      {error && (
-        <p className="mt-1 px-1 text-[11px] text-red-400/80">{error}</p>
+      {walletController.walletError && (
+        <p className="mt-1 px-1 text-[11px] text-red-400/80">{walletController.walletError}</p>
       )}
     </motion.div>
   );

@@ -1099,6 +1099,58 @@ export const tasksApi = {
       method: 'POST',
       body: JSON.stringify({ claim_id: claimId }),
     })),
+
+  getDevState: async (): Promise<{
+    arcadeLevels?: number;
+    dailyLevels?: number;
+    friendsConfirmed?: number;
+    officialChannel?: boolean;
+  }> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.tasks.devState);
+    const state = (raw.state ?? {}) as Record<string, unknown>;
+    return {
+      arcadeLevels: state.arcade_levels != null ? Number(state.arcade_levels) : undefined,
+      dailyLevels: state.daily_levels != null ? Number(state.daily_levels) : undefined,
+      friendsConfirmed: state.friends_confirmed != null ? Number(state.friends_confirmed) : undefined,
+      officialChannel: state.official_channel != null ? Boolean(state.official_channel) : undefined,
+    };
+  },
+
+  setDevState: async (payload: {
+    arcadeLevels?: number;
+    dailyLevels?: number;
+    friendsConfirmed?: number;
+    officialChannel?: boolean;
+  }): Promise<{
+    arcadeLevels?: number;
+    dailyLevels?: number;
+    friendsConfirmed?: number;
+    officialChannel?: boolean;
+  }> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.tasks.devState, {
+      method: 'POST',
+      body: JSON.stringify({
+        arcade_levels: payload.arcadeLevels,
+        daily_levels: payload.dailyLevels,
+        friends_confirmed: payload.friendsConfirmed,
+        official_channel: payload.officialChannel,
+      }),
+    });
+    const state = (raw.state ?? {}) as Record<string, unknown>;
+    return {
+      arcadeLevels: state.arcade_levels != null ? Number(state.arcade_levels) : undefined,
+      dailyLevels: state.daily_levels != null ? Number(state.daily_levels) : undefined,
+      friendsConfirmed: state.friends_confirmed != null ? Number(state.friends_confirmed) : undefined,
+      officialChannel: state.official_channel != null ? Boolean(state.official_channel) : undefined,
+    };
+  },
+
+  resetDevState: async (): Promise<{ success: boolean }> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.tasks.devReset, {
+      method: 'POST',
+    });
+    return { success: Boolean(raw.success) };
+  },
 };
 
 // ============================================

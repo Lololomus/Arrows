@@ -3,9 +3,9 @@ import { motion } from 'framer-motion';
 import { Coins, Diamond, Heart, Lightbulb, Minus, Plus, RefreshCcw, ShoppingBag } from 'lucide-react';
 import { useTonConnectUI } from '@tonconnect/ui-react';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
-import { CoinStashCard } from '../components/ui/CoinStashCard';
-import { WalletButton } from '../components/WalletButton';
+import { HeaderBar } from '../components/ui/HeaderBar';
 import { shopApi } from '../api/client';
+import { useWalletConnectionController } from '../hooks/useWalletConnectionController';
 import { useAppStore } from '../stores/store';
 import type { ShopItem } from '../game/types';
 
@@ -181,6 +181,7 @@ export function ShopScreen() {
   const user = useAppStore((s) => s.user);
   const updateUser = useAppStore((s) => s.updateUser);
   const [tonConnectUI] = useTonConnectUI();
+  const walletController = useWalletConnectionController();
 
   const [items, setItems] = useState<Array<ShopItem & { id: BoostId }>>([]);
   const [tonItems, setTonItems] = useState<ShopItem[]>([]);
@@ -372,8 +373,17 @@ export function ShopScreen() {
           </div>
         </motion.div>
 
-        <CoinStashCard balance={coinBalance} animated={false} className="mb-2 shrink-0" />
-        <WalletButton animated={false} className="mb-3 shrink-0" />
+        <HeaderBar
+          balance={coinBalance}
+          walletMode={walletController.walletMode}
+          walletDisplay={walletController.walletDisplay}
+          walletError={walletController.walletError}
+          showDisconnectAction={walletController.showDisconnectAction}
+          onWalletClick={walletController.onWalletClick}
+          onDisconnect={walletController.onDisconnect}
+          animated={false}
+          className="mb-3 shrink-0"
+        />
 
         {purchaseError && (
           <div className="mb-3 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">

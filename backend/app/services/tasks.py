@@ -27,6 +27,50 @@ from .tasks_catalog import TASKS_CATALOG
 TASK_STATUSES = {"member", "administrator", "creator"}
 DAILY_TASK_PREFIX = "daily_"
 DAILY_CLAIM_SEPARATOR = ":"
+TASK_DEBUG_KEYS = frozenset({"arcade_levels", "daily_levels", "friends_confirmed", "official_channel"})
+TASK_DEBUG_STATE: dict[int, dict[str, Any]] = {}
+
+
+def _coerce_debug_state(raw: dict[str, Any] | None) -> dict[str, Any]:
+    state = raw or {}
+    coerced: dict[str, Any] = {}
+    if "arcade_levels" in state:
+        coerced["arcade_levels"] = max(0, int(state["arcade_levels"]))
+    if "daily_levels" in state:
+        coerced["daily_levels"] = max(0, int(state["daily_levels"]))
+    if "friends_confirmed" in state:
+        coerced["friends_confirmed"] = max(0, int(state["friends_confirmed"]))
+    if "official_channel" in state:
+        coerced["official_channel"] = bool(state["official_channel"])
+    return coerced
+
+
+async def get_task_debug_state(user_id: int) -> dict[str, Any]:
+    if settings.ENVIRONMENT != "development":
+        return {}
+    return _coerce_debug_state(TASK_DEBUG_STATE.get(user_id))
+
+
+async def set_task_debug_state(user_id: int, updates: dict[str, Any]) -> dict[str, Any]:
+    if settings.ENVIRONMENT != "development":
+        raise HTTPException(status_code=403, detail="Dev endpoints are disabled")
+
+    current = await get_task_debug_state(user_id)
+    next_state = {**current}
+    for key, value in updates.items():
+        if key not in TASK_DEBUG_KEYS:
+            continue
+        next_state[key] = value
+
+    normalized = _coerce_debug_state(next_state)
+    TASK_DEBUG_STATE[user_id] = normalized
+    return normalized
+
+
+async def clear_task_debug_state(user_id: int) -> None:
+    if settings.ENVIRONMENT != "development":
+        return
+    TASK_DEBUG_STATE.pop(user_id, None)
 
 
 def get_official_channel_config() -> dict[str, Any] | None:
@@ -100,7 +144,20 @@ async def _count_daily_levels_completed(db: AsyncSession, user_id: int, day: dat
     return int(result.scalar_one())
 
 
-def _get_progress(task_id: str, user: User, *, daily_levels_completed: int | None = None) -> int:
+def _get_progress(
+    task_id: str,
+    user: User,
+    *,
+    daily_levels_completed: int | None = None,
+    debug_state: dict[str, Any] | None = None,
+) -> int:
+    overrides = debug_state or {}
+    if task_id in overrides:
+        override = overrides[task_id]
+        if task_id == "official_channel":
+            return 1 if bool(override) else 0
+        return max(0, int(override))
+
     if task_id == "arcade_levels":
         return max(0, user.current_level - 1)
     if task_id == "friends_confirmed":
@@ -136,8 +193,14 @@ def _build_task_dto(
     user: User,
     *,
     daily_levels_completed: int | None,
+    debug_state: dict[str, Any] | None = None,
 ) -> TaskDto:
-    progress = _get_progress(task["id"], user, daily_levels_completed=daily_levels_completed)
+    progress = _get_progress(
+        task["id"],
+        user,
+        daily_levels_completed=daily_levels_completed,
+        debug_state=debug_state,
+    )
     tiers = [
         TaskTierDto(
             claim_id=resolved_tier["claim_id"],
@@ -155,7 +218,8 @@ def _build_task_dto(
     if next_tier_index is None:
         status = "completed"
     elif task["id"] == "official_channel":
-        status = "action_required"
+        next_tier = tiers[next_tier_index]
+        status = "claimable" if progress >= next_tier.target else "action_required"
     else:
         next_tier = tiers[next_tier_index]
         status = "claimable" if progress >= next_tier.target else "in_progress"
@@ -173,14 +237,25 @@ def _build_task_dto(
     )
 
 
-async def build_tasks_for_user(user: User, db: AsyncSession) -> TasksResponse:
+async def build_tasks_for_user(
+    user: User,
+    db: AsyncSession,
+    *,
+    debug_state: dict[str, Any] | None = None,
+) -> TasksResponse:
     result = await db.execute(select(TaskClaim.claim_id).where(TaskClaim.user_id == user.id))
     claimed_ids = set(result.scalars().all())
     daily_levels_completed = None
     if any(_is_daily_task(task["id"]) for task in TASKS_CATALOG):
         daily_levels_completed = await _count_daily_levels_completed(db, user.id, today_msk())
     tasks = [
-        _build_task_dto(task, claimed_ids, user, daily_levels_completed=daily_levels_completed)
+        _build_task_dto(
+            task,
+            claimed_ids,
+            user,
+            daily_levels_completed=daily_levels_completed,
+            debug_state=debug_state,
+        )
         for task in TASKS_CATALOG
     ]
     return TasksResponse(tasks=tasks)
@@ -259,7 +334,13 @@ async def _ensure_channel_subscription(user: User, db: AsyncSession, channel: di
     )
 
 
-async def claim_task(user: User, claim_id: str, db: AsyncSession) -> TaskClaimResponse:
+async def claim_task(
+    user: User,
+    claim_id: str,
+    db: AsyncSession,
+    *,
+    debug_state: dict[str, Any] | None = None,
+) -> TaskClaimResponse:
     task, tier, claim_day = _get_tier_by_claim_id(claim_id)
     tier = _resolve_tier(task["id"], tier)
 
@@ -284,12 +365,19 @@ async def claim_task(user: User, claim_id: str, db: AsyncSession) -> TaskClaimRe
                 detail={"code": "TASK_EXPIRED", "message": "Daily task has already reset"},
             )
         progress = await _count_daily_levels_completed(db, user.id, claim_day)
+        if debug_state and task["id"] in debug_state:
+            progress = _get_progress(task["id"], user, daily_levels_completed=progress, debug_state=debug_state)
     else:
-        progress = _get_progress(task["id"], user)
+        progress = _get_progress(task["id"], user, debug_state=debug_state)
 
     if task["id"] == "official_channel":
-        channel = await verify_official_channel_subscription(user)
-        await _ensure_channel_subscription(user, db, channel)
+        if progress >= tier["target"]:
+            channel = get_official_channel_config()
+            if channel:
+                await _ensure_channel_subscription(user, db, channel)
+        else:
+            channel = await verify_official_channel_subscription(user)
+            await _ensure_channel_subscription(user, db, channel)
     elif progress < tier["target"]:
         raise HTTPException(
             status_code=409,
@@ -327,7 +415,7 @@ async def claim_task(user: User, claim_id: str, db: AsyncSession) -> TaskClaimRe
             detail={"code": "TASK_ALREADY_CLAIMED", "message": "Task reward already claimed"},
         ) from exc
 
-    tasks = await build_tasks_for_user(user, db)
+    tasks = await build_tasks_for_user(user, db, debug_state=debug_state)
     updated_task = next(item for item in tasks.tasks if item.id == task["id"])
 
     return TaskClaimResponse(

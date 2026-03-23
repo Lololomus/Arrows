@@ -1,16 +1,16 @@
-/**
+﻿/**
  * Arrow Puzzle - Game Screen (VIEWPORT CANVAS)
  *
- * ИЗМЕНЕНИЯ:
- * - Убран <motion.div style={{ x, y, scale }}> вокруг доски.
- * - CanvasBoard заполняет весь containerRef, камера внутри ctx.setTransform().
- * - Убран GameBoard (SVG) и useCanvas threshold — всегда Canvas.
- * - cameraX/Y/Scale прокидываются напрямую в CanvasBoard и FXOverlay.
- * - Кинематографичное интро и zoom controls — без изменений.
+ * РР—РњР•РќР•РќРРЇ:
+ * - РЈР±СЂР°РЅ <motion.div style={{ x, y, scale }}> РІРѕРєСЂСѓРі РґРѕСЃРєРё.
+ * - CanvasBoard Р·Р°РїРѕР»РЅСЏРµС‚ РІРµСЃСЊ containerRef, РєР°РјРµСЂР° РІРЅСѓС‚СЂРё ctx.setTransform().
+ * - РЈР±СЂР°РЅ GameBoard (SVG) Рё useCanvas threshold вЂ” РІСЃРµРіРґР° Canvas.
+ * - cameraX/Y/Scale РїСЂРѕРєРёРґС‹РІР°СЋС‚СЃСЏ РЅР°РїСЂСЏРјСѓСЋ РІ CanvasBoard Рё FXOverlay.
+ * - РљРёРЅРµРјР°С‚РѕРіСЂР°С„РёС‡РЅРѕРµ РёРЅС‚СЂРѕ Рё zoom controls вЂ” Р±РµР· РёР·РјРµРЅРµРЅРёР№.
  *
- * ОПТИМИЗАЦИИ (merged from old):
- * - getHintCameraTarget: globalIndex.getArrow() O(1) вместо arrows.find() O(n)
- * - arrows убран из deps getHintCameraTarget — globalIndex всегда актуален
+ * РћРџРўРРњРР—РђР¦РР (merged from old):
+ * - getHintCameraTarget: globalIndex.getArrow() O(1) РІРјРµСЃС‚Рѕ arrows.find() O(n)
+ * - arrows СѓР±СЂР°РЅ РёР· deps getHintCameraTarget вЂ” globalIndex РІСЃРµРіРґР° Р°РєС‚СѓР°Р»РµРЅ
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
@@ -51,11 +51,12 @@ import gameBgImage from '../assets/game-bg.webp?url';
 
 type ZoomBounds = { minScale: number; maxScale: number; fitScale: number };
 type PanBounds = { minX: number; maxX: number; minY: number; maxY: number };
+type KeyboardPanDirection = 'up' | 'down' | 'left' | 'right';
 
 const GRID_PADDING_CELLS = 0.4;
 const FIT_MARGIN_RATIO = 0.05;
-const ZOOM_OUT_MARGIN_RATIO = 0.10;
-const PAN_EDGE_SLACK_RATIO = 0.15;
+const ZOOM_OUT_MARGIN_RATIO = 0.25;
+const PAN_EDGE_SLACK_RATIO = 0.40;
 const MIN_ABS_SCALE = 0.02;
 const MIN_VISIBLE_CELLS = 7;
 const MAX_ABS_SCALE = 4.0;
@@ -70,6 +71,8 @@ const HINT_FOCUS_MIN_DURATION_MS = 280;
 const HINT_FOCUS_MAX_DURATION_MS = 460;
 const HINT_REFOCUS_PAN_EPS_PX = 6;
 const HINT_REFOCUS_SCALE_EPS = 0.02;
+const KEYBOARD_PAN_MIN_SPEED_PX_PER_SEC = 420;
+const KEYBOARD_PAN_SPEED_VIEWPORT_RATIO = 1.35;
 // false: start and stay at fitScale. true: restore delayed intro push-in zoom.
 const ENABLE_INTRO_CAMERA_PUSH_IN = false;
 // Server progression must stay enabled in all envs, because backend is authoritative.
@@ -83,7 +86,7 @@ function createClientId(): string {
 
 type VictorySaveState = 'idle' | 'saving' | 'saved' | 'error';
 type VictoryNavigationState = 'idle' | 'loading_next';
-// TODO [ВАЖНЫЙ ДО РЕЛИЗА]: удалить временный smart context и вернуть обычный flow сохранения.
+// TODO [Р’РђР–РќР«Р™ Р”Рћ Р Р•Р›РР—Рђ]: СѓРґР°Р»РёС‚СЊ РІСЂРµРјРµРЅРЅС‹Р№ smart context Рё РІРµСЂРЅСѓС‚СЊ РѕР±С‹С‡РЅС‹Р№ flow СЃРѕС…СЂР°РЅРµРЅРёСЏ.
 
 function resolveUserCurrentLevel(rawUser: unknown): number {
   if (!rawUser || typeof rawUser !== 'object') return 1;
@@ -156,6 +159,36 @@ function clampPan(x: number, y: number, bounds: PanBounds): { x: number; y: numb
   };
 }
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (target.isContentEditable) return true;
+  return Boolean(target.closest('[contenteditable="true"], [contenteditable="plaintext-only"]'));
+}
+
+function getKeyboardPanDirection(event: KeyboardEvent): KeyboardPanDirection | null {
+  switch (event.code) {
+    case 'KeyW': return 'up';
+    case 'KeyA': return 'left';
+    case 'KeyS': return 'down';
+    case 'KeyD': return 'right';
+    case 'ArrowUp': return 'up';
+    case 'ArrowLeft': return 'left';
+    case 'ArrowDown': return 'down';
+    case 'ArrowRight': return 'right';
+    default:
+      break;
+  }
+
+  const key = event.key.toLowerCase();
+  if (key === 'w' || key === '\u0446') return 'up';
+  if (key === 'a' || key === '\u0444') return 'left';
+  if (key === 's' || key === '\u044b') return 'down';
+  if (key === 'd' || key === '\u0432') return 'right';
+  return null;
+}
+
 interface GameDevPanelProps {
   currentLevel: number;
   gameLevel: number;
@@ -211,7 +244,7 @@ function GameDevPanel({
           <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-bold tabular-nums text-white/70">
             {currentLevel}
           </span>
-          <span className="text-xs font-black text-white/70">{isExpanded ? '−' : '+'}</span>
+          <span className="text-xs font-black text-white/70">{isExpanded ? 'в€’' : '+'}</span>
         </button>
       </div>
 
@@ -510,7 +543,7 @@ export function GameScreen() {
     };
   }, []);
 
-  // cellSize вычисляется чтобы уровень влез на экран при scale=1
+  // cellSize РІС‹С‡РёСЃР»СЏРµС‚СЃСЏ С‡С‚РѕР±С‹ СѓСЂРѕРІРµРЅСЊ РІР»РµР· РЅР° СЌРєСЂР°РЅ РїСЂРё scale=1
   const baseCellSize = useMemo(() => {
     const w = containerSize.w || window.innerWidth;
     const h = containerSize.h || window.innerHeight;
@@ -624,8 +657,8 @@ export function GameScreen() {
 
   useEffect(() => () => cancelPanTween(), [cancelPanTween]);
 
-  // ⚡ globalIndex.getArrow() O(1) вместо arrows.find() O(n)
-  // ⚡ arrows убран из deps — globalIndex всегда актуален
+  // вљЎ globalIndex.getArrow() O(1) РІРјРµСЃС‚Рѕ arrows.find() O(n)
+  // вљЎ arrows СѓР±СЂР°РЅ РёР· deps вЂ” globalIndex РІСЃРµРіРґР° Р°РєС‚СѓР°Р»РµРЅ
   const getHintCameraTarget = useCallback((arrowId: string) => {
     const arrow = globalIndex.getArrow(arrowId);
     if (!arrow) return null;
@@ -668,7 +701,7 @@ export function GameScreen() {
 
     return { camX, camY, targetScale };
   }, [
-    // ⚡ Убран arrows из deps — globalIndex всегда актуален
+    // вљЎ РЈР±СЂР°РЅ arrows РёР· deps вЂ” globalIndex РІСЃРµРіРґР° Р°РєС‚СѓР°Р»РµРЅ
     viewW, viewH, baseCellSize, cameraScale, zoomBounds.minScale, zoomBounds.maxScale, gridSize.width, gridSize.height,
   ]);
 
@@ -704,7 +737,7 @@ export function GameScreen() {
     return true;
   }, [isIntroAnimating, getHintCameraTarget, animateCameraTo, cameraX, cameraY, cameraScale, viewW, viewH]);
 
-  // === ЗАГРУЗКА УРОВНЯ ===
+  // === Р—РђР“Р РЈР—РљРђ РЈР РћР’РќРЇ ===
   const loadLevel = useCallback(async (levelNum: number) => {
     cancelAutoSolve();
     setStatus('loading');
@@ -765,15 +798,15 @@ export function GameScreen() {
         dailyDayNumberRef.current = null;
         dailySaveStartedRef.current = false;
         setDailyMode(false);
-        if (error?.status === 404) { alert('❌ Daily level not found'); }
-        else if (error?.status === 403) { alert('🔒 Daily недоступен'); }
-        else { alert('❌ Ошибка загрузки Daily'); }
+        if (error?.status === 404) { alert('вќЊ Daily level not found'); }
+        else if (error?.status === 403) { alert('рџ”’ Daily РЅРµРґРѕСЃС‚СѓРїРµРЅ'); }
+        else { alert('вќЊ РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё Daily'); }
         setScreen('home');
         return;
       }
       if (error?.status === 404) { setNoMoreLevels(true); setStatus('victory'); }
-      else if (error?.status === 403) { alert(`🔒 Уровень ${levelNum} закрыт!`); setScreen('home'); }
-      else { alert(`❌ Ошибка загрузки уровня ${levelNum}`); setScreen('home'); }
+      else if (error?.status === 403) { alert(`рџ”’ РЈСЂРѕРІРµРЅСЊ ${levelNum} Р·Р°РєСЂС‹С‚!`); setScreen('home'); }
+      else { alert(`вќЊ РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё СѓСЂРѕРІРЅСЏ ${levelNum}`); setScreen('home'); }
     }
   }, [cancelAutoSolve, initLevel, setStatus, setScreen, setDailyMode]);
 
@@ -805,7 +838,7 @@ export function GameScreen() {
     if (!pendingReviveIntentId) {
       void loadReviveStatus(currentLevel).then((nextStatus) => {
         if (nextStatus && nextStatus.remaining <= 0) {
-          setReviveMessage('Лимит воскрешений на этом уровне исчерпан');
+          setReviveMessage('Р›РёРјРёС‚ РІРѕСЃРєСЂРµС€РµРЅРёР№ РЅР° СЌС‚РѕРј СѓСЂРѕРІРЅРµ РёСЃС‡РµСЂРїР°РЅ');
         }
       });
     }
@@ -818,7 +851,7 @@ export function GameScreen() {
     if (pendingReviveIntentId !== trackedReviveIntent.intentId) {
       setPendingReviveIntentId(trackedReviveIntent.intentId);
     }
-    setReviveMessage('Проверяем просмотр (до 1 мин)...');
+    setReviveMessage('РџСЂРѕРІРµСЂСЏРµРј РїСЂРѕСЃРјРѕС‚СЂ (РґРѕ 1 РјРёРЅ)...');
   }, [pendingReviveIntentId, trackedReviveIntent]);
 
   useEffect(() => {
@@ -872,7 +905,7 @@ export function GameScreen() {
       void adsApi.cancelRewardIntent(pendingReviveIntentId).catch(() => {});
       clearPendingRewardIntent('reward_revive', pendingReviveIntentId);
       setPendingReviveIntentId(null);
-      setReviveMessage('Подтверждение не получено. Нажмите ещё раз — воскрешение гарантировано.');
+      setReviveMessage('РџРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ РЅРµ РїРѕР»СѓС‡РµРЅРѕ. РќР°Р¶РјРёС‚Рµ РµС‰С‘ СЂР°Р· вЂ” РІРѕСЃРєСЂРµС€РµРЅРёРµ РіР°СЂР°РЅС‚РёСЂРѕРІР°РЅРѕ.');
     }, 60_000);
     return () => clearTimeout(timer);
   }, [pendingReviveIntentId]);
@@ -1020,7 +1053,7 @@ export function GameScreen() {
       if (!result.completion.valid) {
         saveResolvedLevelRef.current = completedLevel;
         setSaveState('error');
-        setSaveError(result.completion.error ?? 'Решение не принято сервером');
+        setSaveError(result.completion.error ?? 'Р РµС€РµРЅРёРµ РЅРµ РїСЂРёРЅСЏС‚Рѕ СЃРµСЂРІРµСЂРѕРј');
         return;
       }
 
@@ -1033,17 +1066,17 @@ export function GameScreen() {
       if (typeof error?.message === 'string') {
         const message = error.message.toLowerCase();
         if (message.includes('fetch') || message.includes('network')) {
-          setSaveError('Нет соединения. Проверьте интернет.');
+          setSaveError('РќРµС‚ СЃРѕРµРґРёРЅРµРЅРёСЏ. РџСЂРѕРІРµСЂСЊС‚Рµ РёРЅС‚РµСЂРЅРµС‚.');
           return;
         }
       }
 
       if (typeof error?.status === 'number' && error.status >= 500) {
-        setSaveError('Ошибка сервера. Попробуйте ещё раз.');
+        setSaveError('РћС€РёР±РєР° СЃРµСЂРІРµСЂР°. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰С‘ СЂР°Р·.');
         return;
       }
 
-      setSaveError(error?.message ?? 'Не удалось сохранить прогресс');
+      setSaveError(error?.message ?? 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РїСЂРѕРіСЂРµСЃСЃ');
     }
   }, [
     applyCompletionSuccess,
@@ -1072,7 +1105,7 @@ export function GameScreen() {
     } catch (err: any) {
       dailySaveStartedRef.current = false;
       setSaveState('error');
-      setSaveError(err?.message ?? 'Ошибка сохранения daily');
+      setSaveError(err?.message ?? 'РћС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ daily');
     }
   }, [removedArrowIds, getElapsedSeconds]);
 
@@ -1109,7 +1142,7 @@ export function GameScreen() {
     return () => window.removeEventListener('pagehide', handler);
   }, [gameLevel, getElapsedSeconds, noMoreLevels, removedArrowIds, saveState, status]);
 
-  // === КИНЕМАТОГРАФИЧНОЕ ИНТРО ===
+  // === РљРРќР•РњРђРўРћР“Р РђР¤РР§РќРћР• РРќРўР Рћ ===
   useEffect(() => {
     if (status !== 'playing') return;
 
@@ -1118,12 +1151,12 @@ export function GameScreen() {
     const safeH = Math.max(1, viewH * (1 - FIT_MARGIN_RATIO * 2));
     const playScaleRaw = Math.min(safeW / (10 * baseCellSize), safeH / (10 * baseCellSize), 1.5);
 
-    // Масштаб чтобы влез весь уровень
+    // РњР°СЃС€С‚Р°Р± С‡С‚РѕР±С‹ РІР»РµР· РІРµСЃСЊ СѓСЂРѕРІРµРЅСЊ
     const playScale = clamp(playScaleRaw, zoomBounds.minScale, zoomBounds.maxScale);
     const shouldUseIntroPushIn = ENABLE_INTRO_CAMERA_PUSH_IN && (gridSize.width > 12 || gridSize.height > 12);
-    // Масштаб для комфортной игры (~10x10 ячеек на экране)
+    // РњР°СЃС€С‚Р°Р± РґР»СЏ РєРѕРјС„РѕСЂС‚РЅРѕР№ РёРіСЂС‹ (~10x10 СЏС‡РµРµРє РЅР° СЌРєСЂР°РЅРµ)
 
-    // Жёсткий сброс камеры
+    // Р–С‘СЃС‚РєРёР№ СЃР±СЂРѕСЃ РєР°РјРµСЂС‹
     cancelPanTween();
     cameraX.set(0);
     cameraY.set(0);
@@ -1134,13 +1167,13 @@ export function GameScreen() {
     const shouldLockInputForIntro = maxGridDim >= INTRO_MIN_DIM_FOR_BLOCK;
     setIsIntroAnimating(shouldLockInputForIntro);
 
-    // ⚡ FIX: input lock масштабируется вместе со sweep длительностью
-    // Формула идентична CanvasBoard: base + min(dim - threshold, 100) * 5
+    // вљЎ FIX: input lock РјР°СЃС€С‚Р°Р±РёСЂСѓРµС‚СЃСЏ РІРјРµСЃС‚Рµ СЃРѕ sweep РґР»РёС‚РµР»СЊРЅРѕСЃС‚СЊСЋ
+    // Р¤РѕСЂРјСѓР»Р° РёРґРµРЅС‚РёС‡РЅР° CanvasBoard: base + min(dim - threshold, 100) * 5
     const introLockMs = shouldLockInputForIntro
       ? INTRO_INPUT_LOCK_MS + Math.min(maxGridDim - INTRO_MIN_DIM_FOR_BLOCK, 100) * 5
       : INTRO_INPUT_LOCK_MS;
 
-    // Ждём sweep-волну, затем зумим
+    // Р–РґС‘Рј sweep-РІРѕР»РЅСѓ, Р·Р°С‚РµРј Р·СѓРјРёРј
     const t1 = setTimeout(() => {
       const finalScale = shouldUseIntroPushIn ? playScale : fitAllScale;
       cameraX.set(0);
@@ -1315,7 +1348,118 @@ export function GameScreen() {
   }, [isDragging, cameraX, cameraY, cameraScale, isIntroAnimating, noMoreLevels, clampPanToBounds]);
 
   const handleMouseUp = useCallback(() => setIsDragging(false), []);
-  // === КЛИК ПО СТРЕЛКЕ ===
+
+  useEffect(() => {
+    const activeDirections = new Set<KeyboardPanDirection>();
+    let frameId = 0;
+    let prevTs = 0;
+
+    const stopLoop = () => {
+      if (frameId !== 0) {
+        cancelAnimationFrame(frameId);
+        frameId = 0;
+      }
+      prevTs = 0;
+    };
+
+    const tick = (ts: number) => {
+      frameId = 0;
+      if (activeDirections.size === 0) return;
+      if (status !== 'playing' || isIntroAnimating || noMoreLevels) {
+        stopLoop();
+        return;
+      }
+
+      if (prevTs === 0) prevTs = ts;
+      const dt = Math.min(0.05, Math.max(0.001, (ts - prevTs) / 1000));
+      prevTs = ts;
+
+      const horizontal = (activeDirections.has('right') ? 1 : 0) - (activeDirections.has('left') ? 1 : 0);
+      const vertical = (activeDirections.has('down') ? 1 : 0) - (activeDirections.has('up') ? 1 : 0);
+
+      if (horizontal !== 0 || vertical !== 0) {
+        const norm = Math.hypot(horizontal, vertical) || 1;
+        const dirX = horizontal / norm;
+        const dirY = vertical / norm;
+        const speed = Math.max(
+          KEYBOARD_PAN_MIN_SPEED_PX_PER_SEC,
+          Math.min(viewW, viewH) * KEYBOARD_PAN_SPEED_VIEWPORT_RATIO,
+        );
+        const step = speed * dt;
+        const pan = clampPanToBounds(
+          cameraX.get() - dirX * step,
+          cameraY.get() - dirY * step,
+          cameraScale.get(),
+        );
+        cameraX.set(pan.x);
+        cameraY.set(pan.y);
+      }
+
+      frameId = requestAnimationFrame(tick);
+    };
+
+    const startLoop = () => {
+      if (frameId !== 0) return;
+      prevTs = performance.now();
+      frameId = requestAnimationFrame(tick);
+    };
+
+    const clearActiveDirections = () => {
+      activeDirections.clear();
+      stopLoop();
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (isEditableTarget(event.target)) return;
+
+      const direction = getKeyboardPanDirection(event);
+      if (!direction) return;
+
+      if (event.cancelable) event.preventDefault();
+      cancelPanTween();
+      activeDirections.add(direction);
+      startLoop();
+    };
+
+    const onKeyUp = (event: KeyboardEvent) => {
+      const direction = getKeyboardPanDirection(event);
+      if (!direction) return;
+      activeDirections.delete(direction);
+      if (activeDirections.size === 0) stopLoop();
+    };
+
+    const onWindowBlur = () => clearActiveDirections();
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') clearActiveDirections();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onWindowBlur);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      clearActiveDirections();
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onWindowBlur);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [
+    status,
+    isIntroAnimating,
+    noMoreLevels,
+    viewW,
+    viewH,
+    cameraX,
+    cameraY,
+    cameraScale,
+    clampPanToBounds,
+    cancelPanTween,
+  ]);
+  // === РљР›РРљ РџРћ РЎРўР Р•Р›РљР• ===
   const { handleArrowClick } = useArrowActions({
     isIntroAnimating,
     baseCellSize,
@@ -1332,7 +1476,7 @@ export function GameScreen() {
     showHint,
   });
 
-  // === ПОДСКАЗКА (server-side balance) ===
+  // === РџРћР”РЎРљРђР—РљРђ (server-side balance) ===
   const onHintClick = useCallback(async () => {
     if (isIntroAnimating) return;
     const { hintedArrowId: currentHinted, arrows: currentArrows, seed: currentSeed } = useGameStore.getState();
@@ -1351,7 +1495,7 @@ export function GameScreen() {
       return;
     }
 
-    // Call API — server decrements balance & returns arrow to hint
+    // Call API вЂ” server decrements balance & returns arrow to hint
     try {
       const remainingIds = currentArrows.map(a => a.id);
       const result = await gameApi.getHint(currentLevel, currentSeed, remainingIds);
@@ -1435,7 +1579,7 @@ export function GameScreen() {
   }, [reloadCurrentLevel]);
   const confirmMenu = useCallback(() => { setConfirmAction(null); setScreen('home'); }, [setScreen]);
 
-  // === REVIVE из баланса (мгновенное) ===
+  // === REVIVE РёР· Р±Р°Р»Р°РЅСЃР° (РјРіРЅРѕРІРµРЅРЅРѕРµ) ===
   const handleBalanceRevive = useCallback(async () => {
     if (reviveLoading) return;
     setReviveLoading(true);
@@ -1446,23 +1590,23 @@ export function GameScreen() {
         useAppStore.getState().updateUser({ reviveBalance: result.revive_balance });
         useGameStore.getState().revivePlayer();
       } else {
-        setReviveMessage('Не удалось использовать воскрешение. Попробуйте ещё раз.');
+        setReviveMessage('РќРµ СѓРґР°Р»РѕСЃСЊ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РІРѕСЃРєСЂРµС€РµРЅРёРµ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰С‘ СЂР°Р·.');
       }
     } catch {
-      setReviveMessage('Не удалось связаться с сервером. Попробуйте ещё раз.');
+      setReviveMessage('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРІСЏР·Р°С‚СЊСЃСЏ СЃ СЃРµСЂРІРµСЂРѕРј. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰С‘ СЂР°Р·.');
     } finally {
       setReviveLoading(false);
     }
   }, [reviveLoading]);
 
-  // === REVIVE через рекламу ===
-  // Попытка 1: обычная. Если пользователь не досмотрел (not_completed/provider_error) —
-  // разрешаем одну ещё попытку. Попытка 2: полуслепой оптимистик — воскрешаем
-  // независимо от ответа SDK, подтверждение в фоне.
+  // === REVIVE С‡РµСЂРµР· СЂРµРєР»Р°РјСѓ ===
+  // РџРѕРїС‹С‚РєР° 1: РѕР±С‹С‡РЅР°СЏ. Р•СЃР»Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РґРѕСЃРјРѕС‚СЂРµР» (not_completed/provider_error) вЂ”
+  // СЂР°Р·СЂРµС€Р°РµРј РѕРґРЅСѓ РµС‰С‘ РїРѕРїС‹С‚РєСѓ. РџРѕРїС‹С‚РєР° 2: РїРѕР»СѓСЃР»РµРїРѕР№ РѕРїС‚РёРјРёСЃС‚РёРє вЂ” РІРѕСЃРєСЂРµС€Р°РµРј
+  // РЅРµР·Р°РІРёСЃРёРјРѕ РѕС‚ РѕС‚РІРµС‚Р° SDK, РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ РІ С„РѕРЅРµ.
   const handleRevive = useCallback(async () => {
     if (reviveLoading || adReviveUsedThisLevel) return;
 
-    // Pending intent exists — check its status instead of creating a new one
+    // Pending intent exists вЂ” check its status instead of creating a new one
     if (pendingReviveIntentId) {
       setReviveLoading(true);
       setReviveMessage(null);
@@ -1484,11 +1628,11 @@ export function GameScreen() {
           clearPendingRewardIntent('reward_revive', pendingReviveIntentId);
         }
         setPendingReviveIntentId(null);
-        setReviveMessage('Нажмите ещё раз — воскрешение гарантировано.');
+        setReviveMessage('РќР°Р¶РјРёС‚Рµ РµС‰С‘ СЂР°Р· вЂ” РІРѕСЃРєСЂРµС€РµРЅРёРµ РіР°СЂР°РЅС‚РёСЂРѕРІР°РЅРѕ.');
       } catch {
         clearPendingRewardIntent('reward_revive', pendingReviveIntentId);
         setPendingReviveIntentId(null);
-        setReviveMessage('Нажмите ещё раз — воскрешение гарантировано.');
+        setReviveMessage('РќР°Р¶РјРёС‚Рµ РµС‰С‘ СЂР°Р· вЂ” РІРѕСЃРєСЂРµС€РµРЅРёРµ РіР°СЂР°РЅС‚РёСЂРѕРІР°РЅРѕ.');
       } finally {
         setReviveLoading(false);
       }
@@ -1500,7 +1644,7 @@ export function GameScreen() {
 
     const isSecondAttempt = reviveFailedAttemptsRef.current >= 1;
 
-    // На второй попытке берём свежий sessionId, чтобы не получить 409
+    // РќР° РІС‚РѕСЂРѕР№ РїРѕРїС‹С‚РєРµ Р±РµСЂС‘Рј СЃРІРµР¶РёР№ sessionId, С‡С‚РѕР±С‹ РЅРµ РїРѕР»СѓС‡РёС‚СЊ 409
     if (isSecondAttempt) {
       reviveOpportunityIdRef.current = createClientId();
     }
@@ -1515,12 +1659,12 @@ export function GameScreen() {
       const adResult = await showRewardedAd(ADSGRAM_BLOCK_IDS.rewardRevive);
 
       if (adResult.success || isSecondAttempt) {
-        // Реклама досмотрена — или вторая попытка (полуслепой оптимистик).
-        // В обоих случаях воскрешаем немедленно, сервер подтверждаем в фоне.
+        // Р РµРєР»Р°РјР° РґРѕСЃРјРѕС‚СЂРµРЅР° вЂ” РёР»Рё РІС‚РѕСЂР°СЏ РїРѕРїС‹С‚РєР° (РїРѕР»СѓСЃР»РµРїРѕР№ РѕРїС‚РёРјРёСЃС‚РёРє).
+        // Р’ РѕР±РѕРёС… СЃР»СѓС‡Р°СЏС… РІРѕСЃРєСЂРµС€Р°РµРј РЅРµРјРµРґР»РµРЅРЅРѕ, СЃРµСЂРІРµСЂ РїРѕРґС‚РІРµСЂР¶РґР°РµРј РІ С„РѕРЅРµ.
         setAdReviveUsedThisLevel(true);
         useGameStore.getState().revivePlayer();
-        // Если не success (вторая попытка, SDK не вернул done:true) — сохраняем
-        // intent для reconciler'а на случай, если webhook от AdsGram придёт позже.
+        // Р•СЃР»Рё РЅРµ success (РІС‚РѕСЂР°СЏ РїРѕРїС‹С‚РєР°, SDK РЅРµ РІРµСЂРЅСѓР» done:true) вЂ” СЃРѕС…СЂР°РЅСЏРµРј
+        // intent РґР»СЏ reconciler'Р° РЅР° СЃР»СѓС‡Р°Р№, РµСЃР»Рё webhook РѕС‚ AdsGram РїСЂРёРґС‘С‚ РїРѕР·Р¶Рµ.
         if (!adResult.success) {
           rememberPendingRewardIntent({ intentId: intent.intentId, placement: 'reward_revive' });
         }
@@ -1532,24 +1676,24 @@ export function GameScreen() {
         return;
       }
 
-      // Первая попытка не удалась — разрешаем ещё одну попытку.
+      // РџРµСЂРІР°СЏ РїРѕРїС‹С‚РєР° РЅРµ СѓРґР°Р»Р°СЃСЊ вЂ” СЂР°Р·СЂРµС€Р°РµРј РµС‰С‘ РѕРґРЅСѓ РїРѕРїС‹С‚РєСѓ.
       reviveFailedAttemptsRef.current += 1;
 
       if (adResult.outcome === 'provider_error') {
-        // Технический сбой AdsGram — intent оставляем (webhook может прийти позже)
+        // РўРµС…РЅРёС‡РµСЃРєРёР№ СЃР±РѕР№ AdsGram вЂ” intent РѕСЃС‚Р°РІР»СЏРµРј (webhook РјРѕР¶РµС‚ РїСЂРёР№С‚Рё РїРѕР·Р¶Рµ)
         rememberPendingRewardIntent({ intentId: intent.intentId, placement: 'reward_revive' });
-        setReviveMessage('Проверяем просмотр рекламы (до 1 мин). Или нажмите «Проверить награду».');
+        setReviveMessage('РџСЂРѕРІРµСЂСЏРµРј РїСЂРѕСЃРјРѕС‚СЂ СЂРµРєР»Р°РјС‹ (РґРѕ 1 РјРёРЅ). РР»Рё РЅР°Р¶РјРёС‚Рµ В«РџСЂРѕРІРµСЂРёС‚СЊ РЅР°РіСЂР°РґСѓВ».');
       } else {
-        // not_completed — пользователь закрыл рекламу, отменяем intent
+        // not_completed вЂ” РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ Р·Р°РєСЂС‹Р» СЂРµРєР»Р°РјСѓ, РѕС‚РјРµРЅСЏРµРј intent
         void adsApi.cancelRewardIntent(intent.intentId).catch(() => {});
         setReviveMessage(getRewardedFlowMessage('reward_revive', { outcome: 'not_completed' }));
       }
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
-        // Intent уже активен (race) — не критично, reconciler разберётся
-        setReviveMessage('Воскрешение уже в процессе. Подождите...');
+        // Intent СѓР¶Рµ Р°РєС‚РёРІРµРЅ (race) вЂ” РЅРµ РєСЂРёС‚РёС‡РЅРѕ, reconciler СЂР°Р·Р±РµСЂС‘С‚СЃСЏ
+        setReviveMessage('Р’РѕСЃРєСЂРµС€РµРЅРёРµ СѓР¶Рµ РІ РїСЂРѕС†РµСЃСЃРµ. РџРѕРґРѕР¶РґРёС‚Рµ...');
       } else {
-        setReviveMessage('Не удалось связаться с сервером. Попробуйте ещё раз.');
+        setReviveMessage('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРІСЏР·Р°С‚СЊСЃСЏ СЃ СЃРµСЂРІРµСЂРѕРј. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰С‘ СЂР°Р·.');
       }
     } finally {
       setReviveLoading(false);
@@ -1567,7 +1711,7 @@ export function GameScreen() {
   const handleDailyShare = useCallback(() => {
     const moves = removedArrowIds.length;
     const dayNum = dailyDayNumberRef.current ?? dailyLevelNumRef.current ?? 0;
-    const text = `Daily Challenge #${dayNum}: прошёл за ${moves} ходов! 🏹\nПопробуй: @ArrowRewardBot`;
+    const text = `Daily Challenge #${dayNum}: РїСЂРѕС€С‘Р» Р·Р° ${moves} С…РѕРґРѕРІ! рџЏ№\nРџРѕРїСЂРѕР±СѓР№: @ArrowRewardBot`;
     const tg = (window as Window & { Telegram?: { WebApp?: { openTelegramLink?: (url: string) => void } } }).Telegram?.WebApp;
     const shareUrl = `https://t.me/share/url?text=${encodeURIComponent(text)}`;
     if (tg?.openTelegramLink) {
@@ -1728,15 +1872,15 @@ export function GameScreen() {
                   animate={{ opacity: 1, scale: 1 }}
                   className="text-center bg-slate-900/80 backdrop-blur-xl p-8 rounded-3xl border border-white/20 shadow-2xl max-w-xs"
                 >
-                  <div className="text-5xl mb-4">🎉</div>
-                  <h2 className="text-2xl font-bold text-white mb-2">Скоро новые уровни!</h2>
+                  <div className="text-5xl mb-4">рџЋ‰</div>
+                  <h2 className="text-2xl font-bold text-white mb-2">РЎРєРѕСЂРѕ РЅРѕРІС‹Рµ СѓСЂРѕРІРЅРё!</h2>
                   <button
                     type="button"
                     data-allow-select="true"
                     onClick={confirmMenu}
                     className="w-full py-3 bg-blue-600 rounded-xl text-white font-bold mt-4"
                   >
-                    В меню
+                    Р’ РјРµРЅСЋ
                   </button>
                 </motion.div>
             </div>
@@ -1757,7 +1901,7 @@ export function GameScreen() {
             />
           )}
 
-          {/* ===== FX слой под HUD (fly-out) ===== */}
+          {/* ===== FX СЃР»РѕР№ РїРѕРґ HUD (fly-out) ===== */}
           {renderProfile.enableFxOverlay && (
             <FXOverlay
               containerRef={containerRef}
@@ -1790,7 +1934,7 @@ export function GameScreen() {
         />
       )}
 
-      {/* ===== СЛОЙ ЭФФЕКТОВ (fly-out) ===== */}
+      {/* ===== РЎР›РћР™ Р­Р¤Р¤Р•РљРўРћР’ (fly-out) ===== */}
       <GameMenuModal
         action={confirmAction}
         onCancel={() => setConfirmAction(null)}
@@ -1838,3 +1982,4 @@ export function GameScreen() {
     </div>
   );
 }
+

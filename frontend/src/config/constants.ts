@@ -267,6 +267,8 @@ export const API_ENDPOINTS = {
   tasks: {
     list: '/tasks',
     claim: '/tasks/claim',
+    devState: '/tasks/dev/state',
+    devReset: '/tasks/dev/reset',
   },
   spin: {
     status: '/spin/status',

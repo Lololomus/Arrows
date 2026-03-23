@@ -7,6 +7,7 @@ import {
   Lock,
   Play,
   Puzzle,
+  RefreshCcw,
   Send,
   Sparkles,
   Trophy,
@@ -30,8 +31,18 @@ type FlyingCoin = {
   midX: number; midY: number; endX: number; endY: number;
   rotation: number; delay: number;
 };
+type TaskDevState = {
+  arcadeLevels: number;
+  dailyLevels: number;
+  friendsConfirmed: number;
+  officialChannel: boolean;
+};
 
 const STAGGER = 0.07;
+const DEV_TASKS_ENABLED = import.meta.env.DEV || (
+  import.meta.env.MODE !== 'production'
+  && ['1', 'true', 'yes', 'on'].includes(String(import.meta.env.VITE_ENABLE_DEV_AUTH || '').toLowerCase())
+);
 
 const TASK_UI: Record<TaskDto['id'], TaskUiConfig> = {
   official_channel: { icon: Send,   iconColor: 'text-green-400',  iconBg: 'bg-green-500/20'  },
@@ -296,6 +307,154 @@ function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const TASKS_PLACEHOLDER_ENABLED = false;
+const DEFAULT_TASK_DEV_STATE: TaskDevState = {
+  arcadeLevels: 0,
+  dailyLevels: 0,
+  friendsConfirmed: 0,
+  officialChannel: false,
+};
+
+function DevPresetButton({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-white/70 transition hover:bg-white/10 hover:text-white"
+    >
+      {label}
+    </button>
+  );
+}
+
+function TaskDevPanel({
+  value,
+  loading,
+  error,
+  onChange,
+  onApply,
+  onReset,
+}: {
+  value: TaskDevState;
+  loading: boolean;
+  error: string | null;
+  onChange: (patch: Partial<TaskDevState>) => void;
+  onApply: () => void;
+  onReset: () => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/10 p-4 shadow-[0_10px_24px_rgba(0,0,0,0.22)]">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-black uppercase tracking-[0.22em] text-fuchsia-200/80">Dev Only</div>
+          <div className="mt-1 text-sm font-bold text-white">Накрутка заданий</div>
+        </div>
+        <button
+          type="button"
+          onClick={onReset}
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-white/80 transition hover:bg-white/10 disabled:opacity-60"
+        >
+          <RefreshCcw size={12} />
+          Reset
+        </button>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-3">
+        <div className="rounded-xl border border-white/8 bg-black/15 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <label className="text-xs font-bold text-white">Arcade уровни</label>
+            <input
+              type="number"
+              min="0"
+              value={value.arcadeLevels}
+              onChange={(e) => onChange({ arcadeLevels: Math.max(0, Number(e.target.value) || 0) })}
+              className="w-24 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-right text-sm font-bold text-white outline-none"
+            />
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {[0, 5, 10, 25, 50, 75, 100].map((preset) => (
+              <DevPresetButton key={`arcade-${preset}`} label={String(preset)} onClick={() => onChange({ arcadeLevels: preset })} />
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-white/8 bg-black/15 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <label className="text-xs font-bold text-white">Daily уровни</label>
+            <input
+              type="number"
+              min="0"
+              value={value.dailyLevels}
+              onChange={(e) => onChange({ dailyLevels: Math.max(0, Number(e.target.value) || 0) })}
+              className="w-24 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-right text-sm font-bold text-white outline-none"
+            />
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {[0, 10].map((preset) => (
+              <DevPresetButton key={`daily-${preset}`} label={String(preset)} onClick={() => onChange({ dailyLevels: preset })} />
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-white/8 bg-black/15 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <label className="text-xs font-bold text-white">Подтвержденные друзья</label>
+            <input
+              type="number"
+              min="0"
+              value={value.friendsConfirmed}
+              onChange={(e) => onChange({ friendsConfirmed: Math.max(0, Number(e.target.value) || 0) })}
+              className="w-24 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-right text-sm font-bold text-white outline-none"
+            />
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {[0, 3, 6, 9, 12].map((preset) => (
+              <DevPresetButton key={`friends-${preset}`} label={String(preset)} onClick={() => onChange({ friendsConfirmed: preset })} />
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-white/8 bg-black/15 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-bold text-white">Official channel</div>
+              <div className="mt-1 text-[11px] text-white/55">Делает задачу claimable без открытия канала</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onChange({ officialChannel: !value.officialChannel })}
+              className={`rounded-full px-3 py-2 text-[11px] font-bold uppercase tracking-[0.14em] transition ${
+                value.officialChannel
+                  ? 'bg-green-500/20 text-green-300'
+                  : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              {value.officialChannel ? 'Enabled' : 'Disabled'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <p className="min-h-[16px] text-[11px] text-red-300/85">{error ?? ''}</p>
+        <button
+          type="button"
+          onClick={onApply}
+          disabled={loading}
+          className="shrink-0 rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-500 px-4 py-2.5 text-[11px] font-black uppercase tracking-[0.16em] text-white shadow-[0_8px_18px_rgba(217,70,239,0.28)] transition hover:brightness-110 disabled:opacity-60"
+        >
+          {loading ? 'Applying...' : 'Apply'}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const triggerHaptic = (style: 'light' | 'medium' | 'heavy' | 'selection' | 'success') => {
   const tg = (window as Window & { Telegram?: any }).Telegram?.WebApp;
@@ -381,6 +540,11 @@ export function TasksScreen() {
   const [isStashVisible,     setIsStashVisible]     = useState(false);
   const [isStashPulsing,     setIsStashPulsing]     = useState(false);
   const [adEligible,         setAdEligible]         = useState(false);
+  const [isTaskDevOpen,      setIsTaskDevOpen]      = useState(false);
+  const [taskDevState,       setTaskDevState]       = useState<TaskDevState>(DEFAULT_TASK_DEV_STATE);
+  const [taskDevLoading,     setTaskDevLoading]     = useState(false);
+  const [taskDevError,       setTaskDevError]       = useState<string | null>(null);
+  const [taskDevLoaded,      setTaskDevLoaded]      = useState(false);
 
   const userCoins = user?.coins ?? 0;
 
@@ -396,6 +560,38 @@ export function TasksScreen() {
 
   useEffect(() => { void fetchTasks(true); }, [fetchTasks]);
   useEffect(() => () => { if (stashHideTimerRef.current) clearTimeout(stashHideTimerRef.current); }, []);
+
+  useEffect(() => {
+    if (!DEV_TASKS_ENABLED || !isTaskDevOpen || taskDevLoaded) return;
+    let cancelled = false;
+    const loadDevState = async () => {
+      setTaskDevLoading(true);
+      setTaskDevError(null);
+      try {
+        const state = await tasksApi.getDevState();
+        if (cancelled) return;
+        setTaskDevState({
+          arcadeLevels: state.arcadeLevels ?? 0,
+          dailyLevels: state.dailyLevels ?? 0,
+          friendsConfirmed: state.friendsConfirmed ?? 0,
+          officialChannel: state.officialChannel ?? false,
+        });
+        setTaskDevLoaded(true);
+      } catch {
+        if (!cancelled) {
+          setTaskDevError('Не удалось загрузить dev state');
+        }
+      } finally {
+        if (!cancelled) {
+          setTaskDevLoading(false);
+        }
+      }
+    };
+    void loadDevState();
+    return () => {
+      cancelled = true;
+    };
+  }, [isTaskDevOpen, taskDevLoaded]);
 
   const showStashWithTimer = useCallback(() => {
     setIsStashVisible(true);
@@ -476,6 +672,10 @@ export function TasksScreen() {
     const el = event?.currentTarget as HTMLElement | undefined;
     if (task.kind === 'single') {
       if (task.status === 'completed') return;
+      if (task.status === 'claimable' && el) {
+        await handleClaim(task, el);
+        return;
+      }
       if (!openedChannelIds.has(task.id)) { handleOpenChannel(task); return; }
       if (el) await handleClaim(task, el);
       return;
@@ -502,7 +702,7 @@ export function TasksScreen() {
 
     let actionLabel = '';
     if (task.kind === 'single') {
-      actionLabel = isLoadingTask ? '...' : openedChannelIds.has(task.id) ? 'Проверить' : 'Подписка';
+      actionLabel = isLoadingTask ? '...' : task.status === 'claimable' ? `+${reward}` : openedChannelIds.has(task.id) ? 'Проверить' : 'Подписка';
     } else if (task.status === 'claimable') {
       actionLabel = isLoadingTask ? '...' : `+${reward}`;
     }
@@ -543,7 +743,7 @@ export function TasksScreen() {
                   disabled={isLoadingTask}
                   onClick={(e) => void handleTaskAction(task, e)}
                   className={`shrink-0 flex items-center gap-1 rounded-xl px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white disabled:opacity-70 ${
-                    task.kind === 'single'
+                    task.kind === 'single' && task.status !== 'claimable'
                       ? 'bg-white/10 active:bg-white/20'
                       : 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-[0_4px_15px_rgba(245,158,11,0.3)]'
                   }`}
@@ -656,6 +856,45 @@ export function TasksScreen() {
     return nodes;
   };
 
+  const applyTaskDevState = useCallback(async () => {
+    if (!DEV_TASKS_ENABLED) return;
+    setTaskDevLoading(true);
+    setTaskDevError(null);
+    try {
+      const next = await tasksApi.setDevState(taskDevState);
+      setTaskDevState({
+        arcadeLevels: next.arcadeLevels ?? 0,
+        dailyLevels: next.dailyLevels ?? 0,
+        friendsConfirmed: next.friendsConfirmed ?? 0,
+        officialChannel: next.officialChannel ?? false,
+      });
+      setTaskDevLoaded(true);
+      setOpenedChannelIds(new Set());
+      await fetchTasks(false);
+    } catch (err) {
+      setTaskDevError(handleApiError(err));
+    } finally {
+      setTaskDevLoading(false);
+    }
+  }, [fetchTasks, taskDevState]);
+
+  const resetTaskDevState = useCallback(async () => {
+    if (!DEV_TASKS_ENABLED) return;
+    setTaskDevLoading(true);
+    setTaskDevError(null);
+    try {
+      await tasksApi.resetDevState();
+      setTaskDevState(DEFAULT_TASK_DEV_STATE);
+      setTaskDevLoaded(true);
+      setOpenedChannelIds(new Set());
+      await fetchTasks(false);
+    } catch (err) {
+      setTaskDevError(handleApiError(err));
+    } finally {
+      setTaskDevLoading(false);
+    }
+  }, [fetchTasks]);
+
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
@@ -713,6 +952,47 @@ export function TasksScreen() {
               exit={{ opacity: 0, transition: { duration: 0.08 } }}
               className="space-y-3 pb-2"
             >
+              {DEV_TASKS_ENABLED && (
+                <>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTaskDevError(null);
+                        setIsTaskDevOpen((prev) => !prev);
+                      }}
+                      className="rounded-xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-fuchsia-100/85 transition hover:bg-fuchsia-500/15"
+                    >
+                      {isTaskDevOpen ? 'Скрыть Dev' : 'Dev: Накрутка'}
+                    </button>
+                  </div>
+
+                  <AnimatePresence initial={false}>
+                    {isTaskDevOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0, y: -6 }}
+                        animate={{ opacity: 1, height: 'auto', y: 0 }}
+                        exit={{ opacity: 0, height: 0, y: -6 }}
+                        transition={{ duration: 0.18, ease: 'easeOut' }}
+                        className="overflow-hidden"
+                      >
+                        <TaskDevPanel
+                          value={taskDevState}
+                          loading={taskDevLoading}
+                          error={taskDevError}
+                          onChange={(patch) => {
+                            setTaskDevError(null);
+                            setTaskDevState((prev) => ({ ...prev, ...patch }));
+                          }}
+                          onApply={() => void applyTaskDevState()}
+                          onReset={() => void resetTaskDevState()}
+                        />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </>
+              )}
+
               {screenError ? (
                 <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
                   <div className="font-bold">Не удалось загрузить задания</div>

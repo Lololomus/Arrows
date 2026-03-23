@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '../stores/store';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
-import { CoinStashCard } from '../components/ui/CoinStashCard';
-import { WalletButton } from '../components/WalletButton';
+import { HeaderBar } from '../components/ui/HeaderBar';
+import { useWalletConnectionController } from '../hooks/useWalletConnectionController';
 import { SpinScreen } from './SpinScreen';
 import { spinApi } from '../api/client';
 
@@ -33,6 +33,7 @@ const titleLine = {
 export function HomeScreen() {
   const { setScreen, user, spinAvailable, loginStreak, setSpinStatus, setDailyMode } = useAppStore();
   const [showSpin, setShowSpin] = useState(false);
+  const walletController = useWalletConnectionController();
   const displayTitleFont = { fontFamily: '"Bungee Inline", cursive' } as const;
   const coinBalance = user?.coins ?? 0;
   const displayedLevel = (user as (typeof user & { current_level?: number }) | null)?.currentLevel
@@ -112,8 +113,16 @@ export function HomeScreen() {
         </motion.div>
 
         <div className="flex-1 flex flex-col justify-center space-y-4 pb-8">
-          <CoinStashCard balance={coinBalance} />
-          <WalletButton delay={0.35} />
+          <HeaderBar
+            balance={coinBalance}
+            walletMode={walletController.walletMode}
+            walletDisplay={walletController.walletDisplay}
+            walletError={walletController.walletError}
+            showDisconnectAction={walletController.showDisconnectAction}
+            onWalletClick={walletController.onWalletClick}
+            onDisconnect={walletController.onDisconnect}
+            delay={0.22}
+          />
 
           <motion.button
             type="button"
