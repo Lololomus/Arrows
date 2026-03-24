@@ -185,6 +185,7 @@ export function ShopScreen() {
 
   const [items, setItems] = useState<Array<ShopItem & { id: BoostId }>>([]);
   const [tonItems, setTonItems] = useState<ShopItem[]>([]);
+  const [upgrades, setUpgrades] = useState<ShopItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
@@ -204,10 +205,12 @@ export function ShopScreen() {
       const catalog = await shopApi.getCatalog();
       setItems(normalizeBoosts(catalog.boosts));
       setTonItems([...catalog.arrowSkins, ...catalog.themes].filter((item) => item.priceTon != null));
+      setUpgrades(catalog.upgrades ?? []);
     } catch {
       setError('Не удалось загрузить магазин');
       setItems([]);
       setTonItems([]);
+      setUpgrades([]);
     } finally {
       setLoading(false);
     }
@@ -262,7 +265,8 @@ export function ShopScreen() {
       return;
     }
 
-    const itemType = item.id.startsWith('vip') ? 'boosts'
+    const itemType = item.id === 'extra_life' ? 'boosts'
+      : item.id.startsWith('vip') ? 'boosts'
       : ['diamond', 'cyber', 'rainbow', 'neon', 'fire', 'ice', 'gold', 'default'].includes(item.id) ? 'arrow_skins'
       : 'themes';
 
@@ -298,6 +302,9 @@ export function ShopScreen() {
           if (result.status === 'completed') {
             setTonStatus(null);
             setPurchaseError(null);
+            if (item.id === 'extra_life' && result.extra_lives != null) {
+              updateUser({ extraLives: result.extra_lives });
+            }
             void loadCatalog();
             return;
           }
@@ -321,7 +328,7 @@ export function ShopScreen() {
     }
   }, [loadCatalog, purchasingId, tonConnectUI, user?.walletAddress]);
 
-  const hasStoreContent = items.length > 0 || tonItems.length > 0;
+  const hasStoreContent = items.length > 0 || tonItems.length > 0 || upgrades.length > 0;
 
   return (
     <div className="relative h-full overflow-hidden px-4 pb-nav pt-3">
@@ -420,7 +427,7 @@ export function ShopScreen() {
           </div>
         ) : (
           <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto pb-6">
-            {tonItems.length > 0 && tonStatus && (
+            {tonStatus && (
               <div className="mb-3 rounded-2xl border border-blue-400/20 bg-blue-500/10 px-4 py-3 text-sm text-blue-200">
                 {tonStatus}
               </div>
@@ -447,6 +454,74 @@ export function ShopScreen() {
                 );
               })}
             </section>
+
+            {upgrades.length > 0 && (
+              <div className="mt-5">
+                <div className="mb-3 flex items-center gap-2">
+                  <Heart size={16} className="text-pink-400" />
+                  <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-pink-300/80">Улучшения</span>
+                </div>
+
+                <div className="space-y-3">
+                  {upgrades.map((item) => {
+                    const purchased = item.purchasedCount ?? 0;
+                    const maxP = item.maxPurchases ?? 2;
+                    const isMaxed = purchased >= maxP;
+                    const currentLives = 3 + (user?.extraLives ?? 0);
+                    const noWallet = !user?.walletAddress;
+
+                    return (
+                      <motion.div
+                        key={item.id}
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="rounded-3xl border border-white/10 bg-[#14182b]/78 p-5 shadow-[0_16px_36px_rgba(0,0,0,0.24)] backdrop-blur-xl"
+                      >
+                        <div className="flex items-start gap-4">
+                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-pink-400/20 bg-pink-400/10 text-2xl">
+                            {item.preview || '💖'}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <h3 className="text-base font-bold text-white">{item.name} (навсегда)</h3>
+                            <p className="mt-1 text-sm text-[#a7abb8]">
+                              Сейчас {currentLives}/5 жизней на старте уровня
+                            </p>
+                            <div className="mt-2 flex items-center gap-2">
+                              <div className="flex gap-1">
+                                {Array.from({ length: maxP }, (_, i) => (
+                                  <div
+                                    key={i}
+                                    className={`h-2 w-8 rounded-full ${i < purchased ? 'bg-pink-400' : 'bg-white/10'}`}
+                                  />
+                                ))}
+                              </div>
+                              <span className="text-xs text-[#677086]">Куплено {purchased}/{maxP}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-4">
+                          <button
+                            type="button"
+                            onClick={() => void handleTonPurchase(item)}
+                            disabled={!!purchasingId || isMaxed || noWallet}
+                            className="w-full rounded-2xl bg-gradient-to-r from-pink-500 to-rose-600 px-4 py-3 text-sm font-black text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {isMaxed
+                              ? 'Максимум'
+                              : noWallet
+                                ? 'Подключите кошелёк'
+                                : purchasingId === item.id
+                                  ? '...'
+                                  : `${item.priceTon} TON`}
+                          </button>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {tonItems.length > 0 && (
               <div className="mt-5">

@@ -4,11 +4,14 @@ Arrow Puzzle - Shop API
 Магазин: скины, темы, бусты, покупки.
 """
 
+import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+
+logger = logging.getLogger(__name__)
 
 from ..config import settings
 from ..database import get_db
@@ -63,6 +66,7 @@ BOOSTS = [
     {"id": "vip_week", "name": "VIP неделя", "price_stars": 200, "preview": "👑"},
     {"id": "vip_month", "name": "VIP месяц", "price_stars": 500, "preview": "👑"},
     {"id": "vip_forever", "name": "VIP навсегда", "price_ton": 50.0, "preview": "💎"},
+    {"id": "extra_life", "name": "+1 жизнь", "price_ton": 1.0, "preview": "💖", "max_purchases": 2},
 ]
 
 
@@ -121,6 +125,23 @@ async def get_catalog(
             owned=(item_type, item["id"]) in owned_items
         )
     
+    # Build upgrades section (permanent upgrades for TON)
+    upgrade_items = []
+    if ton_payments_enabled():
+        for b in BOOSTS:
+            if b.get("max_purchases") is not None:
+                max_p = b["max_purchases"]
+                purchased = user.extra_lives if b["id"] == "extra_life" else 0
+                upgrade_items.append(ShopItem(
+                    id=b["id"],
+                    name=b["name"],
+                    price_ton=b.get("price_ton"),
+                    preview=b.get("preview"),
+                    owned=purchased >= max_p,
+                    max_purchases=max_p,
+                    purchased_count=purchased,
+                ))
+
     return ShopCatalog(
         arrow_skins=[
             make_shop_item(s, "arrow_skins")
@@ -136,7 +157,8 @@ async def get_catalog(
             make_shop_item(b, "boosts")
             for b in BOOSTS
             if b["id"] in BETA_VISIBLE_BOOST_IDS
-        ]
+        ],
+        upgrades=upgrade_items,
     )
 
 
@@ -265,6 +287,30 @@ async def purchase_with_ton(
     if price is None:
         raise HTTPException(status_code=400, detail="Item not available for TON")
 
+    # Permanent upgrade: check max purchases
+    if request.item_type == "boosts" and request.item_id == "extra_life":
+        if user.extra_lives >= 2:
+            raise HTTPException(status_code=409, detail="Maximum extra lives already purchased")
+        # Reuse existing pending transaction
+        pending = await db.execute(
+            select(Transaction).where(
+                Transaction.user_id == user.id,
+                Transaction.item_type == "boosts",
+                Transaction.item_id == "extra_life",
+                Transaction.status == "pending",
+            )
+        )
+        existing_tx = pending.scalar_one_or_none()
+        if existing_tx:
+            comment = f"arrow_{user.id}_{existing_tx.id}"
+            return TonPaymentInfo(
+                transaction_id=existing_tx.id,
+                address=settings.TON_WALLET_ADDRESS,
+                amount=price,
+                amount_nano=str(int(price * 1_000_000_000)),
+                comment=comment,
+            )
+
     # Non-consumable: check if already owned
     if request.item_type != "boosts":
         existing = await db.execute(
@@ -392,6 +438,12 @@ async def confirm_ton_transaction(
         return {"transaction_id": tx.id, "status": "pending", "verified": False}
 
     # Verified — grant item
+    # Lock user row to prevent concurrent extra_lives grants
+    user_result = await db.execute(
+        select(User).where(User.id == user.id).with_for_update()
+    )
+    user = user_result.scalar_one()
+
     item = get_item_by_id(tx.item_type, tx.item_id)
     if item:
         if tx.item_type == "boosts":
@@ -413,7 +465,10 @@ async def confirm_ton_transaction(
     tx.ton_tx_hash = match["tx_hash"]
     await db.commit()
 
-    return {"transaction_id": tx.id, "status": "completed", "verified": True}
+    resp = {"transaction_id": tx.id, "status": "completed", "verified": True}
+    if tx.item_id == "extra_life":
+        resp["extra_lives"] = user.extra_lives
+    return resp
 
 
 @router.post("/equip/{item_type}/{item_id}")
@@ -465,6 +520,11 @@ async def apply_boost(user: User, boost_id: str, db: AsyncSession, quantity: int
         user.revive_balance += quantity
     elif boost_id == "life_1":
         pass  # lives client-side only
+    elif boost_id == "extra_life":
+        if user.extra_lives < 2:
+            user.extra_lives += 1
+        else:
+            logger.warning("User %s: extra_lives already at max, TON accepted", user.id)
     elif boost_id == "energy_5":
         user.energy = min(user.energy + 5, settings.MAX_ENERGY + 5)
     elif boost_id == "energy_full":

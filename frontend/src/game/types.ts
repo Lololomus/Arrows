@@ -149,6 +149,7 @@ export interface User {
   coins: number;
   hintBalance: number;
   reviveBalance: number;
+  extraLives: number;
   energy: number;
   energyUpdatedAt: string;
   
@@ -192,16 +193,18 @@ export interface ShopItem {
   name: string;
   description?: string;
   itemType: ItemType;
-  
+
   // Цены (null = недоступно за эту валюту)
   priceCoins: number | null;
   priceStars: number | null;
   priceTon: number | null;
-  
+
   // Метаданные
   preview?: string;
   consumable?: boolean;
   owned?: boolean;
+  maxPurchases?: number;
+  purchasedCount?: number;
 }
 
 /** Каталог магазина */
@@ -209,6 +212,7 @@ export interface ShopCatalog {
   arrowSkins: ShopItem[];
   themes: ShopItem[];
   boosts: ShopItem[];
+  upgrades: ShopItem[];
 }
 
 export interface PurchaseCoinsResponse {

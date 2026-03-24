@@ -769,7 +769,8 @@ export function GameScreen() {
     if (prefetched && prefetched.level === levelNum) {
       const diff = prefetched.meta?.difficulty ?? 1;
       setLevelDifficulty(diff);
-      const livesForLevel = getLivesForDifficulty(diff);
+      const extraLives = useAppStore.getState().user?.extraLives ?? 0;
+      const livesForLevel = getLivesForDifficulty(diff) + extraLives;
       initLevel(levelNum, prefetched.seed, prefetched.grid, prefetched.arrows, livesForLevel);
       return;
     }
@@ -782,13 +783,15 @@ export function GameScreen() {
         dailySaveStartedRef.current = false;
         const diff = levelData.meta?.difficulty ?? 1;
         setLevelDifficulty(diff);
-        const livesForLevel = getLivesForDifficulty(diff);
+        const extraLivesD = useAppStore.getState().user?.extraLives ?? 0;
+        const livesForLevel = getLivesForDifficulty(diff) + extraLivesD;
         initLevel(levelData.level, levelData.seed, levelData.grid, levelData.arrows, livesForLevel);
       } else {
         const levelData = await gameApi.getLevel(levelNum);
         const diff = levelData.meta?.difficulty ?? 1;
         setLevelDifficulty(diff);
-        const livesForLevel = getLivesForDifficulty(diff);
+        const extraLivesN = useAppStore.getState().user?.extraLives ?? 0;
+        const livesForLevel = getLivesForDifficulty(diff) + extraLivesN;
         initLevel(levelNum, levelData.seed, levelData.grid, levelData.arrows, livesForLevel);
       }
     } catch (error: any) {
@@ -1872,15 +1875,15 @@ export function GameScreen() {
                   animate={{ opacity: 1, scale: 1 }}
                   className="text-center bg-slate-900/80 backdrop-blur-xl p-8 rounded-3xl border border-white/20 shadow-2xl max-w-xs"
                 >
-                  <div className="text-5xl mb-4">рџЋ‰</div>
-                  <h2 className="text-2xl font-bold text-white mb-2">РЎРєРѕСЂРѕ РЅРѕРІС‹Рµ СѓСЂРѕРІРЅРё!</h2>
+                  <div className="text-5xl mb-4">{'\uD83C\uDF89'}</div>
+                  <h2 className="text-2xl font-bold text-white mb-2">{'\u0421\u043a\u043e\u0440\u043e \u043d\u043e\u0432\u044b\u0435 \u0443\u0440\u043e\u0432\u043d\u0438!'}</h2>
                   <button
                     type="button"
                     data-allow-select="true"
                     onClick={confirmMenu}
                     className="w-full py-3 bg-blue-600 rounded-xl text-white font-bold mt-4"
                   >
-                    Р’ РјРµРЅСЋ
+                    {'\u0412 \u043c\u0435\u043d\u044e'}
                   </button>
                 </motion.div>
             </div>

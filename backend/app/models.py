@@ -38,6 +38,7 @@ class User(Base):
     coins = Column(Integer, default=0)
     hint_balance = Column(Integer, nullable=False, server_default="5")
     revive_balance = Column(Integer, nullable=False, server_default="0")
+    extra_lives = Column(Integer, nullable=False, server_default="0")
     energy = Column(Integer, default=5)
     energy_updated_at = Column(DateTime, default=datetime.utcnow)
     
@@ -103,6 +104,7 @@ class User(Base):
             "coins": self.coins,
             "hint_balance": self.hint_balance,
             "revive_balance": self.revive_balance,
+            "extra_lives": self.extra_lives,
             "energy": self.energy,
             "is_premium": self.is_premium,
             "active_arrow_skin": self.active_arrow_skin,

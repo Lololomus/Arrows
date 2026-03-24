@@ -170,6 +170,8 @@ class ShopItem(BaseModel):
     price_ton: Optional[float] = None
     preview: Optional[str] = None
     owned: bool = False
+    max_purchases: Optional[int] = None
+    purchased_count: Optional[int] = None
 
 
 class ShopCatalog(BaseModel):
@@ -177,6 +179,7 @@ class ShopCatalog(BaseModel):
     arrow_skins: List[ShopItem]
     themes: List[ShopItem]
     boosts: List[ShopItem]
+    upgrades: List[ShopItem] = []
 
 
 class PurchaseRequest(BaseModel):

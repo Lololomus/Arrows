@@ -221,12 +221,15 @@ interface RawShopItem {
   price_ton?: number | null;
   preview?: string | null;
   owned?: boolean;
+  max_purchases?: number;
+  purchased_count?: number;
 }
 
 interface RawShopCatalog {
   arrow_skins?: RawShopItem[];
   themes?: RawShopItem[];
   boosts?: RawShopItem[];
+  upgrades?: RawShopItem[];
 }
 
 function normalizeShopItem(raw: RawShopItem, itemType: ShopItem['itemType']): ShopItem {
@@ -239,6 +242,8 @@ function normalizeShopItem(raw: RawShopItem, itemType: ShopItem['itemType']): Sh
     priceTon: raw.price_ton ?? null,
     preview: raw.preview ?? undefined,
     owned: raw.owned ?? false,
+    maxPurchases: raw.max_purchases ?? undefined,
+    purchasedCount: raw.purchased_count ?? undefined,
   };
 }
 
@@ -247,6 +252,7 @@ function normalizeShopCatalog(raw: RawShopCatalog): ShopCatalog {
     arrowSkins: (raw.arrow_skins ?? []).map((item) => normalizeShopItem(item, 'arrow_skin')),
     themes: (raw.themes ?? []).map((item) => normalizeShopItem(item, 'theme')),
     boosts: (raw.boosts ?? []).map((item) => normalizeShopItem(item, 'boost')),
+    upgrades: (raw.upgrades ?? []).map((item) => normalizeShopItem(item, 'boost')),
   };
 }
 
@@ -909,8 +915,8 @@ export const shopApi = {
 
   confirmTransaction: (
     txId: number,
-  ): Promise<{ transaction_id: number; status: string; verified: boolean }> =>
-    request<{ transaction_id: number; status: string; verified: boolean }>(
+  ): Promise<{ transaction_id: number; status: string; verified: boolean; extra_lives?: number }> =>
+    request<{ transaction_id: number; status: string; verified: boolean; extra_lives?: number }>(
       API_ENDPOINTS.shop.transactionConfirm(txId),
       { method: 'POST' }
     ),

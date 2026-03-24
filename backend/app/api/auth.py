@@ -57,6 +57,8 @@ def serialize_user(user: User) -> dict:
         "total_stars": user.total_stars,
         "coins": user.coins,
         "hint_balance": user.hint_balance,
+        "revive_balance": user.revive_balance,
+        "extra_lives": user.extra_lives,
         "energy": user.energy,
         "is_premium": user.is_premium,
         "active_arrow_skin": user.active_arrow_skin,
