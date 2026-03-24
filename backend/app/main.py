@@ -4,6 +4,7 @@ Arrow Puzzle - FastAPI Application
 Главная точка входа backend (PRODUCTION READY!).
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,10 +15,11 @@ from .config import settings
 from .database import init_db, close_redis
 from .api import ads, auth, game, shop, social, spin, tasks, wallet, webhooks
 from .middleware.security import (
-    limiter, 
+    limiter,
     add_security_headers,
     _rate_limit_exceeded_handler as rate_limit_handler
 )
+from .services.ton_processor import ton_processor_loop
 
 
 # ============================================
@@ -54,11 +56,19 @@ async def lifespan(app: FastAPI):
     
     await init_db()
     print("✅ Database initialized")
-    
+
+    _ton_task = asyncio.create_task(ton_processor_loop())
+    print("✅ TON processor started")
+
     yield
-    
+
     # Shutdown
     print("🛑 Shutting down...")
+    _ton_task.cancel()
+    try:
+        await _ton_task
+    except asyncio.CancelledError:
+        pass
     await close_redis()
     print("✅ Redis closed")
 

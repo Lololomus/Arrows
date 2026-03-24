@@ -42,7 +42,7 @@ async def verify_ton_transaction(
                 f"{TON_CENTER_BASE}/getTransactions",
                 params={
                     "address": expected_address,
-                    "limit": 30,
+                    "limit": 100,
                     "api_key": settings.TON_API_KEY,
                 },
             )

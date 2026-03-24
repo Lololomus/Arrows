@@ -55,6 +55,32 @@ type QuantityState = Record<BoostId, number>;
 const BOOST_IDS: BoostId[] = ['hints_1', 'revive_1'];
 const MAX_BOOST_QUANTITY = 10;
 
+const TON_SENT_TX_KEY = 'ton_pending_tx_id';
+const TON_SENT_TX_TTL_MS = 24 * 60 * 60 * 1000; // 24h — matches backend pending tx cutoff
+
+function readPendingTxId(): number | null {
+  try {
+    const raw = localStorage.getItem(TON_SENT_TX_KEY);
+    if (!raw) return null;
+    const { txId, ts } = JSON.parse(raw) as { txId: number; ts: number };
+    if (Date.now() - ts > TON_SENT_TX_TTL_MS) {
+      localStorage.removeItem(TON_SENT_TX_KEY);
+      return null;
+    }
+    return txId;
+  } catch {
+    return null;
+  }
+}
+
+function savePendingTxId(txId: number): void {
+  localStorage.setItem(TON_SENT_TX_KEY, JSON.stringify({ txId, ts: Date.now() }));
+}
+
+function clearPendingTxId(): void {
+  localStorage.removeItem(TON_SENT_TX_KEY);
+}
+
 const BOOST_UI: Record<BoostId, {
   title: string;
   description: string;
@@ -277,21 +303,27 @@ export function ShopScreen() {
     try {
       const paymentInfo = await shopApi.purchaseTon(itemType, item.id);
 
-      setTonStatus('Подтвердите в кошельке...');
+      const alreadySent = readPendingTxId() === paymentInfo.transaction_id;
 
-      const amountNano = paymentInfo.amount_nano ?? String(Math.round(paymentInfo.amount * 1e9));
-      const commentPayload = buildCommentPayload(paymentInfo.comment);
+      if (!alreadySent) {
+        setTonStatus('Подтвердите в кошельке...');
 
-      await tonConnectUI.sendTransaction({
-        validUntil: Math.floor(Date.now() / 1000) + 600,
-        messages: [
-          {
-            address: paymentInfo.address,
-            amount: amountNano,
-            payload: commentPayload,
-          },
-        ],
-      });
+        const amountNano = paymentInfo.amount_nano ?? String(Math.round(paymentInfo.amount * 1e9));
+        const commentPayload = buildCommentPayload(paymentInfo.comment);
+
+        await tonConnectUI.sendTransaction({
+          validUntil: Math.floor(Date.now() / 1000) + 600,
+          messages: [
+            {
+              address: paymentInfo.address,
+              amount: amountNano,
+              payload: commentPayload,
+            },
+          ],
+        });
+
+        savePendingTxId(paymentInfo.transaction_id);
+      }
 
       setTonStatus('Ожидаем подтверждение...');
 
@@ -300,6 +332,7 @@ export function ShopScreen() {
         try {
           const result = await shopApi.confirmTransaction(paymentInfo.transaction_id);
           if (result.status === 'completed') {
+            clearPendingTxId();
             setTonStatus(null);
             setPurchaseError(null);
             if (item.id === 'extra_life' && result.extra_lives != null) {
@@ -314,6 +347,7 @@ export function ShopScreen() {
       }
 
       setTonStatus(null);
+      void loadCatalog();
       setPurchaseError('Транзакция отправлена, но подтверждение ещё не получено. Проверьте позже.');
     } catch (errorValue) {
       console.error('[TON purchase error]', errorValue);
@@ -483,6 +517,9 @@ export function ShopScreen() {
                         </div>
                         <div className="min-w-0">
                           <h2 className="text-xl font-bold text-[#f7f8fb]">{item.name}</h2>
+                          <p className="mt-1 text-sm leading-relaxed text-[#a7abb8]">
+                            Увеличивает стартовые жизни.
+                          </p>
                           <div className="mt-2 flex items-center gap-2">
                             <div className="flex gap-1">
                               {Array.from({ length: maxP }, (_, i) => (

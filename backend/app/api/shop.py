@@ -287,14 +287,17 @@ async def purchase_with_ton(
     if user.extra_lives >= 2:
         raise HTTPException(status_code=409, detail="Maximum extra lives already purchased")
 
-    # Reuse existing pending transaction
+    # Reuse existing pending transaction (take most recent to avoid MultipleResultsFound)
     pending = await db.execute(
-        select(Transaction).where(
+        select(Transaction)
+        .where(
             Transaction.user_id == user.id,
             Transaction.item_type == "boosts",
             Transaction.item_id == "extra_life",
             Transaction.status == "pending",
         )
+        .order_by(Transaction.created_at.desc())
+        .limit(1)
     )
     existing_tx = pending.scalar_one_or_none()
     if existing_tx:
