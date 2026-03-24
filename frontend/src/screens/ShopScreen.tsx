@@ -327,8 +327,8 @@ export function ShopScreen() {
 
       setTonStatus('Ожидаем подтверждение...');
 
-      for (let i = 0; i < 12; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 5000));
+      for (let i = 0; i < 20; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
         try {
           const result = await shopApi.confirmTransaction(paymentInfo.transaction_id);
           if (result.status === 'completed') {

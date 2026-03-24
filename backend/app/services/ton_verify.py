@@ -94,13 +94,26 @@ async def verify_ton_transaction(
 
 
 def _extract_comment(in_msg: dict) -> str:
-    """Extract text comment from in_msg."""
-    # TON Center returns comment in msg_data.text or message
+    """Extract text comment from in_msg.
+
+    TON Center v2 exposes the comment in two places:
+      - ``in_msg.message``         — already decoded UTF-8 text (preferred)
+      - ``in_msg.msg_data.text``   — base64-encoded UTF-8 text (fallback)
+    Always check `message` first; decode base64 only as a fallback.
+    """
+    import base64
+
+    message = in_msg.get("message", "")
+    if message:
+        return message
+
     msg_data = in_msg.get("msg_data", {})
     if isinstance(msg_data, dict):
         body = msg_data.get("text", "")
         if body:
-            return body
+            try:
+                return base64.b64decode(body).decode("utf-8")
+            except Exception:
+                return body  # last resort: return raw value
 
-    # Fallback: message field
-    return in_msg.get("message", "")
+    return ""

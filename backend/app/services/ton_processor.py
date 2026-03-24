@@ -148,12 +148,23 @@ async def _fetch_chain_index() -> dict[str, dict]:
 
 
 def _extract_comment(in_msg: dict) -> str:
+    """Same decoding logic as ton_verify._extract_comment (kept in sync)."""
+    import base64
+
+    message = in_msg.get("message", "")
+    if message:
+        return message
+
     msg_data = in_msg.get("msg_data", {})
     if isinstance(msg_data, dict):
         body = msg_data.get("text", "")
         if body:
-            return body
-    return in_msg.get("message", "")
+            try:
+                return base64.b64decode(body).decode("utf-8")
+            except Exception:
+                return body
+
+    return ""
 
 
 async def _expire_stale_pending_txs(cutoff: datetime) -> None:
