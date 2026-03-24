@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.api import shop, wallet
 from app.database import Base
-from app.models import Inventory, Transaction, User
+from app.models import Transaction, User
 from app.schemas import PurchaseRequest, WalletConnectRequest
 
 
@@ -125,7 +125,7 @@ async def test_purchase_with_ton_reuses_existing_pending_transaction(db_session:
     monkeypatch.setattr(shop.settings, "TON_API_KEY", "test-ton-key")
     monkeypatch.setattr(shop.settings, "TON_WALLET_ADDRESS", "EQ_MERCHANT")
 
-    request = PurchaseRequest(item_type="themes", item_id="space")
+    request = PurchaseRequest(item_type="boosts", item_id="extra_life")
 
     first = await shop.purchase_with_ton(request=request, user=user, db=db_session)
     second = await shop.purchase_with_ton(request=request, user=user, db=db_session)
@@ -134,8 +134,8 @@ async def test_purchase_with_ton_reuses_existing_pending_transaction(db_session:
         await db_session.execute(
             select(Transaction).where(
                 Transaction.user_id == user.id,
-                Transaction.item_type == "themes",
-                Transaction.item_id == "space",
+                Transaction.item_type == "boosts",
+                Transaction.item_id == "extra_life",
             )
         )
     ).scalars().all()
@@ -147,7 +147,7 @@ async def test_purchase_with_ton_reuses_existing_pending_transaction(db_session:
 
 
 @pytest.mark.asyncio
-async def test_confirm_ton_transaction_grants_inventory_and_is_idempotent(
+async def test_confirm_ton_transaction_grants_extra_life_and_is_idempotent(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -157,7 +157,7 @@ async def test_confirm_ton_transaction_grants_inventory_and_is_idempotent(
     monkeypatch.setattr(shop.settings, "TON_WALLET_ADDRESS", "EQ_MERCHANT")
 
     payment = await shop.purchase_with_ton(
-        request=PurchaseRequest(item_type="themes", item_id="space"),
+        request=PurchaseRequest(item_type="boosts", item_id="extra_life"),
         user=user,
         db=db_session,
     )
@@ -180,7 +180,7 @@ async def test_confirm_ton_transaction_grants_inventory_and_is_idempotent(
     }
 
     async def matched(**_: object) -> dict[str, object]:
-        return {"tx_hash": "tx-hash-123", "amount": int(Decimal("0.5") * 1_000_000_000)}
+        return {"tx_hash": "tx-hash-123", "amount": int(Decimal("1.0") * 1_000_000_000)}
 
     monkeypatch.setattr(shop, "verify_ton_transaction", matched)
 
@@ -196,73 +196,55 @@ async def test_confirm_ton_transaction_grants_inventory_and_is_idempotent(
     )
 
     tx = await db_session.get(Transaction, payment.transaction_id)
-    inventory_items = (
-        await db_session.execute(
-            select(Inventory).where(
-                Inventory.user_id == user.id,
-                Inventory.item_type == "themes",
-                Inventory.item_id == "space",
-            )
-        )
-    ).scalars().all()
+    await db_session.refresh(user)
 
     assert completed_result == {
         "transaction_id": payment.transaction_id,
         "status": "completed",
         "verified": True,
+        "extra_lives": 1,
     }
-    assert repeated_result == completed_result
+    assert repeated_result == {
+        "transaction_id": payment.transaction_id,
+        "status": "completed",
+        "verified": True,
+    }
     assert tx is not None
     assert tx.status == "completed"
     assert tx.ton_tx_hash == "tx-hash-123"
-    assert len(inventory_items) == 1
+    assert user.extra_lives == 1
 
 
 @pytest.mark.asyncio
-async def test_confirm_ton_transaction_applies_boost_once(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_purchase_with_ton_rejects_non_extra_life_paid_item(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     user = await create_user(db_session, telegram_id=1006)
     monkeypatch.setattr(shop.settings, "TON_PAYMENTS_ENABLED", True)
     monkeypatch.setattr(shop.settings, "TON_API_KEY", "test-ton-key")
     monkeypatch.setattr(shop.settings, "TON_WALLET_ADDRESS", "EQ_MERCHANT")
 
-    payment = await shop.purchase_with_ton(
-        request=PurchaseRequest(item_type="boosts", item_id="vip_forever"),
-        user=user,
-        db=db_session,
-    )
+    with pytest.raises(HTTPException) as exc_info:
+        await shop.purchase_with_ton(
+            request=PurchaseRequest(item_type="boosts", item_id="vip_forever"),
+            user=user,
+            db=db_session,
+        )
 
-    async def matched(**_: object) -> dict[str, object]:
-        return {"tx_hash": "vip-hash-1", "amount": int(Decimal("50") * 1_000_000_000)}
-
-    monkeypatch.setattr(shop, "verify_ton_transaction", matched)
-
-    first = await shop.confirm_ton_transaction(
-        tx_id=payment.transaction_id,
-        user=user,
-        db=db_session,
-    )
-    second = await shop.confirm_ton_transaction(
-        tx_id=payment.transaction_id,
-        user=user,
-        db=db_session,
-    )
-
-    await db_session.refresh(user)
-
-    assert first["status"] == "completed"
-    assert second == first
-    assert user.is_premium is True
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Only extra_life is available for TON purchases"
 
 
 @pytest.mark.asyncio
-async def test_purchase_with_ton_rejects_already_owned_non_consumable(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_purchase_with_ton_rejects_unsupported_theme_item(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     user = await create_user(db_session, telegram_id=1007)
     monkeypatch.setattr(shop.settings, "TON_PAYMENTS_ENABLED", True)
     monkeypatch.setattr(shop.settings, "TON_API_KEY", "test-ton-key")
     monkeypatch.setattr(shop.settings, "TON_WALLET_ADDRESS", "EQ_MERCHANT")
-
-    db_session.add(Inventory(user_id=user.id, item_type="themes", item_id="space"))
-    await db_session.commit()
 
     with pytest.raises(HTTPException) as exc_info:
         await shop.purchase_with_ton(
@@ -271,8 +253,8 @@ async def test_purchase_with_ton_rejects_already_owned_non_consumable(db_session
             db=db_session,
         )
 
-    assert exc_info.value.status_code == 409
-    assert exc_info.value.detail == "Item already owned"
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Only extra_life is available for TON purchases"
 
 
 @pytest.mark.asyncio
@@ -298,3 +280,20 @@ async def test_catalog_hides_ton_items_when_payments_disabled(db_session: AsyncS
 
     assert catalog.arrow_skins == []
     assert catalog.themes == []
+
+
+@pytest.mark.asyncio
+async def test_catalog_exposes_only_extra_life_upgrade_when_ton_enabled(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await create_user(db_session, telegram_id=1010)
+    monkeypatch.setattr(shop.settings, "TON_PAYMENTS_ENABLED", True)
+    monkeypatch.setattr(shop.settings, "TON_API_KEY", "test-ton-key")
+    monkeypatch.setattr(shop.settings, "TON_WALLET_ADDRESS", "EQ_MERCHANT")
+
+    catalog = await shop.get_catalog(user=user, db=db_session)
+
+    assert catalog.arrow_skins == []
+    assert catalog.themes == []
+    assert [item.id for item in catalog.upgrades] == ["extra_life"]

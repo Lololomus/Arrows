@@ -331,7 +331,7 @@ export function ShopScreen() {
   const hasStoreContent = items.length > 0 || tonItems.length > 0 || upgrades.length > 0;
 
   return (
-    <div className="relative h-full overflow-hidden px-4 pb-nav pt-3">
+    <div className="custom-scrollbar relative h-full overflow-y-auto px-4 pb-nav pt-3">
       <AdaptiveParticles
         variant="bg"
         tone="neutral"
@@ -340,7 +340,7 @@ export function ShopScreen() {
         className="z-0 opacity-22"
       />
 
-      <div className="relative z-10 flex h-full flex-col">
+      <div className="relative z-10">
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -426,7 +426,7 @@ export function ShopScreen() {
             </div>
           </div>
         ) : (
-          <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto pb-6">
+          <div className="pb-6">
             {tonStatus && (
               <div className="mb-3 rounded-2xl border border-blue-400/20 bg-blue-500/10 px-4 py-3 text-sm text-blue-200">
                 {tonStatus}
@@ -456,71 +456,72 @@ export function ShopScreen() {
             </section>
 
             {upgrades.length > 0 && (
-              <div className="mt-5">
-                <div className="mb-3 flex items-center gap-2">
-                  <Heart size={16} className="text-pink-400" />
-                  <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-pink-300/80">Улучшения</span>
-                </div>
+              <section className="mt-5 space-y-4">
+                <div className="pl-1 text-sm font-bold uppercase tracking-[0.18em] text-[#677086]">Улучшения</div>
 
-                <div className="space-y-3">
-                  {upgrades.map((item) => {
-                    const purchased = item.purchasedCount ?? 0;
-                    const maxP = item.maxPurchases ?? 2;
-                    const isMaxed = purchased >= maxP;
-                    const currentLives = 3 + (user?.extraLives ?? 0);
-                    const noWallet = !user?.walletAddress;
+                {upgrades.map((item) => {
+                  const purchased = item.purchasedCount ?? 0;
+                  const maxP = item.maxPurchases ?? 2;
+                  const isMaxed = purchased >= maxP;
+                  const currentLives = 3 + (user?.extraLives ?? 0);
+                  const noWallet = !user?.walletAddress;
 
-                    return (
-                      <motion.div
-                        key={item.id}
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="rounded-3xl border border-white/10 bg-[#14182b]/78 p-5 shadow-[0_16px_36px_rgba(0,0,0,0.24)] backdrop-blur-xl"
-                      >
-                        <div className="flex items-start gap-4">
-                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-pink-400/20 bg-pink-400/10 text-2xl">
-                            {item.preview || '💖'}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <h3 className="text-base font-bold text-white">{item.name} (навсегда)</h3>
-                            <p className="mt-1 text-sm text-[#a7abb8]">
-                              Сейчас {currentLives}/5 жизней на старте уровня
-                            </p>
-                            <div className="mt-2 flex items-center gap-2">
-                              <div className="flex gap-1">
-                                {Array.from({ length: maxP }, (_, i) => (
-                                  <div
-                                    key={i}
-                                    className={`h-2 w-8 rounded-full ${i < purchased ? 'bg-pink-400' : 'bg-white/10'}`}
-                                  />
-                                ))}
-                              </div>
-                              <span className="text-xs text-[#677086]">Куплено {purchased}/{maxP}</span>
+                  return (
+                    <motion.section
+                      key={item.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="rounded-[24px] border border-white/5 bg-[#18181b]/60 p-5 backdrop-blur-md"
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-pink-500/20 bg-pink-500/10">
+                          <Heart size={24} className="text-pink-400" strokeWidth={2.5} />
+                        </div>
+                        <div className="min-w-0">
+                          <h2 className="text-xl font-bold text-[#f7f8fb]">{item.name} (навсегда)</h2>
+                          <p className="mt-1 text-sm leading-relaxed text-[#a7abb8]">
+                            Увеличивает стартовые жизни. Сейчас {currentLives}/5.
+                          </p>
+                          <div className="mt-2 flex items-center gap-2">
+                            <div className="flex gap-1">
+                              {Array.from({ length: maxP }, (_, i) => (
+                                <div
+                                  key={i}
+                                  className={`h-1.5 w-8 rounded-full ${i < purchased ? 'bg-pink-400' : 'bg-white/10'}`}
+                                />
+                              ))}
                             </div>
+                            <span className="text-xs text-[#677086]">{purchased}/{maxP}</span>
                           </div>
                         </div>
+                      </div>
 
-                        <div className="mt-4">
-                          <button
-                            type="button"
-                            onClick={() => void handleTonPurchase(item)}
-                            disabled={!!purchasingId || isMaxed || noWallet}
-                            className="w-full rounded-2xl bg-gradient-to-r from-pink-500 to-rose-600 px-4 py-3 text-sm font-black text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {isMaxed
-                              ? 'Максимум'
-                              : noWallet
-                                ? 'Подключите кошелёк'
-                                : purchasingId === item.id
-                                  ? '...'
-                                  : `${item.priceTon} TON`}
-                          </button>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              </div>
+                      <div className="mt-6 flex items-center">
+                        <button
+                          type="button"
+                          onClick={() => void handleTonPurchase(item)}
+                          disabled={!!purchasingId || isMaxed || noWallet}
+                          className="relative flex h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-pink-500 font-bold text-white transition-all hover:bg-pink-400 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+                        >
+                          {purchasingId === item.id ? (
+                            <span className="animate-pulse">Обработка...</span>
+                          ) : isMaxed ? (
+                            <span>Максимум</span>
+                          ) : noWallet ? (
+                            <span>Подключите кошелёк</span>
+                          ) : (
+                            <>
+                              <span>Купить</span>
+                              <div className="mx-1 h-4 w-px bg-black/20" />
+                              <span>{item.priceTon} TON</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </motion.section>
+                  );
+                })}
+              </section>
             )}
 
             {tonItems.length > 0 && (

@@ -44,6 +44,7 @@ ARROW_SKINS = [
 ]
 
 BETA_VISIBLE_BOOST_IDS = {"hints_1", "revive_1"}
+TON_VISIBLE_UPGRADE_IDS = {"extra_life"}
 
 # Темы оформления
 THEMES = [
@@ -125,11 +126,11 @@ async def get_catalog(
             owned=(item_type, item["id"]) in owned_items
         )
     
-    # Build upgrades section (permanent upgrades for TON)
+    # Build upgrades section (currently only extra_life is exposed for TON)
     upgrade_items = []
     if ton_payments_enabled():
         for b in BOOSTS:
-            if b.get("max_purchases") is not None:
+            if b["id"] in TON_VISIBLE_UPGRADE_IDS and b.get("max_purchases") is not None:
                 max_p = b["max_purchases"]
                 purchased = user.extra_lives if b["id"] == "extra_life" else 0
                 upgrade_items.append(ShopItem(
@@ -143,16 +144,9 @@ async def get_catalog(
                 ))
 
     return ShopCatalog(
-        arrow_skins=[
-            make_shop_item(s, "arrow_skins")
-            for s in ARROW_SKINS
-            if ton_payments_enabled() and s.get("price_ton") is not None
-        ],
-        themes=[
-            make_shop_item(t, "themes")
-            for t in THEMES
-            if ton_payments_enabled() and t.get("price_ton") is not None
-        ],
+        # Premium skins/themes are temporarily hidden from catalog.
+        arrow_skins=[],
+        themes=[],
         boosts=[
             make_shop_item(b, "boosts")
             for b in BOOSTS
@@ -287,61 +281,31 @@ async def purchase_with_ton(
     if price is None:
         raise HTTPException(status_code=400, detail="Item not available for TON")
 
-    # Permanent upgrade: check max purchases
-    if request.item_type == "boosts" and request.item_id == "extra_life":
-        if user.extra_lives >= 2:
-            raise HTTPException(status_code=409, detail="Maximum extra lives already purchased")
-        # Reuse existing pending transaction
-        pending = await db.execute(
-            select(Transaction).where(
-                Transaction.user_id == user.id,
-                Transaction.item_type == "boosts",
-                Transaction.item_id == "extra_life",
-                Transaction.status == "pending",
-            )
-        )
-        existing_tx = pending.scalar_one_or_none()
-        if existing_tx:
-            comment = f"arrow_{user.id}_{existing_tx.id}"
-            return TonPaymentInfo(
-                transaction_id=existing_tx.id,
-                address=settings.TON_WALLET_ADDRESS,
-                amount=price,
-                amount_nano=str(int(price * 1_000_000_000)),
-                comment=comment,
-            )
+    if request.item_type != "boosts" or request.item_id not in TON_VISIBLE_UPGRADE_IDS:
+        raise HTTPException(status_code=403, detail="Only extra_life is available for TON purchases")
 
-    # Non-consumable: check if already owned
-    if request.item_type != "boosts":
-        existing = await db.execute(
-            select(Inventory).where(
-                Inventory.user_id == user.id,
-                Inventory.item_type == request.item_type,
-                Inventory.item_id == request.item_id,
-            )
-        )
-        if existing.scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="Item already owned")
+    if user.extra_lives >= 2:
+        raise HTTPException(status_code=409, detail="Maximum extra lives already purchased")
 
-        # Also check for existing pending tx to avoid duplicates
-        pending = await db.execute(
-            select(Transaction).where(
-                Transaction.user_id == user.id,
-                Transaction.item_type == request.item_type,
-                Transaction.item_id == request.item_id,
-                Transaction.status == "pending",
-            )
+    # Reuse existing pending transaction
+    pending = await db.execute(
+        select(Transaction).where(
+            Transaction.user_id == user.id,
+            Transaction.item_type == "boosts",
+            Transaction.item_id == "extra_life",
+            Transaction.status == "pending",
         )
-        existing_tx = pending.scalar_one_or_none()
-        if existing_tx:
-            comment = f"arrow_{user.id}_{existing_tx.id}"
-            return TonPaymentInfo(
-                transaction_id=existing_tx.id,
-                address=settings.TON_WALLET_ADDRESS,
-                amount=price,
-                amount_nano=str(int(price * 1_000_000_000)),
-                comment=comment
-            )
+    )
+    existing_tx = pending.scalar_one_or_none()
+    if existing_tx:
+        comment = f"arrow_{user.id}_{existing_tx.id}"
+        return TonPaymentInfo(
+            transaction_id=existing_tx.id,
+            address=settings.TON_WALLET_ADDRESS,
+            amount=price,
+            amount_nano=str(int(price * 1_000_000_000)),
+            comment=comment,
+        )
 
     # Создаём pending транзакцию
     tx = Transaction(
