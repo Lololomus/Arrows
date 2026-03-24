@@ -316,11 +316,16 @@ export function ShopScreen() {
       setTonStatus(null);
       setPurchaseError('Транзакция отправлена, но подтверждение ещё не получено. Проверьте позже.');
     } catch (errorValue) {
-      const message = errorValue instanceof Error ? errorValue.message : '';
-      if (message.includes('Interrupted') || message.includes('cancel')) {
+      console.error('[TON purchase error]', errorValue);
+      const message = errorValue instanceof Error
+        ? errorValue.message
+        : typeof errorValue === 'string'
+          ? errorValue
+          : JSON.stringify(errorValue);
+      if (message.includes('Interrupted') || message.includes('cancel') || message.includes('Reject') || message.includes('reject')) {
         setTonStatus(null);
       } else {
-        setPurchaseError('Ошибка при отправке транзакции');
+        setPurchaseError(`Ошибка: ${message || 'неизвестная ошибка'}`);
         setTonStatus(null);
       }
     } finally {
@@ -463,7 +468,6 @@ export function ShopScreen() {
                   const purchased = item.purchasedCount ?? 0;
                   const maxP = item.maxPurchases ?? 2;
                   const isMaxed = purchased >= maxP;
-                  const currentLives = 3 + (user?.extraLives ?? 0);
                   const noWallet = !user?.walletAddress;
 
                   return (
@@ -478,10 +482,7 @@ export function ShopScreen() {
                           <Heart size={24} className="text-pink-400" strokeWidth={2.5} />
                         </div>
                         <div className="min-w-0">
-                          <h2 className="text-xl font-bold text-[#f7f8fb]">{item.name} (навсегда)</h2>
-                          <p className="mt-1 text-sm leading-relaxed text-[#a7abb8]">
-                            Увеличивает стартовые жизни. Сейчас {currentLives}/5.
-                          </p>
+                          <h2 className="text-xl font-bold text-[#f7f8fb]">{item.name}</h2>
                           <div className="mt-2 flex items-center gap-2">
                             <div className="flex gap-1">
                               {Array.from({ length: maxP }, (_, i) => (
