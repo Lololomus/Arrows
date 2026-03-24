@@ -27,7 +27,7 @@ function buildCommentPayload(comment: string): string {
   const absentCount = 0;
   const totalCellSize = 2 + dataBytes.length;
 
-  const boc = new Uint8Array(4 + 1 + 5 + 2 + dataBytes.length);
+  const boc = new Uint8Array(4 + 1 + 5 + 2 + 1 + dataBytes.length); // 13 header bytes + data
   let offset = 0;
 
   boc.set(bocMagic, offset); offset += 4;
