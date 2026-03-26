@@ -13,7 +13,7 @@ from app.schemas import (
     FragmentDropUpdateRequest,
     ResolveClaimRequest,
 )
-from app.services import fragment_processor
+from app.services import fragment_gifts, fragment_processor
 
 
 @pytest.fixture
@@ -145,6 +145,56 @@ def build_bot_factory(*, gifts: list[SimpleNamespace]):
             return SimpleNamespace(gifts=gifts)
 
     return FakeBot
+
+
+@pytest.mark.asyncio
+async def test_send_gift_to_user_handles_missing_attempts_default_on_first_send(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await create_user(db_session, telegram_id=2100, current_level=6)
+    drop = await create_drop(
+        db_session,
+        slug="first_send_attempts",
+        telegram_gift_id="gift-first-send",
+        gift_star_cost=25,
+        total_stock=1,
+        condition_target=5,
+    )
+    claim = FragmentClaim(
+        drop_id=drop.id,
+        user_id=user.id,
+        telegram_gift_id=drop.telegram_gift_id,
+        stars_cost=drop.gift_star_cost,
+        status="pending",
+        attempts=None,
+    )
+    db_session.add(claim)
+    drop.reserved_stock = 1
+    await db_session.commit()
+    await db_session.refresh(claim)
+    await db_session.refresh(drop)
+
+    async def fake_send_gift(*, bot_token: str, user_id: int, gift_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(fragment_gifts.settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(fragment_gifts.settings, "TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr(fragment_gifts, "send_gift", fake_send_gift)
+
+    status = await fragment_gifts.send_gift_to_user(claim, drop, user, db_session)
+
+    await db_session.refresh(claim)
+    await db_session.refresh(drop)
+    ledger_entries = (await db_session.execute(select(BotStarsLedger))).scalars().all()
+
+    assert status == "delivered"
+    assert claim.status == "delivered"
+    assert claim.attempts == 1
+    assert drop.reserved_stock == 0
+    assert drop.delivered_stock == 1
+    assert len(ledger_entries) == 1
+    assert ledger_entries[0].event_type == "gift_sent"
 
 
 @pytest.mark.asyncio
@@ -346,11 +396,10 @@ async def test_sync_gift_catalog_deactivates_drop_when_gift_missing(
         )
 
     monkeypatch.setattr(fragment_processor, "AsyncSessionLocal", session_factory)
-    monkeypatch.setattr(
-        fragment_processor,
-        "Bot",
-        build_bot_factory(gifts=[SimpleNamespace(id="gift-other", star_count=10)]),
-    )
+    async def fake_get_available_gifts(*, bot_token: str):
+        return [{"id": "gift-other", "star_count": 10}]
+
+    monkeypatch.setattr(fragment_processor, "get_available_gifts", fake_get_available_gifts)
     monkeypatch.setattr(fragment_processor.settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(fragment_processor.settings, "TELEGRAM_BOT_TOKEN", "test-token")
 
@@ -379,11 +428,10 @@ async def test_sync_gift_catalog_deactivates_drop_on_price_mismatch(
         )
 
     monkeypatch.setattr(fragment_processor, "AsyncSessionLocal", session_factory)
-    monkeypatch.setattr(
-        fragment_processor,
-        "Bot",
-        build_bot_factory(gifts=[SimpleNamespace(id="gift-price-mismatch", star_count=12)]),
-    )
+    async def fake_get_available_gifts(*, bot_token: str):
+        return [{"id": "gift-price-mismatch", "star_count": 12}]
+
+    monkeypatch.setattr(fragment_processor, "get_available_gifts", fake_get_available_gifts)
     monkeypatch.setattr(fragment_processor.settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(fragment_processor.settings, "TELEGRAM_BOT_TOKEN", "test-token")
 
