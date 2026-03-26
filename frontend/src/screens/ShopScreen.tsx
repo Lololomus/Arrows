@@ -370,7 +370,7 @@ export function ShopScreen() {
   const hasStoreContent = items.length > 0 || tonItems.length > 0 || upgrades.length > 0;
 
   return (
-    <div className="custom-scrollbar relative h-full overflow-y-auto px-4 pb-nav pt-3">
+    <div className="custom-scrollbar relative h-full overflow-y-auto px-4 pb-nav pt-6">
       <AdaptiveParticles
         variant="bg"
         tone="neutral"
@@ -380,6 +380,18 @@ export function ShopScreen() {
       />
 
       <div className="relative z-10">
+        <HeaderBar
+          balance={coinBalance}
+          walletMode={walletController.walletMode}
+          walletDisplay={walletController.walletDisplay}
+          walletError={walletController.walletError}
+          showDisconnectAction={walletController.showDisconnectAction}
+          onWalletClick={walletController.onWalletClick}
+          onDisconnect={walletController.onDisconnect}
+          animated={false}
+          className="mt-2 mb-3 shrink-0"
+        />
+
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -390,46 +402,27 @@ export function ShopScreen() {
             Beta Shop
           </div>
 
-          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div className="max-w-[18rem]">
-              <h1 className="text-[34px] font-black leading-[0.95] tracking-tight text-[#f7f8fb]">
-                Магазин бустов
-              </h1>
-              <p className="mt-2 text-[15px] leading-7 text-[#d2d7e5]">
-                Подсказки и возрождения за монеты. Выбирайте количество и покупайте сразу.
-              </p>
-            </div>
+          <p className="mt-3 text-[15px] leading-7 text-[#d2d7e5]">
+            Здесь вы можете купить различные улучшения для игры
+          </p>
 
-            <div className="grid grid-cols-2 gap-2 sm:min-w-[220px]">
-              <div className="rounded-2xl border border-cyan-500/15 bg-cyan-500/[0.05] px-3 py-3">
-                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#8bb8cb]">Подсказки</div>
-                <div className="mt-1 flex items-center gap-2 text-xl font-black text-[#f7f8fb]">
-                  <Lightbulb size={15} className="text-cyan-300" />
-                  {hintBalance}
-                </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="rounded-2xl border border-cyan-500/15 bg-cyan-500/[0.05] px-3 py-3">
+              <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#8bb8cb]">Подсказки</div>
+              <div className="mt-1 flex items-center gap-2 text-xl font-black text-[#f7f8fb]">
+                <Lightbulb size={15} className="text-cyan-300" />
+                {hintBalance}
               </div>
-              <div className="rounded-2xl border border-rose-500/15 bg-rose-500/[0.05] px-3 py-3">
-                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#d2a1b1]">Возрождения</div>
-                <div className="mt-1 flex items-center gap-2 text-xl font-black text-[#f7f8fb]">
-                  <Heart size={15} className="text-rose-300" />
-                  {reviveBalance}
-                </div>
+            </div>
+            <div className="rounded-2xl border border-rose-500/15 bg-rose-500/[0.05] px-3 py-3">
+              <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#d2a1b1]">Возрождения</div>
+              <div className="mt-1 flex items-center gap-2 text-xl font-black text-[#f7f8fb]">
+                <Heart size={15} className="text-rose-300" />
+                {reviveBalance}
               </div>
             </div>
           </div>
         </motion.div>
-
-        <HeaderBar
-          balance={coinBalance}
-          walletMode={walletController.walletMode}
-          walletDisplay={walletController.walletDisplay}
-          walletError={walletController.walletError}
-          showDisconnectAction={walletController.showDisconnectAction}
-          onWalletClick={walletController.onWalletClick}
-          onDisconnect={walletController.onDisconnect}
-          animated={false}
-          className="mb-3 shrink-0"
-        />
 
         {purchaseError && (
           <div className="mb-3 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">

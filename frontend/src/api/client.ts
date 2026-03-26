@@ -96,6 +96,10 @@ interface RawTaskTier {
   target: number;
   reward_coins?: number;
   rewardCoins?: number;
+  reward_hints?: number;
+  rewardHints?: number;
+  reward_revives?: number;
+  rewardRevives?: number;
   title: string;
   claimed: boolean;
 }
@@ -134,6 +138,14 @@ interface RawTaskClaimResponse {
   coins: number;
   reward_coins?: number;
   rewardCoins?: number;
+  reward_hints?: number;
+  rewardHints?: number;
+  reward_revives?: number;
+  rewardRevives?: number;
+  hint_balance?: number;
+  hintBalance?: number;
+  revive_balance?: number;
+  reviveBalance?: number;
   task_id?: string;
   taskId?: string;
   task_status?: TaskDto['status'];
@@ -181,6 +193,8 @@ function normalizeTask(raw: RawTaskDto): TaskDto {
       claimId: tier.claimId ?? tier.claim_id ?? '',
       target: tier.target,
       rewardCoins: tier.rewardCoins ?? tier.reward_coins ?? 0,
+      rewardHints: tier.rewardHints ?? tier.reward_hints ?? 0,
+      rewardRevives: tier.rewardRevives ?? tier.reward_revives ?? 0,
       title: tier.title,
       claimed: tier.claimed,
     })),
@@ -207,6 +221,10 @@ function normalizeTaskClaimResponse(raw: RawTaskClaimResponse): TaskClaimRespons
     claimId: raw.claimId ?? raw.claim_id ?? '',
     coins: raw.coins,
     rewardCoins: raw.rewardCoins ?? raw.reward_coins ?? 0,
+    rewardHints: raw.rewardHints ?? raw.reward_hints ?? 0,
+    rewardRevives: raw.rewardRevives ?? raw.reward_revives ?? 0,
+    hintBalance: raw.hintBalance ?? raw.hint_balance,
+    reviveBalance: raw.reviveBalance ?? raw.revive_balance,
     taskId: raw.taskId ?? raw.task_id ?? 'official_channel',
     taskStatus: raw.taskStatus ?? raw.task_status ?? 'completed',
     nextTierIndex: raw.nextTierIndex ?? raw.next_tier_index ?? null,
@@ -1189,6 +1207,125 @@ export function sendAuthorizedKeepalive(endpoint: string, body: unknown): void {
     keepalive: true,
   }).catch(() => undefined);
 }
+
+// ============================================
+// FRAGMENTS API
+// ============================================
+
+interface RawFragmentDropClaim {
+  status: string;
+  created_at: string;
+  delivered_at: string | null;
+  failure_reason: string | null;
+}
+
+interface RawFragmentDrop {
+  id: number;
+  slug: string;
+  title: string;
+  description: string | null;
+  emoji: string;
+  condition_type: string;
+  condition_target: number;
+  remaining_stock: number;
+  total_stock: number;
+  gift_star_cost: number;
+  progress: number;
+  status: string;
+  claim: RawFragmentDropClaim | null;
+}
+
+export interface FragmentDropClaim {
+  status: string;
+  createdAt: string;
+  deliveredAt: string | null;
+  failureReason: string | null;
+}
+
+export interface FragmentDropResponse {
+  id: number;
+  slug: string;
+  title: string;
+  description: string | null;
+  emoji: string;
+  conditionType: string;
+  conditionTarget: number;
+  remainingStock: number;
+  totalStock: number;
+  giftStarCost: number;
+  progress: number;
+  status: string;
+  claim: FragmentDropClaim | null;
+}
+
+export interface FragmentClaimResult {
+  success: boolean;
+  claimStatus: string;
+  message: string;
+}
+
+export interface FragmentClaimStatusResult {
+  claimStatus: string;
+  failureReason: string | null;
+  attempts: number;
+  createdAt: string;
+  deliveredAt: string | null;
+}
+
+function normalizeFragmentDrop(raw: RawFragmentDrop): FragmentDropResponse {
+  return {
+    id: raw.id,
+    slug: raw.slug,
+    title: raw.title,
+    description: raw.description,
+    emoji: raw.emoji,
+    conditionType: raw.condition_type,
+    conditionTarget: raw.condition_target,
+    remainingStock: raw.remaining_stock,
+    totalStock: raw.total_stock,
+    giftStarCost: raw.gift_star_cost,
+    progress: raw.progress,
+    status: raw.status,
+    claim: raw.claim
+      ? {
+          status: raw.claim.status,
+          createdAt: raw.claim.created_at,
+          deliveredAt: raw.claim.delivered_at,
+          failureReason: raw.claim.failure_reason,
+        }
+      : null,
+  };
+}
+
+export const fragmentsApi = {
+  getDrops: async (): Promise<FragmentDropResponse[]> => {
+    const raw = await request<{ drops: RawFragmentDrop[] }>(API_ENDPOINTS.fragments.drops);
+    return (raw.drops ?? []).map(normalizeFragmentDrop);
+  },
+
+  claimDrop: async (dropId: number): Promise<FragmentClaimResult> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.fragments.claim(dropId), {
+      method: 'POST',
+    });
+    return {
+      success: Boolean(raw.success),
+      claimStatus: String(raw.claim_status ?? ''),
+      message: String(raw.message ?? ''),
+    };
+  },
+
+  getClaimStatus: async (dropId: number): Promise<FragmentClaimStatusResult> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.fragments.claimStatus(dropId));
+    return {
+      claimStatus: String(raw.claim_status ?? ''),
+      failureReason: raw.failure_reason != null ? String(raw.failure_reason) : null,
+      attempts: Number(raw.attempts ?? 0),
+      createdAt: String(raw.created_at ?? ''),
+      deliveredAt: raw.delivered_at != null ? String(raw.delivered_at) : null,
+    };
+  },
+};
+
 
 export const checkApiHealth = async (): Promise<boolean> => {
   try {

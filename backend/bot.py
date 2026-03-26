@@ -11,9 +11,9 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, WebAppInfo
 from sqlalchemy import select
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -22,6 +22,16 @@ from app.config import settings
 from app.database import AsyncSessionLocal, close_redis
 from app.models import User
 from app.services.ad_rewards import utcnow
+from app.services.admin_stars_topup import (
+    ADMIN_TOPUP_PACKS,
+    build_admin_topup_payload,
+    get_admin_telegram_id,
+    is_admin_telegram_id,
+    normalize_topup_amount,
+    parse_admin_topup_payload,
+    record_admin_stars_topup,
+    validate_admin_topup_checkout,
+)
 from app.services.bot_notifications import notify_spin_ready, notify_spin_streak_reset, notify_streak_warning
 from app.services.referrals import extract_referral_code, store_pending_referral_code
 
@@ -93,6 +103,42 @@ def build_info_keyboard() -> InlineKeyboardMarkup:
             ],
         ]
     )
+
+
+def build_admin_topup_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"{amount} Stars",
+                    callback_data=f"admin_topup_select:{amount}",
+                )
+            ]
+            for amount in ADMIN_TOPUP_PACKS
+        ]
+    )
+
+
+async def send_admin_topup_invoice(chat_id: int, amount: int) -> None:
+    await bot.send_invoice(
+        chat_id=chat_id,
+        title="Gift fund top-up",
+        description=f"Top up the bot Stars balance by {amount} Stars.",
+        payload=build_admin_topup_payload(amount),
+        currency="XTR",
+        prices=[LabeledPrice(label="Gift fund", amount=amount)],
+    )
+
+
+def parse_topup_amount_from_command(text: str | None) -> int | None:
+    if not text:
+        return None
+
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        return None
+
+    return normalize_topup_amount(parts[1])
 
 
 @dp.message(Command("start"))
@@ -171,6 +217,102 @@ async def cmd_stats(message: types.Message):
     )
 
     await message.answer(stats_text, parse_mode="HTML")
+
+
+@dp.message(Command("topup_stars"))
+async def cmd_topup_stars(message: types.Message):
+    """Admin-only command to top up the bot Stars balance."""
+    if get_admin_telegram_id() is None:
+        await message.answer("ADMIN_TELEGRAM_ID is not configured.")
+        return
+
+    if not is_admin_telegram_id(message.from_user.id if message.from_user else None):
+        await message.answer("Access denied.")
+        return
+
+    amount = parse_topup_amount_from_command(message.text)
+    if amount is None:
+        supported = ", ".join(str(value) for value in ADMIN_TOPUP_PACKS)
+        await message.answer(
+            f"Choose a Stars top-up amount ({supported}) or use /topup_stars <amount>.",
+            reply_markup=build_admin_topup_keyboard(),
+        )
+        return
+
+    await send_admin_topup_invoice(message.chat.id, amount)
+
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("admin_topup_select:"))
+async def process_admin_topup(callback: types.CallbackQuery):
+    """Send an admin-only Stars invoice from an inline button."""
+    if get_admin_telegram_id() is None:
+        await callback.answer("ADMIN_TELEGRAM_ID is not configured.", show_alert=True)
+        return
+
+    if not is_admin_telegram_id(callback.from_user.id):
+        await callback.answer("Access denied.", show_alert=True)
+        return
+
+    amount = normalize_topup_amount(callback.data.split(":", 1)[1] if callback.data else None)
+    if amount is None:
+        await callback.answer("Unsupported amount.", show_alert=True)
+        return
+
+    chat_id = callback.message.chat.id if callback.message else callback.from_user.id
+    await send_admin_topup_invoice(chat_id, amount)
+    await callback.answer()
+
+
+@dp.pre_checkout_query()
+async def process_pre_checkout_query(pre_checkout_query: types.PreCheckoutQuery):
+    """Allow checkout only for the configured admin on admin top-up invoices."""
+    ok, error_message = validate_admin_topup_checkout(
+        pre_checkout_query.from_user.id,
+        pre_checkout_query.invoice_payload,
+    )
+    await bot.answer_pre_checkout_query(
+        pre_checkout_query.id,
+        ok=ok,
+        error_message=error_message,
+    )
+
+
+@dp.message(F.successful_payment)
+async def process_successful_payment(message: types.Message):
+    """Persist successful admin Stars top-ups into the internal ledger."""
+    payment = message.successful_payment
+    if payment is None:
+        return
+
+    amount = parse_admin_topup_payload(payment.invoice_payload)
+    if amount is None:
+        return
+
+    if not is_admin_telegram_id(message.from_user.id if message.from_user else None):
+        logger.warning(
+            "Ignoring admin Stars top-up payment from non-admin user_id=%s",
+            message.from_user.id if message.from_user else None,
+        )
+        return
+
+    async with AsyncSessionLocal() as db:
+        processed, new_balance = await record_admin_stars_topup(
+            db,
+            telegram_user_id=message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+            amount=amount,
+            charge_id=payment.telegram_payment_charge_id or payment.provider_payment_charge_id or "",
+        )
+
+    if processed:
+        await message.answer(
+            f"Bot Stars balance topped up by {amount}. Current ledger balance: {new_balance}."
+        )
+    else:
+        await message.answer(
+            f"This payment was already processed. Current ledger balance: {new_balance}."
+        )
 
 
 def _fallback_last_spin_at(user: User) -> datetime | None:

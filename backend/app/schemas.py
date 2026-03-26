@@ -363,6 +363,8 @@ class TaskTierDto(BaseModel):
     claim_id: str
     target: int
     reward_coins: int
+    reward_hints: int = 0
+    reward_revives: int = 0
     title: str
     claimed: bool
 
@@ -399,6 +401,10 @@ class TaskClaimResponse(BaseModel):
     claim_id: str
     coins: int
     reward_coins: int
+    reward_hints: int = 0
+    reward_revives: int = 0
+    hint_balance: Optional[int] = None
+    revive_balance: Optional[int] = None
     task_id: str
     task_status: TaskStatus
     next_tier_index: Optional[int] = None
@@ -530,3 +536,94 @@ class ReviveStatusResponse(BaseModel):
     used: int
     limit: int
     remaining: int
+
+
+# ============================================
+# FRAGMENT DROPS
+# ============================================
+
+class FragmentDropClaimDto(BaseModel):
+    """Состояние клейма дропа для конкретного пользователя."""
+    status: str
+    created_at: str
+    delivered_at: Optional[str] = None
+    failure_reason: Optional[str] = None
+
+
+FragmentDropStatus = Literal[
+    "in_progress", "claimable", "claiming", "delivered",
+    "failed", "out_of_stock",
+]
+
+
+class FragmentDropDto(BaseModel):
+    """Дроп-кампания с прогрессом пользователя."""
+    id: int
+    slug: str
+    title: str
+    description: Optional[str] = None
+    emoji: str
+    condition_type: str
+    condition_target: int
+    remaining_stock: int
+    total_stock: int
+    gift_star_cost: int
+    progress: int
+    status: FragmentDropStatus
+    claim: Optional[FragmentDropClaimDto] = None
+
+
+class FragmentDropsResponse(BaseModel):
+    """Ответ списка дропов."""
+    drops: List[FragmentDropDto]
+
+
+class FragmentClaimResponse(BaseModel):
+    """Ответ на запрос клейма подарка."""
+    success: bool
+    claim_status: str
+    message: str
+
+
+class FragmentClaimStatusResponse(BaseModel):
+    """Статус доставки подарка (для поллинга)."""
+    claim_status: str
+    failure_reason: Optional[str] = None
+    attempts: int
+    created_at: str
+    delivered_at: Optional[str] = None
+
+
+# ── Admin Fragments ──
+
+class FragmentDropCreateRequest(BaseModel):
+    """Создание новой кампании дропа."""
+    slug: str = Field(min_length=1, max_length=64, pattern=r'^[a-z0-9_]+$')
+    title: str = Field(min_length=1, max_length=256)
+    description: Optional[str] = None
+    emoji: str = Field(default="🎁", max_length=16)
+    telegram_gift_id: str
+    gift_star_cost: int = Field(gt=0)
+    condition_type: Literal["arcade_levels", "friends_confirmed"]
+    condition_target: int = Field(gt=0)
+    total_stock: int = Field(gt=0)
+
+
+class FragmentDropUpdateRequest(BaseModel):
+    """Обновление кампании."""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    emoji: Optional[str] = None
+    gift_star_cost: Optional[int] = Field(default=None, gt=0)
+    total_stock: Optional[int] = Field(default=None, gt=0)
+    is_active: Optional[bool] = None
+
+
+class AddStockRequest(BaseModel):
+    """Добавление стока к существующей кампании."""
+    additional_stock: int = Field(gt=0)
+
+
+class ResolveClaimRequest(BaseModel):
+    """Ручной резолв зависшего клейма."""
+    action: Literal["mark_delivered", "mark_failed", "retry"]

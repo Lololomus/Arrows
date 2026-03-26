@@ -261,6 +261,8 @@ export interface TaskTier {
   claimId: string;
   target: number;
   rewardCoins: number;
+  rewardHints: number;
+  rewardRevives: number;
   title: string;
   claimed: boolean;
 }
@@ -293,6 +295,10 @@ export interface TaskClaimResponse {
   claimId: string;
   coins: number;
   rewardCoins: number;
+  rewardHints: number;
+  rewardRevives: number;
+  hintBalance?: number;
+  reviveBalance?: number;
   taskId: string;
   taskStatus: TaskStatus;
   nextTierIndex: number | null;
@@ -507,6 +513,25 @@ export interface DependencyGraph {
   nodes: Map<string, Arrow>;
   edges: Map<string, string[]>;  // arrowId -> [blockedByIds]
   reverseEdges: Map<string, string[]>;  // arrowId -> [blocksIds]
+}
+
+// ============================================
+// FRAGMENTS / DROPS
+// ============================================
+
+export type FragmentStatus = 'claimable' | 'in_progress' | 'claiming' | 'completed' | 'failed' | 'sold_out';
+
+export interface FragmentDrop {
+  id: string;
+  emoji: string;
+  title: string;
+  subtitle: string;
+  description: string;
+  status: FragmentStatus;
+  totalStock: number;
+  remainingStock: number;
+  progressCurrent?: number;
+  progressTarget?: number;
 }
 
 /** Слой DAG (для визуализации) */

@@ -278,6 +278,11 @@ export const API_ENDPOINTS = {
     devReset: '/spin/dev/reset',
     devSetStreak: '/spin/dev/set-streak',
   },
+  fragments: {
+    drops: '/fragments/drops',
+    claim: (dropId: number) => `/fragments/drops/${dropId}/claim`,
+    claimStatus: (dropId: number) => `/fragments/drops/${dropId}/claim/status`,
+  },
 };
 
 // ============================================

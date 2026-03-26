@@ -206,6 +206,8 @@ def _build_task_dto(
             claim_id=resolved_tier["claim_id"],
             target=resolved_tier["target"],
             reward_coins=resolved_tier["reward_coins"],
+            reward_hints=resolved_tier.get("reward_hints", 0),
+            reward_revives=resolved_tier.get("reward_revives", 0),
             title=resolved_tier["title"],
             claimed=resolved_tier["claim_id"] in claimed_ids,
         )
@@ -384,14 +386,20 @@ async def claim_task(
             detail={"code": "TASK_NOT_READY", "message": "Task requirements are not met yet"},
         )
 
-    user.coins += tier["reward_coins"]
+    reward_coins = int(tier.get("reward_coins", 0))
+    reward_hints = int(tier.get("reward_hints", 0))
+    reward_revives = int(tier.get("reward_revives", 0))
+
+    user.coins += reward_coins
+    user.hint_balance += reward_hints
+    user.revive_balance += reward_revives
 
     db.add(
         TaskClaim(
             user_id=user.id,
             claim_id=claim_id,
             task_group=task["id"],
-            reward_coins=tier["reward_coins"],
+            reward_coins=reward_coins,
         )
     )
     db.add(
@@ -399,7 +407,7 @@ async def claim_task(
             user_id=user.id,
             type="task",
             currency="coins",
-            amount=Decimal(tier["reward_coins"]),
+            amount=Decimal(reward_coins),
             item_type="task",
             item_id=claim_id,
             status="completed",
@@ -422,7 +430,11 @@ async def claim_task(
         success=True,
         claim_id=claim_id,
         coins=user.coins,
-        reward_coins=tier["reward_coins"],
+        reward_coins=reward_coins,
+        reward_hints=reward_hints,
+        reward_revives=reward_revives,
+        hint_balance=user.hint_balance,
+        revive_balance=user.revive_balance,
         task_id=task["id"],
         task_status=updated_task.status,
         next_tier_index=updated_task.next_tier_index,

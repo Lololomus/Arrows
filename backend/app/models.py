@@ -385,3 +385,88 @@ class AdRewardIntent(Base):
         UniqueConstraint("intent_id", name="uq_ad_reward_intents_intent_id"),
     )
 
+
+# ============================================
+# FRAGMENT DROPS (Telegram Gifts)
+# ============================================
+
+class FragmentDrop(Base):
+    """Кампания лимитного дропа — подарок Telegram за выполнение условия."""
+
+    __tablename__ = "fragment_drops"
+
+    id = Column(Integer, primary_key=True)
+    slug = Column(String(64), unique=True, nullable=False, index=True)
+    title = Column(String(256), nullable=False)
+    description = Column(Text, nullable=True)
+    emoji = Column(String(16), nullable=False, server_default="🎁")
+
+    # Telegram Gift
+    telegram_gift_id = Column(String(128), nullable=False)
+    gift_star_cost = Column(Integer, nullable=False)
+
+    # Условие
+    condition_type = Column(String(32), nullable=False)   # arcade_levels | friends_confirmed
+    condition_target = Column(Integer, nullable=False)
+
+    # Сток: available = total_stock - reserved_stock - delivered_stock
+    total_stock = Column(Integer, nullable=False)
+    reserved_stock = Column(Integer, nullable=False, server_default="0")
+    delivered_stock = Column(Integer, nullable=False, server_default="0")
+
+    # Жизненный цикл
+    is_active = Column(Boolean, nullable=False, server_default="true")
+    priority = Column(Integer, nullable=False, server_default="0")
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    claims = relationship("FragmentClaim", back_populates="drop")
+
+
+class FragmentClaim(Base):
+    """Заявка пользователя на получение подарка из дропа."""
+
+    __tablename__ = "fragment_claims"
+
+    id = Column(Integer, primary_key=True)
+    drop_id = Column(Integer, ForeignKey("fragment_drops.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # pending → sending → delivered | failed
+    status = Column(String(16), nullable=False, server_default="pending", index=True)
+
+    # Снапшот на момент клейма
+    telegram_gift_id = Column(String(128), nullable=False)
+    stars_cost = Column(Integer, nullable=False)
+
+    # Ошибки и повторы
+    failure_reason = Column(String(256), nullable=True)
+    attempts = Column(Integer, nullable=False, server_default="0")
+    last_attempt_at = Column(DateTime, nullable=True)
+
+    # Таймстемпы
+    created_at = Column(DateTime, server_default=func.now())
+    delivered_at = Column(DateTime, nullable=True)
+    failed_at = Column(DateTime, nullable=True)
+
+    drop = relationship("FragmentDrop", back_populates="claims")
+
+    __table_args__ = (
+        UniqueConstraint("drop_id", "user_id", name="uq_fragment_claim_drop_user"),
+    )
+
+
+class BotStarsLedger(Base):
+    """Аудит-лог изменений баланса Stars бота."""
+
+    __tablename__ = "bot_stars_ledger"
+
+    id = Column(Integer, primary_key=True)
+    event_type = Column(String(32), nullable=False)       # gift_sent | stars_received | manual_topup | sync
+    amount = Column(Integer, nullable=False)               # + приход, - расход
+    balance_after = Column(Integer, nullable=True)
+
+    fragment_claim_id = Column(Integer, ForeignKey("fragment_claims.id"), nullable=True)
+    note = Column(String(256), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+

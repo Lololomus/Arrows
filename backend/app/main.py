@@ -13,13 +13,14 @@ from slowapi.errors import RateLimitExceeded
 
 from .config import settings
 from .database import init_db, close_redis
-from .api import ads, auth, game, shop, social, spin, tasks, wallet, webhooks
+from .api import ads, admin_fragments, auth, fragments, game, shop, social, spin, tasks, wallet, webhooks
 from .middleware.security import (
     limiter,
     add_security_headers,
     _rate_limit_exceeded_handler as rate_limit_handler
 )
 from .services.ton_processor import ton_processor_loop
+from .services.fragment_processor import fragment_processor_loop
 
 
 # ============================================
@@ -60,15 +61,20 @@ async def lifespan(app: FastAPI):
     _ton_task = asyncio.create_task(ton_processor_loop())
     print("✅ TON processor started")
 
+    _fragment_task = asyncio.create_task(fragment_processor_loop())
+    print("✅ Fragment processor started")
+
     yield
 
     # Shutdown
     print("🛑 Shutting down...")
     _ton_task.cancel()
-    try:
-        await _ton_task
-    except asyncio.CancelledError:
-        pass
+    _fragment_task.cancel()
+    for t in (_ton_task, _fragment_task):
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
     await close_redis()
     print("✅ Redis closed")
 
@@ -151,6 +157,8 @@ app.include_router(shop.router, prefix=api_prefix)
 app.include_router(social.router, prefix=api_prefix)
 app.include_router(spin.router, prefix=api_prefix)
 app.include_router(tasks.router, prefix=api_prefix)
+app.include_router(fragments.router, prefix=api_prefix)
+app.include_router(admin_fragments.router, prefix=api_prefix)
 app.include_router(wallet.router, prefix=api_prefix)
 app.include_router(webhooks.router, prefix=api_prefix)
 

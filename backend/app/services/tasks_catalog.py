@@ -1,4 +1,4 @@
-"""Declarative task catalog for TasksScreen."""
+﻿"""Declarative task catalog for TasksScreen."""
 
 TASKS_CATALOG = [
     {
@@ -36,6 +36,12 @@ TASKS_CATALOG = [
             {"claim_id": "arcade_levels_50", "target": 50, "reward_coins": 60, "title": "Пройди 50 уровней"},
             {"claim_id": "arcade_levels_75", "target": 75, "reward_coins": 80, "title": "Пройди 75 уровней"},
             {"claim_id": "arcade_levels_100", "target": 100, "reward_coins": 100, "title": "Пройди 100 уровней"},
+            {"claim_id": "arcade_levels_250", "target": 250, "reward_coins": 110, "title": "Пройди 250 уровней"},
+            {"claim_id": "arcade_levels_500", "target": 500, "reward_coins": 120, "reward_hints": 1, "title": "Пройди 500 уровней"},
+            {"claim_id": "arcade_levels_1000", "target": 1000, "reward_coins": 140, "reward_hints": 2, "title": "Пройди 1000 уровней"},
+            {"claim_id": "arcade_levels_1500", "target": 1500, "reward_coins": 160, "reward_hints": 3, "title": "Пройди 1500 уровней"},
+            {"claim_id": "arcade_levels_2500", "target": 2500, "reward_coins": 180, "reward_revives": 1, "title": "Пройди 2500 уровней"},
+            {"claim_id": "arcade_levels_5000", "target": 5000, "reward_coins": 200, "reward_revives": 2, "title": "Пройди 5000 уровней"},
         ],
     },
     {
@@ -51,4 +57,3 @@ TASKS_CATALOG = [
         ],
     },
 ]
-

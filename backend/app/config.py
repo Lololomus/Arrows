@@ -5,9 +5,9 @@ Arrow Puzzle - Backend Configuration
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Self
 
 
 class Settings(BaseSettings):
@@ -121,6 +121,24 @@ class Settings(BaseSettings):
 
     # Admin / security
     ADMIN_API_KEY: str = ""
+    ADMIN_ALERT_CHAT_ID: str = ""
+    ADMIN_TELEGRAM_ID: str = ""
+
+    # Fragment Drops (Telegram Gifts)
+    FRAGMENT_DROPS_ENABLED: bool = False
+    FRAGMENT_GIFT_SEND_TIMEOUT: int = 30
+    FRAGMENT_MAX_CLAIM_ATTEMPTS: int = 5
+    FRAGMENT_SENDING_TIMEOUT: int = 300
+    FRAGMENT_STARS_LOW_THRESHOLD: int = 100
+
+    @model_validator(mode="after")
+    def validate_ton_settings(self) -> Self:
+        if self.TON_PAYMENTS_ENABLED and self.ENVIRONMENT == "production":
+            if not self.TON_API_KEY:
+                raise ValueError("TON_API_KEY is required when TON_PAYMENTS_ENABLED=True in production")
+            if not self.TON_WALLET_ADDRESS:
+                raise ValueError("TON_WALLET_ADDRESS is required when TON_PAYMENTS_ENABLED=True in production")
+        return self
 
     @field_validator("DEV_AUTH_ALLOWLIST")
     @classmethod

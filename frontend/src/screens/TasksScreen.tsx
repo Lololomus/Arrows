@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 
 import { adsApi, authApi, handleApiError, tasksApi } from '../api/client';
+import FragmentsTab from './FragmentsTab';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import type { TaskDto } from '../game/types';
 import { ADS_ENABLED, ADS_FIRST_ELIGIBLE_LEVEL, ADSGRAM_BLOCK_IDS } from '../config/constants';
@@ -52,6 +53,14 @@ const TASK_UI: Record<TaskDto['id'], TaskUiConfig> = {
 };
 
 const isDailyTask = (task: TaskDto) => task.id.startsWith('daily_');
+
+function formatTaskRewardLabel(rewardCoins: number, rewardHints = 0, rewardRevives = 0): string {
+  const parts: string[] = [];
+  if (rewardCoins > 0) parts.push(`+${rewardCoins}`);
+  if (rewardHints > 0) parts.push(`+💡${rewardHints}`);
+  if (rewardRevives > 0) parts.push(`+❤️${rewardRevives}`);
+  return parts.join(' ') || '+0';
+}
 
 // ─── Section divider ─────────────────────────────────────────────────────────
 
@@ -661,8 +670,12 @@ export function TasksScreen() {
     triggerHaptic('heavy');
     try {
       const result = await tasksApi.claimTask(tier.claimId);
-      updateUser({ coins: result.coins });
-      runRewardAnimation(result.rewardCoins, el);
+      updateUser({
+        coins: result.coins,
+        ...(result.hintBalance != null ? { hintBalance: result.hintBalance } : {}),
+        ...(result.reviveBalance != null ? { reviveBalance: result.reviveBalance } : {}),
+      });
+      if (result.rewardCoins > 0) runRewardAnimation(result.rewardCoins, el);
       await fetchTasks(false);
     } catch (err) { setTaskErrors((p) => ({ ...p, [task.id]: handleApiError(err) })); }
     finally { setTaskLoading(task.id, false); }
@@ -691,7 +704,11 @@ export function TasksScreen() {
     const nextTier = task.nextTierIndex != null ? task.tiers[task.nextTierIndex] : null;
     const lastTier = task.tiers.length > 0 ? task.tiers[task.tiers.length - 1] : null;
     const target   = nextTier?.target ?? 1;
-    const reward   = nextTier?.rewardCoins ?? lastTier?.rewardCoins ?? 0;
+    const rewardCoins = nextTier?.rewardCoins ?? lastTier?.rewardCoins ?? 0;
+    const rewardHints = nextTier?.rewardHints ?? lastTier?.rewardHints ?? 0;
+    const rewardRevives = nextTier?.rewardRevives ?? lastTier?.rewardRevives ?? 0;
+    const rewardLabel = formatTaskRewardLabel(rewardCoins, rewardHints, rewardRevives);
+    const rewardCaption = rewardHints > 0 || rewardRevives > 0 ? 'награда' : 'монет';
     const progress = task.kind === 'stepped' ? task.progress : task.status === 'completed' ? 1 : 0;
     const pct      = Math.min(100, (progress / target) * 100);
     const isLoadingTask = loadingTaskIds.has(task.id);
@@ -702,9 +719,9 @@ export function TasksScreen() {
 
     let actionLabel = '';
     if (task.kind === 'single') {
-      actionLabel = isLoadingTask ? '...' : task.status === 'claimable' ? `+${reward}` : openedChannelIds.has(task.id) ? 'Проверить' : 'Подписка';
+      actionLabel = isLoadingTask ? '...' : task.status === 'claimable' ? rewardLabel : openedChannelIds.has(task.id) ? 'Проверить' : 'Подписка';
     } else if (task.status === 'claimable') {
-      actionLabel = isLoadingTask ? '...' : `+${reward}`;
+      actionLabel = isLoadingTask ? '...' : rewardLabel;
     }
 
     return (
@@ -753,8 +770,8 @@ export function TasksScreen() {
                 </motion.button>
               ) : (
                 <div className="shrink-0 flex flex-col items-end">
-                  <span className="text-[15px] font-bold leading-none text-amber-400">+{reward}</span>
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-amber-400/60">монет</span>
+                  <span className="text-[15px] font-bold leading-none text-amber-400">{rewardLabel}</span>
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-amber-400/60">{rewardCaption}</span>
                 </div>
               )}
             </div>
@@ -792,24 +809,22 @@ export function TasksScreen() {
     );
   };
 
-  // ─── Build the task list: completed → daily → active ────────────────────────
+  // ─── Build the task list: daily → active → completed ────────────────────────
 
   const renderTaskList = () => {
     const dailyTasks    = tasks.filter(isDailyTask);
     const nonDailyTasks = tasks.filter((t) => !isDailyTask(t));
-    const completed = nonDailyTasks.filter((t) => t.status === 'completed');
     const active    = nonDailyTasks.filter((t) => t.status !== 'completed');
     const dailyActive    = dailyTasks.filter((t) => t.status !== 'completed');
     const dailyCompleted = dailyTasks.filter((t) => t.status === 'completed');
+    const completed = [...dailyCompleted, ...nonDailyTasks.filter((t) => t.status === 'completed')];
     const showAds   = ADS_ENABLED && isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardDailyCoins);
 
     const nodes: React.ReactNode[] = [];
     let i = 0;
 
-    // 1. Выполненные (вверху)
-    for (const task of completed) nodes.push(renderTaskCard(task, i++ * STAGGER));
-
-    const hasDailySection = dailyTasks.length > 0 || adEligible;
+    // 1. Daily section
+    const hasDailySection = dailyActive.length > 0 || adEligible;
 
     // 2. Divider → ежедневные
     if (hasDailySection) {
@@ -822,7 +837,7 @@ export function TasksScreen() {
     }
 
     // 3. Ежедневные задания
-    for (const task of [...dailyActive, ...dailyCompleted]) {
+    for (const task of dailyActive) {
       nodes.push(renderTaskCard(task, i++ * STAGGER));
     }
 
@@ -840,7 +855,7 @@ export function TasksScreen() {
     }
 
     // 5. Divider → активные (если что-то есть выше)
-    const anythingAbove = completed.length > 0 || hasDailySection;
+    const anythingAbove = hasDailySection;
     if (anythingAbove && active.length > 0) {
       nodes.push(
         <SectionDivider key="d-active" label="Задания"
@@ -852,6 +867,16 @@ export function TasksScreen() {
 
     // 6. Активные задания
     for (const task of active) nodes.push(renderTaskCard(task, i++ * STAGGER));
+
+    if (completed.length > 0) {
+      nodes.push(
+        <SectionDivider key="d-completed" label="Выполнено"
+          icon={<CheckCircle2 size={10} className="text-green-400" />}
+          lineClass="via-green-400/20" delay={i++ * STAGGER}
+        />
+      );
+      for (const task of completed) nodes.push(renderTaskCard(task, i++ * STAGGER));
+    }
 
     return nodes;
   };
@@ -1016,14 +1041,9 @@ export function TasksScreen() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1, transition: { duration: 0.15 } }}
               exit={{ opacity: 0, transition: { duration: 0.08 } }}
-              className="flex h-full items-center justify-center px-2"
+              className="w-full"
             >
-              <div className="relative w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
-                <AdaptiveParticles variant="accent" tone="neutral" baseCount={12} baseSpeed={0.14} className="z-0 opacity-55" />
-                <Puzzle size={42} className="relative z-10 mx-auto mb-3 text-white/50" />
-                <h3 className="relative z-10 mb-2 text-xl font-bold text-white">Фрагменты</h3>
-                <p className="relative z-10 text-sm text-white/60">Скоро появится</p>
-              </div>
+              <FragmentsTab />
             </motion.div>
           )}
         </AnimatePresence>

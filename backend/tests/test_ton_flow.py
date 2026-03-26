@@ -10,6 +10,9 @@ from app.database import Base
 from app.models import Transaction, User
 from app.schemas import PurchaseRequest, WalletConnectRequest
 
+VALID_WALLET_1 = "0:" + ("1" * 64)
+VALID_WALLET_2 = "0:" + ("2" * 64)
+
 
 class FakeRedis:
     def __init__(self) -> None:
@@ -79,7 +82,7 @@ async def test_wallet_connect_binds_wallet_and_consumes_payload(db_session: Asyn
     assert await fake_redis.get(f"ton_proof:{user.id}") == payload_response["payload"]
 
     result = await wallet.connect_wallet(
-        request=WalletConnectRequest(address="EQ_TEST_WALLET", proof={"timestamp": 1}),
+        request=WalletConnectRequest(address=VALID_WALLET_1, proof={"timestamp": 1}),
         user=user,
         db=db_session,
     )
@@ -87,13 +90,17 @@ async def test_wallet_connect_binds_wallet_and_consumes_payload(db_session: Asyn
     await db_session.refresh(user)
 
     assert result.success is True
-    assert user.wallet_address == "EQ_TEST_WALLET"
+    assert user.wallet_address == wallet._normalize_address(VALID_WALLET_1)
     assert await fake_redis.get(f"ton_proof:{user.id}") is None
 
 
 @pytest.mark.asyncio
 async def test_wallet_connect_rejects_wallet_bound_to_another_user(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
-    await create_user(db_session, telegram_id=1002, wallet_address="EQ_DUPLICATE")
+    await create_user(
+        db_session,
+        telegram_id=1002,
+        wallet_address=wallet._normalize_address(VALID_WALLET_2),
+    )
     user = await create_user(db_session, telegram_id=1003)
     fake_redis = FakeRedis()
 
@@ -106,7 +113,7 @@ async def test_wallet_connect_rejects_wallet_bound_to_another_user(db_session: A
     await fake_redis.set(f"ton_proof:{user.id}", "payload")
 
     result = await wallet.connect_wallet(
-        request=WalletConnectRequest(address="EQ_DUPLICATE", proof={"timestamp": 1}),
+        request=WalletConnectRequest(address=VALID_WALLET_2, proof={"timestamp": 1}),
         user=user,
         db=db_session,
     )
