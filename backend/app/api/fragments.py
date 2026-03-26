@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -76,10 +76,24 @@ async def get_drops(
     if not settings.FRAGMENT_DROPS_ENABLED:
         return FragmentDropsResponse(drops=[])
 
-    # Fetch active drops
+    user_claim_drop_ids = select(FragmentClaim.drop_id).where(FragmentClaim.user_id == user.id)
+    sold_out_expr = (
+        FragmentDrop.total_stock - FragmentDrop.reserved_stock - FragmentDrop.delivered_stock <= 0
+    )
+
+    # Keep active drops visible to everyone.
+    # Also keep completed history visible when:
+    # - the current user already has a claim for the drop; or
+    # - the drop is fully exhausted and should stay in the "completed" section.
     drops_result = await db.execute(
         select(FragmentDrop)
-        .where(FragmentDrop.is_active == True)  # noqa: E712
+        .where(  # noqa: E712
+            or_(
+                FragmentDrop.is_active == True,
+                FragmentDrop.id.in_(user_claim_drop_ids),
+                sold_out_expr,
+            )
+        )
         .order_by(FragmentDrop.priority.desc(), FragmentDrop.id)
     )
     drops = list(drops_result.scalars().all())

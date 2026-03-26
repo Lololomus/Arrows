@@ -431,6 +431,90 @@ async def test_admin_retry_blocks_outcome_unknown_manual_review_claim(
 
 
 @pytest.mark.asyncio
+async def test_get_drops_keeps_inactive_drop_visible_for_user_with_claim(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await create_user(db_session, telegram_id=2003, current_level=6)
+    drop = await create_drop(
+        db_session,
+        slug="claimed_inactive",
+        telegram_gift_id="gift-claimed-inactive",
+        gift_star_cost=10,
+        total_stock=3,
+        is_active=False,
+        delivered_stock=1,
+        condition_target=5,
+    )
+    await create_claim(
+        db_session,
+        drop_id=drop.id,
+        user_id=user.id,
+        telegram_gift_id=drop.telegram_gift_id,
+        stars_cost=drop.gift_star_cost,
+        status="delivered",
+        attempts=1,
+    )
+
+    monkeypatch.setattr(fragments.settings, "FRAGMENT_DROPS_ENABLED", True)
+
+    response = await fragments.get_drops(user=user, db=db_session)
+
+    assert [item.id for item in response.drops] == [drop.id]
+    assert response.drops[0].status == "delivered"
+
+
+@pytest.mark.asyncio
+async def test_get_drops_keeps_inactive_sold_out_drop_visible(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await create_user(db_session, telegram_id=2004, current_level=1)
+    drop = await create_drop(
+        db_session,
+        slug="sold_out_inactive",
+        telegram_gift_id="gift-sold-out",
+        gift_star_cost=10,
+        total_stock=2,
+        is_active=False,
+        delivered_stock=2,
+        condition_target=10,
+    )
+
+    monkeypatch.setattr(fragments.settings, "FRAGMENT_DROPS_ENABLED", True)
+
+    response = await fragments.get_drops(user=user, db=db_session)
+
+    assert [item.id for item in response.drops] == [drop.id]
+    assert response.drops[0].status == "out_of_stock"
+    assert response.drops[0].remaining_stock == 0
+
+
+@pytest.mark.asyncio
+async def test_get_drops_hides_inactive_unfinished_drop_without_claim(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await create_user(db_session, telegram_id=2005, current_level=1)
+    await create_drop(
+        db_session,
+        slug="inactive_hidden",
+        telegram_gift_id="gift-hidden",
+        gift_star_cost=10,
+        total_stock=5,
+        is_active=False,
+        delivered_stock=1,
+        condition_target=10,
+    )
+
+    monkeypatch.setattr(fragments.settings, "FRAGMENT_DROPS_ENABLED", True)
+
+    response = await fragments.get_drops(user=user, db=db_session)
+
+    assert response.drops == []
+
+
+@pytest.mark.asyncio
 async def test_sync_gift_catalog_deactivates_drop_when_gift_missing(
     session_factory,
     monkeypatch: pytest.MonkeyPatch,

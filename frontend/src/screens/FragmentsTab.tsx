@@ -96,20 +96,27 @@ function SectionDivider({
   label,
   icon,
   lineClass = 'via-white/12',
+  delay = 0,
 }: {
   label: string;
   icon?: React.ReactNode;
   lineClass?: string;
+  delay?: number;
 }) {
   return (
-    <div className="flex items-center gap-3 py-2">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.22, delay, ease: 'easeOut' }}
+      className="flex items-center gap-3 py-2"
+    >
       <div className={`h-px flex-1 bg-gradient-to-r from-transparent ${lineClass}`} />
       <div className="flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1">
         {icon}
         <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">{label}</span>
       </div>
       <div className={`h-px flex-1 bg-gradient-to-l from-transparent ${lineClass}`} />
-    </div>
+    </motion.div>
   );
 }
 
@@ -513,7 +520,7 @@ export default function FragmentsTab() {
           className="text-cyan-400 mx-auto mb-2 relative z-10 drop-shadow-[0_0_15px_rgba(34,211,238,0.5)]"
         />
         <h1 className="text-[26px] leading-tight font-black text-white uppercase tracking-wide drop-shadow-md relative z-10">
-          Лимитные дропы
+          ЛИМИТИРОВАННЫЕ ДРОПЫ
         </h1>
         <p className="text-white/60 text-xs mt-1.5 relative z-10">Выполняй хардкорные задания</p>
       </div>
@@ -547,6 +554,7 @@ export default function FragmentsTab() {
             label="В ПРОЦЕССЕ"
             lineClass="via-yellow-400/20"
             icon={<Flame size={10} className="text-yellow-400" />}
+            delay={0.05}
           />
           {inProgress.map((drop) => (
             <InProgressCard key={drop.id} drop={drop} />
@@ -557,7 +565,12 @@ export default function FragmentsTab() {
       {/* Completed / sold-out section */}
       {hasDone && (
         <>
-          <SectionDivider label="ЗАВЕРШЕНО" />
+          <SectionDivider
+            label="ЗАВЕРШЕННЫЕ"
+            lineClass="via-green-400/20"
+            icon={<CheckCircle2 size={10} className="text-green-400" />}
+            delay={0.08}
+          />
           {completed.map((drop) => (
             <CompletedCard key={drop.id} drop={drop} />
           ))}
