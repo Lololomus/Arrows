@@ -20,6 +20,7 @@ from ..models import BotStarsLedger, FragmentClaim, FragmentDrop, User
 from .telegram_gifts_api import (
     GiftApiBadRequest,
     GiftApiForbidden,
+    GiftApiUnknownOutcome,
     GiftApiRetryAfter,
     send_gift,
 )
@@ -205,10 +206,20 @@ async def send_gift_to_user(
         claim.failure_reason = f"rate_limited: {exc.retry_after}s"
         await db.commit()
         return "sending"
+    except GiftApiUnknownOutcome as exc:
+        logger.error(
+            "fragment_gifts: unknown delivery outcome for claim %d: %s",
+            claim.id,
+            exc.description,
+        )
+        claim.status = "sending"
+        claim.failure_reason = f"outcome_unknown: {exc.description[:200]}"
+        await db.commit()
+        return "sending"
     except Exception as exc:
         logger.exception("fragment_gifts: unexpected error sending gift (claim=%d)", claim.id)
-        claim.status = "pending"
-        claim.failure_reason = f"retriable: {str(exc)[:200]}"
+        claim.status = "sending"
+        claim.failure_reason = f"outcome_unknown: {str(exc)[:200]}"
         await db.commit()
         return "sending"
 

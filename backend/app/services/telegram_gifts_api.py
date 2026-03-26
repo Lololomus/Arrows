@@ -25,6 +25,11 @@ class GiftApiRetryAfter(Exception):
     description: str = "Too Many Requests"
 
 
+@dataclass
+class GiftApiUnknownOutcome(Exception):
+    description: str
+
+
 async def _call_bot_api(method: str, token: str, payload: dict[str, Any] | None = None) -> Any:
     url = f"https://api.telegram.org/bot{token}/{method}"
     timeout = aiohttp.ClientTimeout(total=settings.FRAGMENT_GIFT_SEND_TIMEOUT)
@@ -34,9 +39,9 @@ async def _call_bot_api(method: str, token: str, payload: dict[str, Any] | None 
             async with session.post(url, json=payload or {}) as response:
                 data = await response.json(content_type=None)
     except asyncio.TimeoutError as exc:
-        raise TimeoutError(f"{method} timed out") from exc
+        raise GiftApiUnknownOutcome(description=f"{method} timed out") from exc
     except aiohttp.ClientError as exc:
-        raise RuntimeError(f"{method} request failed: {exc}") from exc
+        raise GiftApiUnknownOutcome(description=f"{method} request failed: {exc}") from exc
 
     if data.get("ok"):
         return data.get("result")
@@ -51,6 +56,8 @@ async def _call_bot_api(method: str, token: str, payload: dict[str, Any] | None 
         raise GiftApiForbidden(description=description)
     if error_code == 400:
         raise GiftApiBadRequest(description=description)
+    if error_code >= 500:
+        raise GiftApiUnknownOutcome(description=description)
     raise RuntimeError(f"{method} failed: {description}")
 
 

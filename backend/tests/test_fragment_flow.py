@@ -198,6 +198,56 @@ async def test_send_gift_to_user_handles_missing_attempts_default_on_first_send(
 
 
 @pytest.mark.asyncio
+async def test_send_gift_to_user_does_not_auto_retry_unknown_delivery_outcome(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await create_user(db_session, telegram_id=2101, current_level=6)
+    drop = await create_drop(
+        db_session,
+        slug="unknown_outcome",
+        telegram_gift_id="gift-unknown",
+        gift_star_cost=25,
+        total_stock=1,
+        condition_target=5,
+    )
+    claim = FragmentClaim(
+        drop_id=drop.id,
+        user_id=user.id,
+        telegram_gift_id=drop.telegram_gift_id,
+        stars_cost=drop.gift_star_cost,
+        status="pending",
+        attempts=0,
+    )
+    db_session.add(claim)
+    drop.reserved_stock = 1
+    await db_session.commit()
+    await db_session.refresh(claim)
+    await db_session.refresh(drop)
+
+    async def fake_send_gift(*, bot_token: str, user_id: int, gift_id: str) -> None:
+        raise fragment_gifts.GiftApiUnknownOutcome("sendGift timed out")
+
+    monkeypatch.setattr(fragment_gifts.settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(fragment_gifts.settings, "TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr(fragment_gifts, "send_gift", fake_send_gift)
+
+    status = await fragment_gifts.send_gift_to_user(claim, drop, user, db_session)
+
+    await db_session.refresh(claim)
+    await db_session.refresh(drop)
+    ledger_entries = (await db_session.execute(select(BotStarsLedger))).scalars().all()
+
+    assert status == "sending"
+    assert claim.status == "sending"
+    assert claim.attempts == 1
+    assert "outcome_unknown:" in (claim.failure_reason or "")
+    assert drop.reserved_stock == 1
+    assert drop.delivered_stock == 0
+    assert ledger_entries == []
+
+
+@pytest.mark.asyncio
 async def test_create_drop_uses_db_ledger_for_budget_checks(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
