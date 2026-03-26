@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from sqlalchemy import or_, select
 
@@ -25,6 +25,7 @@ from .fragment_gifts import (
     send_gift_to_user,
     set_cached_stars_balance,
     set_drops_paused,
+    utcnow_naive,
 )
 from .telegram_gifts_api import get_available_gifts
 
@@ -62,7 +63,7 @@ async def _run_cycle() -> None:
 
 
 async def _recover_pending_claims() -> None:
-    now = datetime.now(timezone.utc)
+    now = utcnow_naive()
     min_cutoff = now - timedelta(seconds=_PENDING_STALE_SECONDS)
 
     async with AsyncSessionLocal() as db:
@@ -111,7 +112,7 @@ async def _attempt_delivery(db, claim: FragmentClaim) -> None:
     drop = drop_result.scalar_one_or_none()
     if not drop or not drop.is_active:
         claim.status = "failed"
-        claim.failed_at = datetime.now(timezone.utc)
+        claim.failed_at = utcnow_naive()
         claim.failure_reason = "campaign_deactivated"
         if drop:
             drop.reserved_stock = max(0, drop.reserved_stock - 1)
@@ -122,7 +123,7 @@ async def _attempt_delivery(db, claim: FragmentClaim) -> None:
     user = user_result.scalar_one_or_none()
     if not user:
         claim.status = "failed"
-        claim.failed_at = datetime.now(timezone.utc)
+        claim.failed_at = utcnow_naive()
         claim.failure_reason = "user_not_found"
         drop.reserved_stock = max(0, drop.reserved_stock - 1)
         await db.commit()
@@ -135,7 +136,7 @@ async def _attempt_delivery(db, claim: FragmentClaim) -> None:
 
     if claim.status == "pending" and int(claim.attempts or 0) >= _MAX_ATTEMPTS:
         claim.status = "failed"
-        claim.failed_at = datetime.now(timezone.utc)
+        claim.failed_at = utcnow_naive()
         claim.failure_reason = "max_retries_exhausted"
         drop.reserved_stock = max(0, drop.reserved_stock - 1)
         await db.commit()
@@ -143,7 +144,7 @@ async def _attempt_delivery(db, claim: FragmentClaim) -> None:
 
 
 async def _resolve_stuck_sending_claims() -> None:
-    now = datetime.now(timezone.utc)
+    now = utcnow_naive()
     cutoff = now - timedelta(seconds=_SENDING_STALE_SECONDS)
 
     async with AsyncSessionLocal() as db:

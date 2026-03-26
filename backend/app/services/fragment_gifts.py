@@ -30,6 +30,10 @@ REDIS_STARS_BALANCE_KEY = "bot_stars:balance"
 REDIS_DROPS_PAUSED_KEY = "fragment_drops:paused_insufficient_stars"
 
 
+def utcnow_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def get_user_progress(user: User, condition_type: str) -> int:
     if condition_type == "arcade_levels":
         return max(0, user.current_level - 1)
@@ -129,7 +133,7 @@ async def send_gift_to_user(
     user: User,
     db: AsyncSession,
 ) -> str:
-    now = datetime.now(timezone.utc)
+    now = utcnow_naive()
 
     if settings.ENVIRONMENT == "development":
         logger.info("[DEV] Gift send skipped, auto-delivered (claim=%d, user=%d)", claim.id, user.id)
@@ -210,7 +214,7 @@ async def send_gift_to_user(
 
     logger.info("fragment_gifts: gift delivered (claim=%d, user=%d, drop=%s)", claim.id, user.id, drop.slug)
     claim.status = "delivered"
-    claim.delivered_at = datetime.now(timezone.utc)
+    claim.delivered_at = utcnow_naive()
     drop.reserved_stock -= 1
     drop.delivered_stock += 1
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import func, select
@@ -19,7 +19,12 @@ from ..schemas import (
     FragmentDropUpdateRequest,
     ResolveClaimRequest,
 )
-from ..services.fragment_gifts import get_cached_stars_balance, set_cached_stars_balance, set_drops_paused
+from ..services.fragment_gifts import (
+    get_cached_stars_balance,
+    set_cached_stars_balance,
+    set_drops_paused,
+    utcnow_naive,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +249,7 @@ async def resolve_claim(
     )
     drop = drop_result.scalar_one_or_none()
 
-    now = datetime.now(timezone.utc)
+    now = utcnow_naive()
 
     if body.action == "mark_delivered":
         if claim.status == "delivered":
