@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
-from ..models import ChannelSubscription, LevelAttempt, TaskClaim, Transaction, User
+from ..models import ChannelSubscription, LevelAttempt, Referral, TaskClaim, Transaction, User
 from ..schemas import (
     ChannelMetaDto,
     TaskClaimResponse,
@@ -131,6 +131,25 @@ def _msk_day_bounds(day: date) -> tuple[datetime, datetime]:
     return start_utc, end_utc
 
 
+def _season_start_dt() -> datetime:
+    try:
+        return datetime.fromisoformat(settings.SEASON_START_DATE).replace(tzinfo=None)
+    except ValueError:
+        return datetime(2020, 1, 1)
+
+
+async def _count_season_referrals(db: AsyncSession, user_id: int) -> int:
+    season_start = _season_start_dt()
+    result = await db.execute(
+        select(func.count(Referral.id)).where(
+            Referral.inviter_id == user_id,
+            Referral.status == "confirmed",
+            Referral.confirmed_at >= season_start,
+        )
+    )
+    return int(result.scalar_one())
+
+
 async def _count_daily_levels_completed(db: AsyncSession, user_id: int, day: date) -> int:
     start_utc, end_utc = _msk_day_bounds(day)
     result = await db.execute(
@@ -149,6 +168,7 @@ def _get_progress(
     user: User,
     *,
     daily_levels_completed: int | None = None,
+    season_referrals_count: int | None = None,
     debug_state: dict[str, Any] | None = None,
 ) -> int:
     overrides = debug_state or {}
@@ -161,7 +181,7 @@ def _get_progress(
     if task_id == "arcade_levels":
         return max(0, user.current_level - 1)
     if task_id == "friends_confirmed":
-        return max(0, user.referrals_count)
+        return max(0, season_referrals_count if season_referrals_count is not None else user.referrals_count)
     if task_id == "official_channel":
         return 0
     if task_id == "daily_levels":
@@ -193,12 +213,14 @@ def _build_task_dto(
     user: User,
     *,
     daily_levels_completed: int | None,
+    season_referrals_count: int | None = None,
     debug_state: dict[str, Any] | None = None,
 ) -> TaskDto:
     progress = _get_progress(
         task["id"],
         user,
         daily_levels_completed=daily_levels_completed,
+        season_referrals_count=season_referrals_count,
         debug_state=debug_state,
     )
     tiers = [
@@ -250,12 +272,16 @@ async def build_tasks_for_user(
     daily_levels_completed = None
     if any(_is_daily_task(task["id"]) for task in TASKS_CATALOG):
         daily_levels_completed = await _count_daily_levels_completed(db, user.id, today_msk())
+    season_referrals_count = None
+    if any(task["id"] == "friends_confirmed" for task in TASKS_CATALOG):
+        season_referrals_count = await _count_season_referrals(db, user.id)
     tasks = [
         _build_task_dto(
             task,
             claimed_ids,
             user,
             daily_levels_completed=daily_levels_completed,
+            season_referrals_count=season_referrals_count,
             debug_state=debug_state,
         )
         for task in TASKS_CATALOG
@@ -370,7 +396,10 @@ async def claim_task(
         if debug_state and task["id"] in debug_state:
             progress = _get_progress(task["id"], user, daily_levels_completed=progress, debug_state=debug_state)
     else:
-        progress = _get_progress(task["id"], user, debug_state=debug_state)
+        season_referrals_count = None
+        if task["id"] == "friends_confirmed":
+            season_referrals_count = await _count_season_referrals(db, user.id)
+        progress = _get_progress(task["id"], user, season_referrals_count=season_referrals_count, debug_state=debug_state)
 
     if task["id"] == "official_channel":
         if progress >= tier["target"]:

@@ -8,13 +8,14 @@ interface HowToPlayModalProps {
   onClose: () => void;
 }
 
-const SLIDE_KEYS = ['tap', 'blocked', 'hold', 'pinch'] as const;
+const SLIDE_KEYS = ['tap', 'blocked', 'hold', 'pinch', 'helpers'] as const;
 
 const SLIDE_ICONS: Record<typeof SLIDE_KEYS[number], string> = {
   tap: '👆',
   blocked: '🚫',
   hold: '👁️',
   pinch: '🤏',
+  helpers: '💡',
 };
 
 export function HowToPlayModal({ open, onClose }: HowToPlayModalProps) {

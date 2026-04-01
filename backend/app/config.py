@@ -120,6 +120,9 @@ class Settings(BaseSettings):
     # Rate Limiting - Ads
     RATE_LIMIT_ADS: int = 10
 
+    # Season
+    SEASON_START_DATE: str = "2020-01-01T00:00:00"  # UTC datetime; referrals before this date are excluded from tasks
+
     # Admin / security
     ADMIN_API_KEY: str = ""
     ADMIN_ALERT_CHAT_ID: str = ""

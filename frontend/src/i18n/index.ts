@@ -221,7 +221,7 @@ const resources = {
           },
           blocked: {
             title: 'Блокировка',
-            body: 'Если другая стрелка смотрит этой в хвост — её нельзя убрать. Сначала убери ту, что блокирует.',
+            body: 'Если стрелка смотрит другой в хвост — её нельзя убрать. Сначала убери ту, что блокирует.',
           },
           hold: {
             title: 'Зажми, чтобы увидеть путь',
@@ -229,7 +229,11 @@ const resources = {
           },
           pinch: {
             title: 'Навигация по полю',
-            body: 'Сведи/разведи два пальца для зума. Тяни одним пальцем (по пустому месту), чтобы перемещать поле.',
+            body: 'Тяни одним пальцем по пустому месту, чтобы перемещать поле. Сведи/разведи два пальца для зума.',
+          },
+          helpers: {
+            title: 'Подсказки и возрождения',
+            body: 'Подсказка подсвечивает стрелку, которую можно убрать прямо сейчас. Если жизни кончились — можно возродиться за рекламу или использовать сохранённое возрождение.',
           },
         },
       },
@@ -756,7 +760,7 @@ const resources = {
           },
           blocked: {
             title: 'Blocking',
-            body: 'If another arrow points at the tail of this one — it cannot be removed. First remove the one that is blocking it.',
+            body: 'If an arrow points at another\'s tail — it cannot be removed. First remove the one that is blocking it.',
           },
           hold: {
             title: 'Hold to see the path',
@@ -764,7 +768,11 @@ const resources = {
           },
           pinch: {
             title: 'Navigate the field',
-            body: 'Pinch two fingers to zoom in or out. Drag with one finger on an empty spot to pan the field.',
+            body: 'Drag one finger on an empty spot to move the field. Pinch two fingers to zoom in or out.',
+          },
+          helpers: {
+            title: 'Hints & Revives',
+            body: 'A hint highlights an arrow you can remove right now. If you run out of lives — revive by watching an ad or use a saved revive.',
           },
         },
       },
