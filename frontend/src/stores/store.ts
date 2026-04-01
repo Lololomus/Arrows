@@ -14,6 +14,7 @@ import { persist } from 'zustand/middleware';
 import type { Arrow, User, GameStatus } from '../game/types';
 import { INITIAL_LIVES } from '../config/constants';
 import { rebuildIndex, removeFromIndex, globalIndex } from '../game/spatialIndex';
+import type { AppLocale } from '../i18n';
 
 // ============================================
 // APP STORE (без изменений)
@@ -25,6 +26,11 @@ export type AuthStatus = 'booting' | 'authenticated' | 'reauthenticating' | 'exp
 interface AppState {
   screen: ScreenName;
   setScreen: (screen: ScreenName) => void;
+
+  locale: AppLocale;
+  setLocale: (locale: AppLocale) => void;
+  localeManuallySet: boolean;
+  setLocaleManually: (locale: AppLocale) => void;
 
   user: User | null;
   setUser: (user: User | null) => void;
@@ -66,6 +72,9 @@ interface AppState {
 
   isDailyMode: boolean;
   setDailyMode: (isDailyMode: boolean) => void;
+
+  serverUnavailable: boolean;
+  setServerUnavailable: (unavailable: boolean) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -74,12 +83,26 @@ export const useAppStore = create<AppState>()(
       screen: 'home',
       setScreen: (screen) => set({ screen }),
 
+      locale: 'en',
+      setLocale: (locale) => set({ locale }),
+      localeManuallySet: false,
+      setLocaleManually: (locale) => set({ locale, localeManuallySet: true }),
+
       user: null,
-      setUser: (user) => set({ user }),
+      setUser: (user) => set((state) => ({
+        user,
+        locale: user?.locale ?? state.locale,
+        localeManuallySet: user?.localeManuallySet ?? state.localeManuallySet,
+      })),
       updateUser: (updates) => {
         const currentUser = get().user;
         if (currentUser) {
-          set({ user: { ...currentUser, ...updates } });
+          const nextUser = { ...currentUser, ...updates };
+          set({
+            user: nextUser,
+            locale: nextUser.locale,
+            localeManuallySet: nextUser.localeManuallySet,
+          });
         }
       },
 
@@ -94,6 +117,8 @@ export const useAppStore = create<AppState>()(
       setAuthenticatedSession: ({ token, user, expiresAt }) => set({
         token,
         user,
+        locale: user.locale,
+        localeManuallySet: user.localeManuallySet,
         authExpiresAt: expiresAt,
         authStatus: 'authenticated',
         authMessage: null,
@@ -131,12 +156,17 @@ export const useAppStore = create<AppState>()(
 
       isDailyMode: false,
       setDailyMode: (isDailyMode) => set({ isDailyMode }),
+
+      serverUnavailable: false,
+      setServerUnavailable: (serverUnavailable) => set({ serverUnavailable }),
     }),
     {
       name: 'arrow-puzzle-app',
       partialize: (state) => ({
         token: state.token,
         authExpiresAt: state.authExpiresAt,
+        locale: state.locale,
+        localeManuallySet: state.localeManuallySet,
       }),
     }
   )

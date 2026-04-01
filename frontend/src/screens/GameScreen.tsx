@@ -18,10 +18,11 @@ import { useMotionValue, motion } from 'framer-motion';
 import { useAppStore, useGameStore } from '../stores/store';
 import { useRewardStore } from '../stores/rewardStore';
 import { CanvasBoard } from '../components/CanvasBoard';
-import { ApiError, adsApi, gameApi, sendAuthorizedKeepalive, type CompleteAndNextResponse } from '../api/client';
+import { ApiError, adsApi, gameApi, handleApiError, sendAuthorizedKeepalive, type CompleteAndNextResponse } from '../api/client';
 import { isValidInterstitialBlockId, isValidRewardedBlockId, showInterstitialAd, showRewardedAd } from '../services/adsgram';
 import { getRewardedFlowMessage } from '../services/rewardedAds';
 import { clearPendingRewardIntent, rememberPendingRewardIntent } from '../services/rewardReconciler';
+import { translate } from '../i18n';
 import {
   API_ENDPOINTS,
   MAX_CELL_SIZE,
@@ -801,15 +802,12 @@ export function GameScreen() {
         dailyDayNumberRef.current = null;
         dailySaveStartedRef.current = false;
         setDailyMode(false);
-        if (error?.status === 404) { alert('вќЊ Daily level not found'); }
-        else if (error?.status === 403) { alert('рџ”’ Daily РЅРµРґРѕСЃС‚СѓРїРµРЅ'); }
-        else { alert('вќЊ РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё Daily'); }
+        alert(handleApiError(error));
         setScreen('home');
         return;
       }
       if (error?.status === 404) { setNoMoreLevels(true); setStatus('victory'); }
-      else if (error?.status === 403) { alert(`рџ”’ РЈСЂРѕРІРµРЅСЊ ${levelNum} Р·Р°РєСЂС‹С‚!`); setScreen('home'); }
-      else { alert(`вќЊ РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё СѓСЂРѕРІРЅСЏ ${levelNum}`); setScreen('home'); }
+      else { alert(handleApiError(error)); setScreen('home'); }
     }
   }, [cancelAutoSolve, initLevel, setStatus, setScreen, setDailyMode]);
 
@@ -841,7 +839,7 @@ export function GameScreen() {
     if (!pendingReviveIntentId) {
       void loadReviveStatus(currentLevel).then((nextStatus) => {
         if (nextStatus && nextStatus.remaining <= 0) {
-          setReviveMessage('Р›РёРјРёС‚ РІРѕСЃРєСЂРµС€РµРЅРёР№ РЅР° СЌС‚РѕРј СѓСЂРѕРІРЅРµ РёСЃС‡РµСЂРїР°РЅ');
+          setReviveMessage(translate('errors:codes.REVIVE_LIMIT_REACHED'));
         }
       });
     }
@@ -854,7 +852,7 @@ export function GameScreen() {
     if (pendingReviveIntentId !== trackedReviveIntent.intentId) {
       setPendingReviveIntentId(trackedReviveIntent.intentId);
     }
-    setReviveMessage('РџСЂРѕРІРµСЂСЏРµРј РїСЂРѕСЃРјРѕС‚СЂ (РґРѕ 1 РјРёРЅ)...');
+    setReviveMessage(translate('game:hintsEmpty.checkingView'));
   }, [pendingReviveIntentId, trackedReviveIntent]);
 
   useEffect(() => {
@@ -908,7 +906,7 @@ export function GameScreen() {
       void adsApi.cancelRewardIntent(pendingReviveIntentId).catch(() => {});
       clearPendingRewardIntent('reward_revive', pendingReviveIntentId);
       setPendingReviveIntentId(null);
-      setReviveMessage('РџРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ РЅРµ РїРѕР»СѓС‡РµРЅРѕ. РќР°Р¶РјРёС‚Рµ РµС‰С‘ СЂР°Р· вЂ” РІРѕСЃРєСЂРµС€РµРЅРёРµ РіР°СЂР°РЅС‚РёСЂРѕРІР°РЅРѕ.');
+      setReviveMessage(translate('game:revive.pendingConfirmation'));
     }, 60_000);
     return () => clearTimeout(timer);
   }, [pendingReviveIntentId]);
@@ -1056,7 +1054,11 @@ export function GameScreen() {
       if (!result.completion.valid) {
         saveResolvedLevelRef.current = completedLevel;
         setSaveState('error');
-        setSaveError(result.completion.error ?? 'Р РµС€РµРЅРёРµ РЅРµ РїСЂРёРЅСЏС‚Рѕ СЃРµСЂРІРµСЂРѕРј');
+        setSaveError(
+          result.completion.error
+            ? handleApiError(new ApiError(400, result.completion.error, result.completion.error))
+            : translate('errors:generic.server'),
+        );
         return;
       }
 
@@ -1069,17 +1071,17 @@ export function GameScreen() {
       if (typeof error?.message === 'string') {
         const message = error.message.toLowerCase();
         if (message.includes('fetch') || message.includes('network')) {
-          setSaveError('РќРµС‚ СЃРѕРµРґРёРЅРµРЅРёСЏ. РџСЂРѕРІРµСЂСЊС‚Рµ РёРЅС‚РµСЂРЅРµС‚.');
+          setSaveError(translate('errors:generic.network'));
           return;
         }
       }
 
       if (typeof error?.status === 'number' && error.status >= 500) {
-        setSaveError('РћС€РёР±РєР° СЃРµСЂРІРµСЂР°. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰С‘ СЂР°Р·.');
+        setSaveError(translate('errors:generic.server'));
         return;
       }
 
-      setSaveError(error?.message ?? 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РїСЂРѕРіСЂРµСЃСЃ');
+      setSaveError(handleApiError(error));
     }
   }, [
     applyCompletionSuccess,
@@ -1108,7 +1110,7 @@ export function GameScreen() {
     } catch (err: any) {
       dailySaveStartedRef.current = false;
       setSaveState('error');
-      setSaveError(err?.message ?? 'РћС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ daily');
+      setSaveError(handleApiError(err));
     }
   }, [removedArrowIds, getElapsedSeconds]);
 
@@ -1593,10 +1595,10 @@ export function GameScreen() {
         useAppStore.getState().updateUser({ reviveBalance: result.revive_balance });
         useGameStore.getState().revivePlayer();
       } else {
-        setReviveMessage('РќРµ СѓРґР°Р»РѕСЃСЊ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РІРѕСЃРєСЂРµС€РµРЅРёРµ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰С‘ СЂР°Р·.');
+        setReviveMessage(translate('errors:generic.server'));
       }
     } catch {
-      setReviveMessage('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРІСЏР·Р°С‚СЊСЃСЏ СЃ СЃРµСЂРІРµСЂРѕРј. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰С‘ СЂР°Р·.');
+      setReviveMessage(translate('errors:generic.network'));
     } finally {
       setReviveLoading(false);
     }
@@ -1631,11 +1633,11 @@ export function GameScreen() {
           clearPendingRewardIntent('reward_revive', pendingReviveIntentId);
         }
         setPendingReviveIntentId(null);
-        setReviveMessage('РќР°Р¶РјРёС‚Рµ РµС‰С‘ СЂР°Р· вЂ” РІРѕСЃРєСЂРµС€РµРЅРёРµ РіР°СЂР°РЅС‚РёСЂРѕРІР°РЅРѕ.');
+        setReviveMessage(translate('game:revive.pendingConfirmation'));
       } catch {
         clearPendingRewardIntent('reward_revive', pendingReviveIntentId);
         setPendingReviveIntentId(null);
-        setReviveMessage('РќР°Р¶РјРёС‚Рµ РµС‰С‘ СЂР°Р· вЂ” РІРѕСЃРєСЂРµС€РµРЅРёРµ РіР°СЂР°РЅС‚РёСЂРѕРІР°РЅРѕ.');
+        setReviveMessage(translate('game:revive.pendingConfirmation'));
       } finally {
         setReviveLoading(false);
       }
@@ -1685,7 +1687,7 @@ export function GameScreen() {
       if (adResult.outcome === 'provider_error') {
         // РўРµС…РЅРёС‡РµСЃРєРёР№ СЃР±РѕР№ AdsGram вЂ” intent РѕСЃС‚Р°РІР»СЏРµРј (webhook РјРѕР¶РµС‚ РїСЂРёР№С‚Рё РїРѕР·Р¶Рµ)
         rememberPendingRewardIntent({ intentId: intent.intentId, placement: 'reward_revive' });
-        setReviveMessage('РџСЂРѕРІРµСЂСЏРµРј РїСЂРѕСЃРјРѕС‚СЂ СЂРµРєР»Р°РјС‹ (РґРѕ 1 РјРёРЅ). РР»Рё РЅР°Р¶РјРёС‚Рµ В«РџСЂРѕРІРµСЂРёС‚СЊ РЅР°РіСЂР°РґСѓВ».');
+        setReviveMessage(translate('game:hintsEmpty.checkingView'));
       } else {
         // not_completed вЂ” РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ Р·Р°РєСЂС‹Р» СЂРµРєР»Р°РјСѓ, РѕС‚РјРµРЅСЏРµРј intent
         void adsApi.cancelRewardIntent(intent.intentId).catch(() => {});
@@ -1694,9 +1696,9 @@ export function GameScreen() {
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
         // Intent СѓР¶Рµ Р°РєС‚РёРІРµРЅ (race) вЂ” РЅРµ РєСЂРёС‚РёС‡РЅРѕ, reconciler СЂР°Р·Р±РµСЂС‘С‚СЃСЏ
-        setReviveMessage('Р’РѕСЃРєСЂРµС€РµРЅРёРµ СѓР¶Рµ РІ РїСЂРѕС†РµСЃСЃРµ. РџРѕРґРѕР¶РґРёС‚Рµ...');
+        setReviveMessage(translate('game:revive.inProgress'));
       } else {
-        setReviveMessage('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРІСЏР·Р°С‚СЊСЃСЏ СЃ СЃРµСЂРІРµСЂРѕРј. РџРѕРїСЂРѕР±СѓР№С‚Рµ РµС‰С‘ СЂР°Р·.');
+        setReviveMessage(translate('errors:generic.network'));
       }
     } finally {
       setReviveLoading(false);
@@ -1714,7 +1716,7 @@ export function GameScreen() {
   const handleDailyShare = useCallback(() => {
     const moves = removedArrowIds.length;
     const dayNum = dailyDayNumberRef.current ?? dailyLevelNumRef.current ?? 0;
-    const text = `Daily Challenge #${dayNum}: РїСЂРѕС€С‘Р» Р·Р° ${moves} С…РѕРґРѕРІ! рџЏ№\nРџРѕРїСЂРѕР±СѓР№: @ArrowRewardBot`;
+    const text = translate('game:dailyShare.text', { day: dayNum, moves });
     const tg = (window as Window & { Telegram?: { WebApp?: { openTelegramLink?: (url: string) => void } } }).Telegram?.WebApp;
     const shareUrl = `https://t.me/share/url?text=${encodeURIComponent(text)}`;
     if (tg?.openTelegramLink) {
@@ -1876,14 +1878,14 @@ export function GameScreen() {
                   className="text-center bg-slate-900/80 backdrop-blur-xl p-8 rounded-3xl border border-white/20 shadow-2xl max-w-xs"
                 >
                   <div className="text-5xl mb-4">{'\uD83C\uDF89'}</div>
-                  <h2 className="text-2xl font-bold text-white mb-2">{'\u0421\u043a\u043e\u0440\u043e \u043d\u043e\u0432\u044b\u0435 \u0443\u0440\u043e\u0432\u043d\u0438!'}</h2>
+                  <h2 className="text-2xl font-bold text-white mb-2">{translate('game:noMoreLevels.title')}</h2>
                   <button
                     type="button"
                     data-allow-select="true"
                     onClick={confirmMenu}
                     className="w-full py-3 bg-blue-600 rounded-xl text-white font-bold mt-4"
                   >
-                    {'\u0412 \u043c\u0435\u043d\u044e'}
+                    {translate('common:backToMenu')}
                   </button>
                 </motion.div>
             </div>
@@ -1985,4 +1987,3 @@ export function GameScreen() {
     </div>
   );
 }
-

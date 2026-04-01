@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { socialApi } from '../api/client';
 import { APP_NAME } from '../config/constants';
 import type { ReferralInfo, ReferralLeaderboardEntry } from '../game/types';
+import { translate } from '../i18n';
 
 type TelegramWebAppLike = {
   openTelegramLink: (url: string) => void;
@@ -81,11 +82,11 @@ export function useReferral() {
   const shareReferral = useCallback(() => {
     if (!link) return;
 
-    const text = `Играй в ${APP_NAME} и получи бонус!\n${link}`;
+    const text = translate('friends:share.body', { app: APP_NAME, link });
     const tg = (window as TelegramWindow).Telegram?.WebApp;
 
     if (tg) {
-      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(`Играй в ${APP_NAME}!`)}`;
+      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(translate('friends:share.short', { app: APP_NAME }))}`;
       tg.openTelegramLink(shareUrl);
     } else {
       void navigator.clipboard.writeText(text);

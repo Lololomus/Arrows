@@ -1,5 +1,5 @@
 ﻿// ===== 📄 ФАЙЛ: frontend/src/screens/LeaderboardScreen.tsx =====
-import { useState, useMemo, useRef, useEffect, useCallback, memo, type CSSProperties, type ReactNode } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback, memo, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Trophy, Gift, Info } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -9,6 +9,7 @@ import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { StarParticles } from '../components/ui/StarParticles';
 import { useParticleRuntimeProfile } from '../components/ui/particleRuntimeProfile';
 import { useCountdown } from '../hooks/useCountdown';
+import { formatNumber, getAppLocale, translate } from '../i18n';
 
 // --- ХЕЛПЕРЫ ДЛЯ TELEGRAM ---
 const triggerHaptic = (style: 'light' | 'medium' | 'heavy' | 'selection') => {
@@ -54,13 +55,42 @@ const RANK_STYLES: Record<number, { bg: string; border: string; rankClass: strin
 };
 
 const DEFAULT_RANK_STYLE = { bg: 'bg-white/5', border: 'border-white/5', rankClass: 'text-white/40', icon: '', particleColor: undefined };
-const DEFAULT_PLAYER_NAME = 'Player';
-const TWO_LINE_CLAMP_STYLE: CSSProperties = {
-  display: '-webkit-box',
-  WebkitLineClamp: 2,
-  WebkitBoxOrient: 'vertical',
-  overflow: 'hidden',
-};
+
+function getDefaultPlayerName(): string {
+  return translate('common:playerFallback');
+}
+
+function formatParticipantsLabel(count: number): string {
+  const locale = getAppLocale();
+  const formattedCount = formatNumber(count);
+
+  if (locale === 'ru') {
+    const mod10 = count % 10;
+    const mod100 = count % 100;
+    if (mod10 === 1 && mod100 !== 11) {
+      return translate('leaderboard:participant_one', { count: formattedCount });
+    }
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+      return translate('leaderboard:participant_few', { count: formattedCount });
+    }
+    return translate('leaderboard:participant_many', { count: formattedCount });
+  }
+
+  return translate(count === 1 ? 'leaderboard:participant_one' : 'leaderboard:participant_other', {
+    count: formattedCount,
+  });
+}
+
+function formatCompactCountdown(days: number, hours: number, minutes: number): string {
+  const formattedDays = formatNumber(days);
+  const formattedHours = String(hours).padStart(2, '0');
+  const formattedMinutes = String(minutes).padStart(2, '0');
+  const dayLabel = translate('common:units.dayCompact');
+  const hourLabel = translate('common:units.hourCompact');
+  const minuteLabel = translate('common:units.minuteCompact');
+
+  return `${formattedDays}${dayLabel} ${formattedHours}${hourLabel} ${formattedMinutes}${minuteLabel}`;
+}
 
 type PrizeTier = {
   label: string;
@@ -124,21 +154,16 @@ const PRIZE_TIERS_BY_RANK: Record<number, PrizeTier> = {
 
 type SeasonPrizeRow = {
   icon: string;
-  placeLabel: string;
+  rank: number;
   rewardLabel: string;
   borderClass: string;
   rewardClass: string;
 };
 
-type SeasonStarsPrize = {
-  rankLabel: string;
-  stars: string;
-};
-
 const SEASON_TOP_PRIZE_ROWS: readonly SeasonPrizeRow[] = [
-  { icon: '🥇', placeLabel: '1 место', rewardLabel: 'Precious Peach ~$500', borderClass: 'border-yellow-500/30', rewardClass: 'text-yellow-300' },
-  { icon: '🥈', placeLabel: '2 место', rewardLabel: 'Heroic Helmet ~$270', borderClass: 'border-gray-400/30', rewardClass: 'text-gray-300' },
-  { icon: '🥉', placeLabel: '3 место', rewardLabel: 'Astral Shard ~$230', borderClass: 'border-orange-500/30', rewardClass: 'text-orange-300' },
+  { icon: '🥇', rank: 1, rewardLabel: 'Precious Peach ~$500', borderClass: 'border-yellow-500/30', rewardClass: 'text-yellow-300' },
+  { icon: '🥈', rank: 2, rewardLabel: 'Heroic Helmet ~$270', borderClass: 'border-gray-400/30', rewardClass: 'text-gray-300' },
+  { icon: '🥉', rank: 3, rewardLabel: 'Astral Shard ~$230', borderClass: 'border-orange-500/30', rewardClass: 'text-orange-300' },
 ];
 
 type SeasonPrizeGroup = {
@@ -162,15 +187,6 @@ const SEASON_PRIZE_GROUPS: readonly SeasonPrizeGroup[] = [
   { rankLabel: '31–39', reward: '1000 ⭐', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
   { rankLabel: '40–45', reward: '500 ⭐', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
   { rankLabel: '46–50', reward: '300 ⭐', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
-];
-
-const SEASON_STARS_PRIZES: readonly SeasonStarsPrize[] = [
-  { rankLabel: '4', stars: '1000' },
-  { rankLabel: '5', stars: '500' },
-  { rankLabel: '6–7', stars: '350' },
-  { rankLabel: '8', stars: '300' },
-  { rankLabel: '9', stars: '250' },
-  { rankLabel: '10', stars: '200' },
 ];
 
 const getPrizeTierByRank = (rank: number): PrizeTier | null => {
@@ -202,7 +218,7 @@ const ScoreRewardStack = memo(({
   <div className={`${wrapperClassName ?? ''} shrink-0 pl-2`}>
     {prizeTier || reservePrizeRow ? (
       <div className="grid w-[110px] grid-rows-[20px_24px] justify-items-end content-center gap-1 leading-none">
-        <span className={scoreClassName}>{score.toLocaleString()}</span>
+        <span className={scoreClassName}>{formatNumber(score)}</span>
         <div className="h-[24px] w-full flex items-center justify-end">
           {prizeTier ? (
             <PrizeBadge tier={prizeTier} />
@@ -213,7 +229,7 @@ const ScoreRewardStack = memo(({
       </div>
     ) : (
       <div className="flex h-[45px] w-[110px] items-center justify-end leading-none">
-        <span className={scoreClassName}>{score.toLocaleString()}</span>
+        <span className={scoreClassName}>{formatNumber(score)}</span>
       </div>
     )}
   </div>
@@ -229,8 +245,6 @@ const LEADERBOARD_MODES: readonly LeaderboardModeConfig[] = [
     state: 'live',
     // Current Arcade tab is backed by global progression until Battle gets its own leaderboard.
     boardType: 'global',
-    emptyTitle: 'Лидерборд пока пуст',
-    emptySubtitle: 'Играй и попади в топ!',
   },
   {
     id: 'campaign',
@@ -251,7 +265,7 @@ const normalizeUsername = (rawUsername: unknown): string | null => {
   return normalized.length > 0 ? normalized : null;
 };
 
-const normalizeDisplayName = (rawDisplayName: unknown, rawUsername?: unknown, fallback = DEFAULT_PLAYER_NAME): string => {
+const normalizeDisplayName = (rawDisplayName: unknown, rawUsername?: unknown, fallback = getDefaultPlayerName()): string => {
   if (typeof rawDisplayName === 'string') {
     const trimmed = rawDisplayName.trim();
     if (trimmed.length > 0) return trimmed;
@@ -274,7 +288,7 @@ function mapApiToPlayers(entries: { rank: number; userId: number; username: stri
     const normalizedUsername = normalizeUsername(entry.username);
     return {
       rank: entry.rank,
-      displayName: normalizeDisplayName(entry.firstName, entry.username, DEFAULT_PLAYER_NAME),
+      displayName: normalizeDisplayName(entry.firstName, entry.username, getDefaultPlayerName()),
       username: normalizedUsername,
       score: entry.score,
       avatarSeed: entry.userId,
@@ -426,7 +440,7 @@ const SeasonInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose: (
                 <Gift className="text-yellow-400 w-7 h-7" />
               </div>
               <h3 className="text-2xl font-black text-white uppercase tracking-wide drop-shadow-md">
-                Награды сезона
+                {translate('leaderboard:seasonRewardsTitle')}
               </h3>
             </div>
 
@@ -435,11 +449,11 @@ const SeasonInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose: (
               <div className="space-y-3">
                 {/* ТОП-3 */}
                 <div className="space-y-2">
-                  {SEASON_TOP_PRIZE_ROWS.map((row) => (
-                    <div key={row.placeLabel} className={`flex items-center justify-between bg-black/20 rounded-xl p-2.5 border ${row.borderClass}`}>
+                  {SEASON_TOP_PRIZE_ROWS.map((row, index) => (
+                    <div key={row.rank} className={`flex items-center justify-between bg-black/20 rounded-xl p-2.5 border ${row.borderClass}`}>
                       <div className="flex items-center gap-3">
                         <span className="text-xl drop-shadow-md">{row.icon}</span>
-                        <span className="text-white font-medium">{row.placeLabel}</span>
+                        <span className="text-white font-medium">{translate('leaderboard:season.placeLabel', { rank: row.rank ?? index + 1 })}</span>
                       </div>
                       <span className={`${row.rewardClass} font-black text-base whitespace-nowrap`}>{row.rewardLabel}</span>
                     </div>
@@ -461,7 +475,7 @@ const SeasonInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose: (
 
                 <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
                   <p className="text-white/90 font-medium text-sm leading-relaxed">
-                    По завершении сезона награды получат игроки, занявшие <span className="text-yellow-400 font-bold">1–50 места</span> в лидерборде.
+                    {translate('leaderboard:seasonRewardsSummary')}
                   </p>
                 </div>
               </div>
@@ -673,7 +687,7 @@ const BOTTOM_NAV_SELECTOR = '[data-bottom-nav]';
 const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger, myPosition, myScore }: { user: any, isDocked: boolean, pulseTrigger?: number, myPosition: number | null, myScore: number | null }) => {
   const currentUserRank = useMemo(() => {
     const normalizedUsername = normalizeUsername(user?.username);
-    const displayName = normalizeDisplayName(user?.firstName ?? user?.first_name, normalizedUsername, DEFAULT_PLAYER_NAME);
+    const displayName = normalizeDisplayName(user?.firstName ?? user?.first_name, normalizedUsername, getDefaultPlayerName());
 
     return {
       rank: myPosition ?? 0,
@@ -727,9 +741,9 @@ const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger, myPosition, mySc
       />
 
       <div className="flex flex-col items-center justify-center w-8 mr-2 leading-none relative z-10 shrink-0">
-         <span className="text-white/40 font-bold text-[10px] uppercase mb-1">Место</span>
+         <span className="text-white/40 font-bold text-[10px] uppercase mb-1">{translate('leaderboard:place')}</span>
          <span className={`font-black tracking-tighter transition-colors ${isDocked ? 'text-blue-200 text-sm' : 'text-cyan-300 text-sm drop-shadow-md'}`}>
-           {currentUserRank.rank > 0 ? `#${currentUserRank.rank.toLocaleString()}` : '—'}
+           {currentUserRank.rank > 0 ? `#${formatNumber(currentUserRank.rank)}` : '—'}
          </span>
       </div>
 
@@ -1032,14 +1046,14 @@ export function LeaderboardScreen() {
         {/* Кнопка информации (ровно там где ты указал на скрине) */}
         <button 
           onClick={() => { triggerHaptic('light'); setIsInfoModalOpen(true); }}
-          aria-label="Информация о сезоне"
+          aria-label={translate('leaderboard:seasonInfoLabel')}
           className="absolute top-3.5 right-3.5 z-20 w-10 h-10 flex items-center justify-center rounded-xl bg-white/10 border border-white/20 text-white/75 hover:text-white hover:bg-white/15 active:scale-95 transition-all backdrop-blur-sm shadow-[0_4px_14px_rgba(0,0,0,0.28)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-300/50"
         >
           <Info size={21} />
         </button>
 
         <Trophy size={56} className="mx-auto text-yellow-400 mb-2 drop-shadow-glow relative z-10" />
-        <h2 className="text-3xl font-black text-white uppercase tracking-wide drop-shadow-md relative z-10">#1 сезон</h2>
+        <h2 className="text-3xl font-black text-white uppercase tracking-wide drop-shadow-md relative z-10">{translate('leaderboard:seasonTitle')}</h2>
         
         {/* ДИНАМИЧЕСКИЙ ТАЙМЕР */}
         {seasonEndsAt && (
@@ -1048,13 +1062,13 @@ export function LeaderboardScreen() {
               <>
                 <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]"></div>
                 <p className="text-yellow-200/90 text-sm font-mono font-medium tracking-wide">
-                  {days}д {hours.toString().padStart(2, '0')}ч {minutes.toString().padStart(2, '0')}м
+                  {formatCompactCountdown(days, hours, minutes)}
                 </p>
               </>
             ) : (
               <>
                 <div className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_#ef4444]"></div>
-                <p className="text-red-300/90 text-sm font-mono font-medium tracking-wide">Сезон завершен</p>
+                <p className="text-red-300/90 text-sm font-mono font-medium tracking-wide">{translate('leaderboard:seasonEnded')}</p>
               </>
             )}
           </div>
@@ -1089,7 +1103,7 @@ export function LeaderboardScreen() {
                 />
                 <span className="text-4xl mb-3 block relative z-10" aria-hidden="true">{displayMode.icon}</span>
                 <h3 className="text-white text-xl font-bold mb-2 relative z-10">{displayMode.label}</h3>
-                <p className="text-white/60 text-sm relative z-10">Скоро</p>
+                <p className="text-white/60 text-sm relative z-10">{translate('leaderboard:comingSoon')}</p>
               </div>
             </motion.div>
           ) : leaderboard.length === 0 ? (
@@ -1102,8 +1116,8 @@ export function LeaderboardScreen() {
             >
               <div className="text-center py-16">
                 <div className="text-5xl mb-4">🏆</div>
-                <p className="text-white/60 text-base font-medium">{displayMode.emptyTitle ?? 'Лидерборд пока пуст'}</p>
-                <p className="text-white/35 text-sm mt-2">{displayMode.emptySubtitle ?? 'Играй и попади в топ!'}</p>
+                <p className="text-white/60 text-base font-medium">{translate('leaderboard:emptyTitle')}</p>
+                <p className="text-white/35 text-sm mt-2">{translate('leaderboard:emptySubtitle')}</p>
               </div>
             </motion.div>
           ) : (
@@ -1138,8 +1152,11 @@ export function LeaderboardScreen() {
                     <div className="w-12 h-[1px] bg-white/20 mb-3" />
                     <p className="text-white/30 text-xs font-medium">
                       {totalParticipants > leaderboard.length
-                        ? `Топ-${leaderboard.length} из ${totalParticipants}`
-                        : `${leaderboard.length} ${leaderboard.length === 1 ? 'участник' : leaderboard.length < 5 ? 'участника' : 'участников'}`
+                        ? translate('leaderboard:topOfTotal', {
+                            top: formatNumber(leaderboard.length),
+                            total: formatNumber(totalParticipants),
+                          })
+                        : formatParticipantsLabel(leaderboard.length)
                       }
                     </p>
                   </div>

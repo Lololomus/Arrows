@@ -217,6 +217,7 @@ export const API_ENDPOINTS = {
   auth: {
     telegram: '/auth/telegram',
     me: '/auth/me',
+    locale: '/auth/locale',
     refresh: '/auth/refresh',
   },
   game: {

@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { Coins } from 'lucide-react';
+import { formatNumber, translate } from '../../i18n';
 
 interface CoinStashCardProps {
   balance: number;
@@ -15,8 +16,8 @@ export function CoinStashCard({
   className = '',
   animated = true,
   delay = 0.2,
-  label = 'Coin stash',
-  badge = 'Wallet',
+  label = translate('common:coinStash'),
+  badge = translate('common:wallet'),
 }: CoinStashCardProps) {
   const animationProps = animated
     ? {
@@ -41,7 +42,7 @@ export function CoinStashCard({
           <div className="leading-tight">
             <p className="text-[11px] uppercase tracking-[0.22em] text-yellow-100/70">{label}</p>
             <p className="text-2xl font-black text-yellow-200 drop-shadow-[0_0_12px_rgba(250,204,21,0.35)]">
-              {balance.toLocaleString()}
+              {formatNumber(balance)}
             </p>
           </div>
         </div>

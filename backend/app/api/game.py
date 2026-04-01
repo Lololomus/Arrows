@@ -25,6 +25,7 @@ from ..schemas import (
     EnergyResponse, HintRequest, HintResponse,
     Grid, Arrow, Cell, LevelMeta
 )
+from .error_utils import api_error
 from .auth import get_current_user
 from ..services.level_loader import load_level_from_file
 from ..services.generator import get_hint as get_hint_arrow, get_free_arrows
@@ -351,12 +352,12 @@ async def _do_complete(
 
     if level_num < 1:
         return (
-            CompleteResponse(valid=False, current_level=user.current_level, error="Invalid level number"),
+            CompleteResponse(valid=False, current_level=user.current_level, error="GAME_INVALID_LEVEL_NUMBER"),
             metrics,
         )
     if request.time_seconds <= 0:
         return (
-            CompleteResponse(valid=False, current_level=user.current_level, error="Invalid completion time"),
+            CompleteResponse(valid=False, current_level=user.current_level, error="GAME_INVALID_COMPLETION_TIME"),
             metrics,
         )
 
@@ -391,12 +392,12 @@ async def _do_complete(
     if request.is_daily:
         if level_num != _get_daily_level_num():
             return (
-                CompleteResponse(valid=False, current_level=user.current_level, error="Invalid daily level"),
+                CompleteResponse(valid=False, current_level=user.current_level, error="DAILY_LEVEL_INVALID"),
                 metrics,
             )
     elif level_num != user.current_level:
         return (
-            CompleteResponse(valid=False, current_level=user.current_level, error="Level not unlocked"),
+            CompleteResponse(valid=False, current_level=user.current_level, error="LEVEL_NOT_UNLOCKED"),
             metrics,
         )
 
@@ -404,13 +405,13 @@ async def _do_complete(
     level_data = get_cached_level(level_num)
     if not level_data:
         return (
-            CompleteResponse(valid=False, current_level=user.current_level, error="Level data not found on server"),
+            CompleteResponse(valid=False, current_level=user.current_level, error="LEVEL_DATA_NOT_FOUND"),
             metrics,
         )
 
     if request.seed != level_data["seed"]:
         return (
-            CompleteResponse(valid=False, current_level=user.current_level, error="Invalid seed"),
+            CompleteResponse(valid=False, current_level=user.current_level, error="LEVEL_INVALID_SEED"),
             metrics,
         )
 
@@ -421,7 +422,7 @@ async def _do_complete(
 
     if len(request.moves) != len(arrows_raw):
         return (
-            CompleteResponse(valid=False, current_level=user.current_level, error="Invalid move count"),
+            CompleteResponse(valid=False, current_level=user.current_level, error="GAME_INVALID_MOVE_COUNT"),
             metrics,
         )
 
@@ -450,7 +451,7 @@ async def _do_complete(
 
     if not valid:
         return (
-            CompleteResponse(valid=False, current_level=user.current_level, error=error_msg or "Invalid moves"),
+            CompleteResponse(valid=False, current_level=user.current_level, error="GAME_INVALID_MOVES"),
             metrics,
         )
 
@@ -558,21 +559,21 @@ async def get_level(
 ):
     allow_locked = is_dev_level_unlock_bypass_active(x_dev_user_id)
     if level_num < 1:
-        raise HTTPException(status_code=400, detail="Invalid level number")
+        raise api_error(400, "LEVEL_INVALID_NUMBER", "Invalid level number")
     if level_num != user.current_level and not allow_locked:
-        raise HTTPException(status_code=403, detail="Level not unlocked")
+        raise api_error(403, "LEVEL_NOT_UNLOCKED", "Level not unlocked")
 
     if level_num > settings.MAX_AVAILABLE_LEVEL:
-        raise HTTPException(status_code=404, detail="Level not found (End of content)")
+        raise api_error(404, "LEVEL_NOT_FOUND", "Level not found")
 
     level_data = get_cached_level(level_num)
     if not level_data:
-        raise HTTPException(status_code=404, detail="Level not found (End of content)")
+        raise api_error(404, "LEVEL_NOT_FOUND", "Level not found")
 
     try:
         return _serialize_level_response(level_num, level_data)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Level data error: {str(e)}")
+    except Exception:
+        raise api_error(500, "LEVEL_DATA_ERROR", "Level data error")
 
 
 # ============================================
@@ -602,18 +603,18 @@ async def get_daily_level(
 ):
     """Уровень дня — один из сложных, доступен всем без проверки unlock."""
     if user.is_banned:
-        raise HTTPException(status_code=403, detail="Banned")
+        raise api_error(403, "USER_BANNED", "User is banned")
     level_num = _get_daily_level_num()
     level_data = get_cached_level(level_num)
     if not level_data:
-        raise HTTPException(status_code=404, detail="Daily level not found")
+        raise api_error(404, "DAILY_LEVEL_NOT_FOUND", "Daily level not found")
     try:
         response = _serialize_level_response(level_num, level_data)
         response.daily_day_number = _day_number()
         response.daily_date = _utc_today().isoformat()
         return response
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Level data error: {str(e)}")
+    except Exception:
+        raise api_error(500, "LEVEL_DATA_ERROR", "Level data error")
 
 
 @router.post("/complete", response_model=CompleteResponse)
@@ -628,7 +629,7 @@ async def complete_level(
     )
     locked_user = locked_user_result.scalar_one_or_none()
     if not locked_user:
-        raise HTTPException(status_code=401, detail="User not found")
+        raise api_error(401, "USER_NOT_FOUND", "User not found")
 
     endpoint_started = time.monotonic()
     completion, metrics = await _do_complete(
@@ -668,7 +669,7 @@ async def complete_and_next(
     )
     locked_user = locked_user_result.scalar_one_or_none()
     if not locked_user:
-        raise HTTPException(status_code=401, detail="User not found")
+        raise api_error(401, "USER_NOT_FOUND", "User not found")
 
     # 1. Проверяем и сохраняем
     endpoint_started = time.monotonic()
@@ -718,9 +719,9 @@ async def start_level(
 ):
     allow_locked = is_dev_level_unlock_bypass_active(x_dev_user_id)
     if level_num != user.current_level and not allow_locked:
-        raise HTTPException(status_code=403, detail="Level not unlocked")
+        raise api_error(403, "LEVEL_NOT_UNLOCKED", "Level not unlocked")
     if not await spend_energy(user, db):
-        raise HTTPException(status_code=402, detail="Not enough energy")
+        raise api_error(402, "NO_ENERGY", "Not enough energy")
     attempt = LevelAttempt(
         user_id=user.id, level_number=level_num,
         seed=level_num, result="pending",
@@ -775,19 +776,19 @@ async def get_hint(
     )
     row = result.first()
     if row is None:
-        raise HTTPException(status_code=409, detail="No hints available")
+        raise api_error(409, "NO_HINTS_AVAILABLE", "No hints available")
 
     new_balance = row[0]
 
     level_data = get_cached_level(request.level)
     if not level_data:
-        raise HTTPException(status_code=404, detail="Level not found")
+        raise api_error(404, "LEVEL_NOT_FOUND", "Level not found")
     remaining = [a for a in level_data["arrows"] if str(a["id"]) in request.remaining_arrows]
     if not remaining:
-        raise HTTPException(status_code=400, detail="No arrows remaining")
+        raise api_error(400, "NO_ARROWS_REMAINING", "No arrows remaining")
     hint_arrow_id = get_hint_arrow(remaining, level_data["grid"]["width"], level_data["grid"]["height"])
     if not hint_arrow_id:
-        raise HTTPException(status_code=500, detail="No valid move found")
+        raise api_error(500, "NO_VALID_MOVE_FOUND", "No valid move found")
 
     await db.commit()
     return HintResponse(arrow_id=hint_arrow_id, hint_balance=new_balance)

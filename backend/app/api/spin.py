@@ -18,6 +18,7 @@ from ..config import settings
 from ..database import get_db
 from ..models import AdRewardClaim, Transaction, User
 from ..services.ad_rewards import PLACEMENT_SPIN_RETRY, today_msk, utcnow
+from .error_utils import api_error
 from .auth import get_current_user
 
 
@@ -250,7 +251,7 @@ async def roll_spin(
     )
     locked_user = result.scalar_one_or_none()
     if locked_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise api_error(404, "USER_NOT_FOUND", "User not found")
 
     now = _spin_now()
     today = _spin_today()
@@ -266,10 +267,10 @@ async def roll_spin(
             await db.commit()
             last_spin_at = _fallback_last_spin_at(locked_user)
         else:
-            raise HTTPException(status_code=409, detail="Collect pending prize first")
+            raise api_error(409, "SPIN_PENDING_PRIZE", "Collect the pending prize first")
 
     if last_spin_at is not None and now < last_spin_at + SPIN_COOLDOWN:
-        raise HTTPException(status_code=409, detail="Spin on cooldown")
+        raise api_error(409, "SPIN_ON_COOLDOWN", "Spin is on cooldown")
 
     if last_spin_at is not None and now - last_spin_at < SPIN_STREAK_WINDOW:
         new_streak = (locked_user.login_streak or 0) + 1
@@ -307,17 +308,17 @@ async def retry_spin(
     )
     locked_user = result.scalar_one_or_none()
     if locked_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise api_error(404, "USER_NOT_FOUND", "User not found")
 
     last_spin_at = _fallback_last_spin_at(locked_user)
     if last_spin_at is None:
-        raise HTTPException(status_code=409, detail="No spin rolled")
+        raise api_error(409, "SPIN_NOT_ROLLED", "No spin has been rolled yet")
 
     if locked_user.pending_spin_prize_type is None:
-        raise HTTPException(status_code=404, detail="No pending prize to retry")
+        raise api_error(404, "SPIN_NO_PENDING_PRIZE", "No pending prize to retry")
 
     if _is_retry_used_for_current_spin(locked_user, last_spin_at):
-        raise HTTPException(status_code=409, detail="Retry already used")
+        raise api_error(409, "SPIN_RETRY_ALREADY_USED", "Spin retry has already been used")
 
     ad_claim = await db.execute(
         select(AdRewardClaim.id).where(
@@ -357,10 +358,10 @@ async def collect_spin(
     )
     locked_user = result.scalar_one_or_none()
     if locked_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise api_error(404, "USER_NOT_FOUND", "User not found")
 
     if locked_user.pending_spin_prize_type is None:
-        raise HTTPException(status_code=404, detail="No pending prize to collect")
+        raise api_error(404, "SPIN_NO_PENDING_PRIZE", "No pending prize to collect")
 
     prize_type = locked_user.pending_spin_prize_type
     prize_amount = locked_user.pending_spin_prize_amount or 0
@@ -405,7 +406,7 @@ async def dev_reset_spin(
     )
     locked_user = result.scalar_one_or_none()
     if locked_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise api_error(404, "USER_NOT_FOUND", "User not found")
 
     locked_user.pending_spin_prize_type = None
     locked_user.pending_spin_prize_amount = None
@@ -437,7 +438,7 @@ async def dev_set_spin_streak(
     )
     locked_user = result.scalar_one_or_none()
     if locked_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise api_error(404, "USER_NOT_FOUND", "User not found")
 
     locked_user.pending_spin_prize_type = None
     locked_user.pending_spin_prize_amount = None

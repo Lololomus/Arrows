@@ -6,6 +6,7 @@ import { useAppStore } from './stores/store';
 import { authApi, socialApi } from './api/client';
 import { ADS_ENABLED, UI_ANIMATIONS } from './config/constants';
 import { RewardToastHost } from './components/ui/RewardToastHost';
+import { TunnelDownOverlay } from './components/TunnelDownOverlay';
 import { SmartLoader } from './components/ui/SmartLoader';
 import { AuthExpiredScreen } from './components/AuthExpiredScreen';
 import { BottomNav, type TabId } from './components/BottomNav';
@@ -16,6 +17,7 @@ import gameBackgroundUrl from './assets/game-bg.webp?url';
 import { bootstrapAuth, hasUsableTelegramInitData, markAuthExpired } from './services/authSession';
 import { startRewardReconciler, stopRewardReconciler } from './services/rewardReconciler';
 import { extractReferralCode, getSavedReferralCode, clearSavedReferralCode } from './utils/referralLaunch';
+import { detectTelegramLocale, setAppLocale, translate } from './i18n';
 
 const ShopScreen = lazy(() =>
   import('./screens/ShopScreen').then((module) => ({ default: module.ShopScreen }))
@@ -40,6 +42,7 @@ export default function App() {
   return (
     <TonConnectUIProvider manifestUrl={TON_CONNECT_MANIFEST_URL}>
       <AppInner />
+      <TunnelDownOverlay />
     </TonConnectUIProvider>
   );
 }
@@ -49,9 +52,12 @@ function AppInner() {
     screen,
     authStatus,
     authMessage,
+    locale,
+    localeManuallySet,
     setUser,
     setError,
     setAuthenticatedSession,
+    setLocale,
   } = useAppStore();
   const [activeTab, setActiveTab] = useState<TabId>('play');
   const handleTabChange = useCallback((id: TabId) => setActiveTab(id), []);
@@ -112,7 +118,7 @@ function AppInner() {
           return;
         }
 
-        markAuthExpired('Сессия истекла. Переоткройте Mini App из Telegram.');
+        markAuthExpired(translate('auth:sessionExpired'));
         return;
       }
 
@@ -131,7 +137,7 @@ function AppInner() {
       if (cancelled()) return;
       console.error('Auth failed:', error);
       if (useAppStore.getState().authStatus !== 'expired') {
-        markAuthExpired('Сессия истекла. Переоткройте Mini App из Telegram.');
+        markAuthExpired(translate('auth:sessionExpired'));
       }
     }
   }, [applyReferralIfPresent, setAuthenticatedSession, setError]);
@@ -143,6 +149,17 @@ function AppInner() {
       cancelled = true;
     };
   }, [runBootstrap]);
+
+  useEffect(() => {
+    if (localeManuallySet) return;
+    const detectedLocale = detectTelegramLocale();
+    setLocale(detectedLocale);
+    void setAppLocale(detectedLocale);
+  }, [localeManuallySet, setLocale]);
+
+  useEffect(() => {
+    void setAppLocale(locale);
+  }, [locale]);
 
   useEffect(() => {
     if (!ADS_ENABLED) {
@@ -212,7 +229,7 @@ function AppInner() {
         <RewardToastHost />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(34,197,94,0.16),transparent_36%),linear-gradient(180deg,#020617_0%,#0f172a_100%)]" />
         <div className="relative z-10 flex h-full items-center justify-center">
-          <SmartLoader text="Проверяем сессию..." />
+          <SmartLoader text={translate('auth:sessionCheck')} />
         </div>
       </div>
     );
@@ -221,7 +238,7 @@ function AppInner() {
   if (authStatus === 'expired') {
     return (
       <AuthExpiredScreen
-        message={authMessage || 'Сессия истекла. Переоткройте Mini App из Telegram.'}
+        message={authMessage || translate('auth:sessionExpired')}
         onRetry={() => {
           void runBootstrap();
         }}

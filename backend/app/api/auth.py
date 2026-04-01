@@ -17,8 +17,14 @@ import jwt
 from ..config import settings
 from ..database import get_db, get_redis
 from ..models import User, UserStats, Referral
-from ..schemas import TelegramAuthRequest, AuthResponse, UserResponse
+from ..schemas import (
+    TelegramAuthRequest,
+    AuthResponse,
+    UserResponse,
+    UserLocaleUpdateRequest,
+)
 from ..middleware.security import validate_telegram_init_data, limiter
+from ..services.i18n import normalize_locale
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -52,6 +58,8 @@ def serialize_user(user: User) -> dict:
         "telegram_id": user.telegram_id,
         "username": user.username,
         "first_name": user.first_name,
+        "locale": normalize_locale(getattr(user, "locale", None)),
+        "locale_manually_set": bool(getattr(user, "locale_manually_set", False)),
         "photo_url": user.photo_url,
         "current_level": user.current_level,
         "total_stars": user.total_stars,
@@ -148,6 +156,8 @@ async def get_current_user(
                 telegram_id=telegram_id,
                 username="dev_user",
                 first_name="Developer",
+                locale="en",
+                locale_manually_set=False,
                 current_level=1,
                 coins=settings.DEV_AUTH_DEFAULT_COINS,
                 energy=min(settings.DEV_AUTH_DEFAULT_ENERGY, settings.MAX_ENERGY),
@@ -291,6 +301,7 @@ async def auth_telegram(
     telegram_id = telegram_user["id"]
     username = telegram_user.get("username")
     first_name = telegram_user.get("first_name")
+    locale = normalize_locale(telegram_user.get("language_code"))
     photo_url = telegram_user.get("photo_url")
     is_premium = telegram_user.get("is_premium", False)
     
@@ -308,6 +319,8 @@ async def auth_telegram(
             telegram_id=telegram_id,
             username=username,
             first_name=first_name,
+            locale=locale,
+            locale_manually_set=False,
             photo_url=photo_url,
             coins=settings.INITIAL_COINS,
             energy=settings.MAX_ENERGY,
@@ -336,6 +349,9 @@ async def auth_telegram(
         if user.first_name != first_name:
             user.first_name = first_name
             updated = True
+        if not bool(getattr(user, "locale_manually_set", False)) and normalize_locale(getattr(user, "locale", None)) != locale:
+            user.locale = locale
+            updated = True
         if user.photo_url != photo_url:
             user.photo_url = photo_url
             updated = True
@@ -355,7 +371,30 @@ async def auth_telegram(
 # @limiter.limit(f"{settings.RATE_LIMIT_AUTH}/minute")
 async def get_me(user: User = Depends(get_current_user)):
     """Получить данные текущего пользователя."""
-    return user
+    return UserResponse.model_validate(serialize_user(user))
+
+
+@router.put("/locale", response_model=UserResponse)
+async def update_locale(
+    body: UserLocaleUpdateRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    locale = normalize_locale(body.locale)
+    updated = False
+
+    if normalize_locale(getattr(user, "locale", None)) != locale:
+        user.locale = locale
+        updated = True
+    if not bool(getattr(user, "locale_manually_set", False)):
+        user.locale_manually_set = True
+        updated = True
+
+    if updated:
+        await db.commit()
+        await db.refresh(user)
+
+    return UserResponse.model_validate(serialize_user(user))
 
 
 @router.post("/refresh", response_model=AuthResponse)

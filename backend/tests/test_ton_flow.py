@@ -121,7 +121,7 @@ async def test_wallet_connect_rejects_wallet_bound_to_another_user(db_session: A
     await db_session.refresh(user)
 
     assert result.success is False
-    assert result.error == "Wallet already connected to another account"
+    assert result.error == "WALLET_ALREADY_CONNECTED"
     assert user.wallet_address is None
 
 
@@ -240,7 +240,10 @@ async def test_purchase_with_ton_rejects_non_extra_life_paid_item(
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "Only extra_life is available for TON purchases"
+    assert exc_info.value.detail == {
+        "code": "TON_ITEM_NOT_ALLOWED",
+        "message": "Only extra_life is available for TON purchases",
+    }
 
 
 @pytest.mark.asyncio
@@ -261,7 +264,10 @@ async def test_purchase_with_ton_rejects_unsupported_theme_item(
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "Only extra_life is available for TON purchases"
+    assert exc_info.value.detail == {
+        "code": "TON_ITEM_NOT_ALLOWED",
+        "message": "Only extra_life is available for TON purchases",
+    }
 
 
 @pytest.mark.asyncio
@@ -276,7 +282,10 @@ async def test_purchase_with_ton_is_disabled_by_default(db_session: AsyncSession
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "TON payments are currently disabled"
+    assert exc_info.value.detail == {
+        "code": "TON_PAYMENTS_DISABLED",
+        "message": "TON payments are currently disabled",
+    }
 
 
 @pytest.mark.asyncio

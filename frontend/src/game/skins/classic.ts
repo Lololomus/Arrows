@@ -8,6 +8,7 @@
  */
 
 import type { GameSkin } from './types';
+import { translate } from '../../i18n';
 
 // ============================================
 // EASING FUNCTIONS
@@ -20,10 +21,14 @@ const easeIn = (t: number) => t * t;
 // CLASSIC SKIN
 // ============================================
 
-export const ClassicSkin: GameSkin = {
+export const ClassicSkin = {
   id: 'classic',
-  name: 'Классический',
-  description: 'Строгий минимализм. Чистые линии, без лишних эффектов.',
+  get name() {
+    return translate('shop:skins.classic.name');
+  },
+  get description() {
+    return translate('shop:skins.classic.description');
+  },
   price: 0,
   icon: '🎯',
 
@@ -78,4 +83,4 @@ export const ClassicSkin: GameSkin = {
     appearStaggerDelay: 15,      // Задержка между стрелками
     appearDuration: 250,         // Длительность вырастания
   },
-};
+} as GameSkin;

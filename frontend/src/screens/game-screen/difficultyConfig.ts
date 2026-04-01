@@ -11,6 +11,7 @@
  */
 
 import { Trophy, Crown, Medal, Flame, Skull, HeartCrack, type LucideIcon } from 'lucide-react';
+import { translate } from '../../i18n';
 
 // ============================================
 // TYPES
@@ -28,7 +29,6 @@ export interface DifficultyVisualConfig {
   hudDotColor: string;
   /** Lives granted for this difficulty tier */
   lives: number;
-  victoryTitle: string;
   victoryIcon: LucideIcon;
   victoryIconColor: string;
   victoryGlow: string;
@@ -43,7 +43,6 @@ export interface DifficultyVisualConfig {
 }
 
 export interface DefeatVisualConfig {
-  title: string;
   icon: LucideIcon;
   iconColor: string;
   glow: string;
@@ -64,7 +63,6 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     hudBadgeColor: 'text-blue-400',
     hudDotColor: 'bg-blue-400',
     lives: 3,
-    victoryTitle: 'ПРОЙДЕНО',
     victoryIcon: Medal,
     victoryIconColor: 'text-blue-200',
     victoryGlow: 'bg-blue-500',
@@ -84,7 +82,6 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     hudBadgeColor: 'text-yellow-400',
     hudDotColor: 'bg-yellow-400',
     lives: 3,
-    victoryTitle: 'ПОБЕДА!',
     victoryIcon: Trophy,
     victoryIconColor: 'text-yellow-400',
     victoryGlow: 'bg-yellow-500',
@@ -104,7 +101,6 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     hudBadgeColor: 'text-rose-400',
     hudDotColor: 'bg-rose-400',
     lives: 3,
-    victoryTitle: 'ПРЕВОСХОДНО!',
     victoryIcon: Crown,
     victoryIconColor: 'text-amber-100',
     victoryGlow: 'bg-rose-500',
@@ -124,7 +120,6 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     hudBadgeColor: 'text-purple-400',
     hudDotColor: 'bg-purple-400',
     lives: 3,
-    victoryTitle: 'ЛЕГЕНДА!',
     victoryIcon: Flame,
     victoryIconColor: 'text-purple-200',
     victoryGlow: 'bg-purple-600',
@@ -144,7 +139,6 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     hudBadgeColor: 'text-red-500',
     hudDotColor: 'bg-red-500',
     lives: 3,
-    victoryTitle: 'НЕВОЗМОЖНО!',
     victoryIcon: Skull,
     victoryIconColor: 'text-red-200',
     victoryGlow: 'bg-red-600',
@@ -165,7 +159,6 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
 // ============================================
 
 export const DEFEAT_CONFIG: DefeatVisualConfig = {
-  title: 'ИГРА ОКОНЧЕНА',
   icon: HeartCrack,
   iconColor: 'text-red-400',
   glow: 'bg-red-900',
@@ -224,6 +217,27 @@ export function getDifficultyTier(difficulty: DifficultyValue): DifficultyTier {
 /** Returns visual config for backend difficulty value */
 export function getDifficultyConfig(difficulty: DifficultyValue): DifficultyVisualConfig {
   return DIFFICULTY_CONFIG[getDifficultyTier(difficulty)];
+}
+
+export function getVictoryTitle(tier: DifficultyTier): string {
+  switch (tier) {
+    case 'easy':
+      return translate('game:victory.titles.easy');
+    case 'normal':
+      return translate('game:victory.titles.normal');
+    case 'hard':
+      return translate('game:victory.titles.hard');
+    case 'extreme':
+      return translate('game:victory.titles.extreme');
+    case 'impossible':
+      return translate('game:victory.titles.impossible');
+    default:
+      return translate('game:ui.victoryTitle');
+  }
+}
+
+export function getDefeatTitle(): string {
+  return translate('game:defeat.title');
 }
 
 /** Returns lives count for difficulty tier */

@@ -10,6 +10,7 @@ import {
   getDifficultyConfig,
   type DifficultyValue,
 } from './difficultyConfig';
+import { translate } from '../../i18n';
 
 // ============================================
 // PROPS
@@ -162,7 +163,7 @@ function TopBar({
           className="bg-slate-900/90 backdrop-blur-md rounded-full px-6 py-2.5 border border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.6)] flex items-center gap-3"
         >
           <span className="text-white/50 text-xs font-bold uppercase tracking-widest leading-none mt-0.5">
-            LVL
+            {translate('game:ui.levelLabel')}
           </span>
           <span className="text-white font-black text-2xl leading-none tabular-nums">
             {currentLevel}
@@ -229,7 +230,7 @@ function BottomBar({
           onClick={onMenuClick}
           className="bg-slate-800/90 backdrop-blur-md px-5 py-4 rounded-2xl border border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.4)] shrink-0 flex items-center justify-center"
         >
-          <span className="text-white/90 font-bold text-xs tracking-wider">MENU</span>
+          <span className="text-white/90 font-bold text-xs tracking-wider">{translate('game:hud.menu')}</span>
         </motion.button>
 
         {/* 2. Статус Жизней */}
@@ -270,7 +271,7 @@ function BottomBar({
                   </div>
                   <div className="flex flex-col items-start leading-none justify-center">
                     <span className="text-[9px] font-bold text-emerald-50 uppercase tracking-widest mb-1 opacity-90">
-                      Бесплатно
+                      {translate('game:hud.free')}
                     </span>
                     <div className="flex items-center gap-1">
                       <span className="font-black text-lg text-white leading-none">+{hintAdRewardAmount}</span>

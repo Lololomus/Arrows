@@ -21,6 +21,7 @@ from ..schemas import (
     TonPaymentInfo, TransactionStatusResponse
 )
 from ..services.ton_verify import verify_ton_transaction
+from .error_utils import api_error
 from .auth import get_current_user
 
 
@@ -166,25 +167,25 @@ async def purchase_item(
     # Находим товар
     item = get_item_by_id(request.item_type, request.item_id)
     if not item:
-        return PurchaseResponse(success=False, error="Item not found")
+        return PurchaseResponse(success=False, error="ITEM_NOT_FOUND")
 
     if request.item_type != "boosts" or request.item_id not in BETA_VISIBLE_BOOST_IDS:
-        return PurchaseResponse(success=False, error="Item unavailable in beta shop")
+        return PurchaseResponse(success=False, error="ITEM_UNAVAILABLE")
     
     # Проверяем что это покупка за монеты
     price = item.get("price_coins")
     if price is None:
-        return PurchaseResponse(success=False, error="Item not available for coins")
+        return PurchaseResponse(success=False, error="ITEM_NOT_AVAILABLE_FOR_COINS")
     
     if price == 0:
-        return PurchaseResponse(success=False, error="Item is free")
+        return PurchaseResponse(success=False, error="ITEM_IS_FREE")
     
     # Проверяем баланс
     quantity = request.quantity if request.item_type == "boosts" else 1
     total_price = price * quantity
 
     if user.coins < total_price:
-        return PurchaseResponse(success=False, error="Not enough coins")
+        return PurchaseResponse(success=False, error="NOT_ENOUGH_COINS")
     
     # Проверяем что ещё не куплен (для не-бустов)
     if request.item_type != "boosts":
@@ -196,7 +197,7 @@ async def purchase_item(
             )
         )
         if result.scalar_one_or_none():
-            return PurchaseResponse(success=False, error="Already owned")
+            return PurchaseResponse(success=False, error="ALREADY_OWNED")
     
     # Списываем монеты
     user.coins -= total_price
@@ -246,18 +247,18 @@ async def purchase_with_stars(
     """
     item = get_item_by_id(request.item_type, request.item_id)
     if not item:
-        return PurchaseResponse(success=False, error="Item not found")
+        return PurchaseResponse(success=False, error="ITEM_NOT_FOUND")
     
     price = item.get("price_stars")
     if price is None:
-        return PurchaseResponse(success=False, error="Item not available for Stars")
+        return PurchaseResponse(success=False, error="ITEM_NOT_AVAILABLE_FOR_STARS")
     
     # TODO: Реальная интеграция с Telegram Stars
     # Здесь должен быть вызов Telegram Bot API для создания invoice
     
     return PurchaseResponse(
         success=False, 
-        error="Stars payment requires Telegram integration"
+        error="STARS_INTEGRATION_REQUIRED"
     )
 
 
@@ -271,21 +272,21 @@ async def purchase_with_ton(
     Получить данные для оплаты TON.
     """
     if not ton_payments_enabled():
-        raise HTTPException(status_code=403, detail="TON payments are currently disabled")
+        raise api_error(403, "TON_PAYMENTS_DISABLED", "TON payments are currently disabled")
 
     item = get_item_by_id(request.item_type, request.item_id)
     if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
+        raise api_error(404, "ITEM_NOT_FOUND", "Item not found")
 
     price = item.get("price_ton")
     if price is None:
-        raise HTTPException(status_code=400, detail="Item not available for TON")
+        raise api_error(400, "ITEM_NOT_AVAILABLE_FOR_TON", "Item not available for TON")
 
     if request.item_type != "boosts" or request.item_id not in TON_VISIBLE_UPGRADE_IDS:
-        raise HTTPException(status_code=403, detail="Only extra_life is available for TON purchases")
+        raise api_error(403, "TON_ITEM_NOT_ALLOWED", "Only extra_life is available for TON purchases")
 
     if user.extra_lives >= 2:
-        raise HTTPException(status_code=409, detail="Maximum extra lives already purchased")
+        raise api_error(409, "EXTRA_LIVES_LIMIT_REACHED", "Maximum extra lives already purchased")
 
     # Reuse existing pending transaction (take most recent to avoid MultipleResultsFound)
     pending = await db.execute(
@@ -351,7 +352,7 @@ async def get_transaction_status(
     )
     tx = result.scalar_one_or_none()
     if not tx:
-        raise HTTPException(status_code=404, detail="Transaction not found")
+        raise api_error(404, "TRANSACTION_NOT_FOUND", "Transaction not found")
 
     return TransactionStatusResponse(
         transaction_id=tx.id,
@@ -381,14 +382,14 @@ async def confirm_ton_transaction(
     )
     tx = result.scalar_one_or_none()
     if not tx:
-        raise HTTPException(status_code=404, detail="Transaction not found")
+        raise api_error(404, "TRANSACTION_NOT_FOUND", "Transaction not found")
 
     # Already completed — idempotent response
     if tx.status == "completed":
         return {"transaction_id": tx.id, "status": "completed", "verified": True}
 
     if tx.status != "pending":
-        raise HTTPException(status_code=409, detail=f"Transaction status is '{tx.status}'")
+        raise api_error(409, "TRANSACTION_NOT_PENDING", "Transaction is not pending", params={"status": tx.status})
 
     comment = f"arrow_{user.id}_{tx.id}"
     amount_nano = int(float(tx.amount) * 1_000_000_000)

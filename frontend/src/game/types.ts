@@ -139,6 +139,8 @@ export interface User {
   telegramId: number;
   username: string | null;
   firstName: string | null;
+  locale: 'ru' | 'en';
+  localeManuallySet: boolean;
   photo_url?: string | null;
   
   // Прогресс

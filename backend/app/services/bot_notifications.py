@@ -12,6 +12,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 from ..config import settings
+from .i18n import bot_text, normalize_locale
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +27,11 @@ def _get_bot() -> Bot:
     return _bot
 
 
-def _spin_keyboard() -> InlineKeyboardMarkup:
+def _spin_keyboard(locale: str | None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[
             InlineKeyboardButton(
-                text="🎰 Крутить рулетку",
+                text=bot_text("spin_button", locale),
                 web_app=WebAppInfo(url=settings.WEBAPP_URL),
             )
         ]]
@@ -41,19 +42,16 @@ def _tier_name(tier: int) -> str:
     return {0: "Tier 1", 1: "Tier 2", 2: "Tier 3"}.get(tier, "Tier 1")
 
 
-async def notify_spin_ready(telegram_id: int) -> NotificationDelivery:
+async def notify_spin_ready(telegram_id: int, locale: str | None = None) -> NotificationDelivery:
     """Notification: spin is available again (24h cooldown completed)."""
-    text = (
-        "🎰 <b>Рулетка снова доступна!</b>\n\n"
-        "Прошло 24 часа — самое время крутить.\n"
-        "Не прерывай серию 🔥"
-    )
+    locale = normalize_locale(locale)
+    text = bot_text("spin_ready", locale)
     try:
         await _get_bot().send_message(
             chat_id=telegram_id,
             text=text,
             parse_mode="HTML",
-            reply_markup=_spin_keyboard(),
+            reply_markup=_spin_keyboard(locale),
         )
         return "sent"
     except (TelegramForbiddenError, TelegramBadRequest):
@@ -63,19 +61,16 @@ async def notify_spin_ready(telegram_id: int) -> NotificationDelivery:
         return "failed"
 
 
-async def notify_spin_streak_reset(telegram_id: int, old_streak: int) -> NotificationDelivery:
+async def notify_spin_streak_reset(telegram_id: int, old_streak: int, locale: str | None = None) -> NotificationDelivery:
     """Notification: streak has been reset after missing the window."""
-    text = (
-        f"💔 <b>Серия прервана</b>\n\n"
-        f"Пропустил день — серия сброшена (была: <b>{old_streak} дн.</b>).\n\n"
-        "Возвращайся каждый день — чем длиннее серия, тем круче призы."
-    )
+    locale = normalize_locale(locale)
+    text = bot_text("spin_streak_reset", locale, old_streak=old_streak)
     try:
         await _get_bot().send_message(
             chat_id=telegram_id,
             text=text,
             parse_mode="HTML",
-            reply_markup=_spin_keyboard(),
+            reply_markup=_spin_keyboard(locale),
         )
         return "sent"
     except (TelegramForbiddenError, TelegramBadRequest):
@@ -85,19 +80,17 @@ async def notify_spin_streak_reset(telegram_id: int, old_streak: int) -> Notific
         return "failed"
 
 
-async def notify_streak_warning(telegram_id: int, streak: int, tier: int) -> NotificationDelivery:
+async def notify_streak_warning(telegram_id: int, streak: int, tier: int, locale: str | None = None) -> NotificationDelivery:
     """Notification: streak will reset in ~6 hours."""
+    locale = normalize_locale(locale)
     tier_name = _tier_name(tier)
-    text = (
-        f"⏰ <b>Серия {streak} дн. сгорит через ~6 часов</b>\n\n"
-        f"Не теряй <b>{tier_name}</b> — зайди и крути пока не поздно."
-    )
+    text = bot_text("spin_streak_warning", locale, streak=streak, tier_name=tier_name)
     try:
         await _get_bot().send_message(
             chat_id=telegram_id,
             text=text,
             parse_mode="HTML",
-            reply_markup=_spin_keyboard(),
+            reply_markup=_spin_keyboard(locale),
         )
         return "sent"
     except (TelegramForbiddenError, TelegramBadRequest):

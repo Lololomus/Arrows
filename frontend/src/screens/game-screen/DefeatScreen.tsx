@@ -12,7 +12,8 @@ import { motion } from 'framer-motion';
 import { Heart, RefreshCcw, Play, Tv2 } from 'lucide-react';
 
 import { DefeatFX } from './DefeatFX';
-import { DEFEAT_CONFIG } from './difficultyConfig';
+import { DEFEAT_CONFIG, getDefeatTitle } from './difficultyConfig';
+import { translate } from '../../i18n';
 
 interface DefeatScreenProps {
   level: number;
@@ -96,7 +97,7 @@ export function DefeatScreen({
           className={`text-4xl font-black text-transparent bg-clip-text bg-gradient-to-b ${cfg.textGradient} mb-6 tracking-tighter uppercase text-center leading-tight`}
           style={{ filter: 'drop-shadow(0px 4px 15px rgba(0,0,0,0.8))' }}
         >
-          {cfg.title}
+          {getDefeatTitle()}
         </motion.h2>
 
         {/* ===== ПЛАШКА УРОВНЯ ===== */}
@@ -107,12 +108,12 @@ export function DefeatScreen({
           className="flex items-center gap-3 mb-10 bg-[#1a0505]/95 pl-5 pr-2 py-1.5 rounded-full border border-red-500/20 shadow-[0_4px_20px_rgba(0,0,0,0.5)] backdrop-blur-xl"
         >
           <span className="text-white font-bold uppercase tracking-widest text-sm">
-            Уровень {level}
+            {translate('game:defeat.level', { level })}
           </span>
           <div className="w-px h-5 bg-red-500/20" />
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full border bg-red-500/10 border-red-500/30 text-red-400">
             <span className="text-[10px] font-black uppercase tracking-widest drop-shadow-md">
-              ПРОВАЛЕН
+              {translate('game:defeat.failed')}
             </span>
           </div>
         </motion.div>
@@ -133,7 +134,7 @@ export function DefeatScreen({
               className="w-full py-5 rounded-[20px] bg-gradient-to-b from-emerald-400 to-emerald-600 text-white font-black text-xl uppercase tracking-widest hover:brightness-110 transition-all border border-emerald-300/30 shadow-xl flex items-center justify-center gap-3 disabled:opacity-50"
             >
               <Heart size={22} fill="currentColor" />
-              {isReviveLoading ? 'Воскрешаем...' : `Воскреснуть (${balanceReviveCount})`}
+              {isReviveLoading ? translate('game:defeat.reviving') : translate('game:defeat.revive', { count: balanceReviveCount })}
             </motion.button>
           )}
 
@@ -147,11 +148,11 @@ export function DefeatScreen({
                 className="w-full py-5 rounded-[20px] bg-gradient-to-b from-emerald-500 to-emerald-700 text-white font-black text-xl uppercase tracking-widest hover:brightness-110 transition-all border border-emerald-400/30 shadow-xl flex items-center justify-center gap-3 disabled:opacity-50"
               >
                 <Tv2 size={22} />
-                {reviveLoading ? 'Загрузка...' : revivePending ? 'Проверить награду' : 'Смотреть рекламу'}
+                {reviveLoading ? translate('game:defeat.loadingAd') : revivePending ? translate('game:defeat.checkReward') : translate('game:defeat.watchAd')}
                 {!reviveLoading && <Play size={16} className="opacity-70" />}
               </motion.button>
               <p className="text-xs font-medium text-white/50 -mt-2">
-                Бесплатное воскрешение — 1 раз за уровень
+                {translate('game:defeat.freeRevive')}
               </p>
             </>
           )}
@@ -166,14 +167,14 @@ export function DefeatScreen({
             className={`w-full py-5 rounded-[20px] ${cfg.button} text-white font-black text-xl uppercase tracking-widest hover:brightness-110 transition-all border border-red-400/30 shadow-xl flex items-center justify-center gap-3`}
           >
             <RefreshCcw size={24} className="opacity-80" strokeWidth={3} />
-            Повторить
+            {translate('game:victory.retry')}
           </motion.button>
 
           <button
             onClick={onMenu}
             className="text-white/40 font-bold text-xs tracking-widest uppercase hover:text-white/80 transition-colors py-2 px-6"
           >
-            Вернуться в меню
+            {translate('common:backToMenu')}
           </button>
         </motion.div>
       </div>

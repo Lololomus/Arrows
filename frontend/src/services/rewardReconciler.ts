@@ -4,6 +4,7 @@ import type {
   RewardIntentStatusResponse,
   RewardPlacement,
 } from '../game/types';
+import { translate } from '../i18n';
 import { useAppStore } from '../stores/store';
 import { useRewardStore } from '../stores/rewardStore';
 
@@ -40,15 +41,15 @@ function getRewardToastMessage(status: RewardIntentStatusResponse): string | nul
   if (status.status === 'granted') {
     switch (status.placement) {
       case 'reward_daily_coins':
-        return '+20 монет начислены';
+        return translate('game:rewardToast.dailyCoinsGranted');
       case 'reward_hint':
-        return 'Подсказки начислены';
+        return translate('game:rewardToast.hintsGranted');
       case 'reward_revive':
-        return 'Награда за продолжение подтверждена';
+        return translate('game:rewardToast.reviveGranted');
       case 'reward_spin_retry':
-        return 'Респин за рекламу подтвержден';
+        return translate('game:rewardToast.spinRetryGranted');
       default:
-        return 'Награда начислена';
+        return translate('game:rewardToast.granted');
     }
   }
 
@@ -58,9 +59,9 @@ function getRewardToastMessage(status: RewardIntentStatusResponse): string | nul
 
   switch (status.failureCode) {
     case 'INTENT_EXPIRED':
-      return 'Проверка награды истекла';
+      return translate('game:rewardToast.expired');
     case 'INVALID_SIGNATURE':
-      return 'Не удалось подтвердить просмотр рекламы';
+      return translate('game:rewardToast.invalidSignature');
     default:
       return null;
   }

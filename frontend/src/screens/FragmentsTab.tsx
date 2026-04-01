@@ -5,6 +5,8 @@ import { CheckCircle2, Flame, Gem, Info, Loader2, AlertTriangle } from 'lucide-r
 
 import { fragmentsApi, handleApiError } from '../api/client';
 import type { FragmentDrop } from '../game/types';
+import { getFragmentConditionDescription } from '../i18n/content';
+import { formatNumber, translate } from '../i18n';
 
 // ─── Mock data (DEV only) ─────────────────────────────────────────────────────
 
@@ -53,11 +55,6 @@ const MOCK_DROPS: FragmentDrop[] = [
   },
 ];
 
-const CONDITION_LABELS: Record<string, string> = {
-  arcade_levels: 'уровней в Arcade',
-  friends_confirmed: 'друзей',
-};
-
 function mapApiStatus(status: string): FragmentDrop['status'] {
   if (status === 'delivered') return 'completed';
   if (status === 'claiming') return 'claiming';
@@ -74,13 +71,12 @@ async function fetchFragmentDrops(): Promise<FragmentDrop[]> {
 
   const apiDrops = await fragmentsApi.getDrops();
   return apiDrops.map((d) => {
-    const condLabel = CONDITION_LABELS[d.conditionType] ?? '';
     return {
       id: String(d.id),
       emoji: d.emoji,
       title: d.title,
-      subtitle: `${d.title} (${d.giftStarCost} ⭐️)`,
-      description: d.description ?? `Достигни ${d.conditionTarget} ${condLabel}`,
+      subtitle: translate('fragments:subtitle', { stars: formatNumber(d.giftStarCost) }),
+      description: d.description ?? getFragmentConditionDescription(d.conditionType, d.conditionTarget, ''),
       status: mapApiStatus(d.status),
       totalStock: d.totalStock,
       remainingStock: d.remainingStock,
@@ -157,18 +153,18 @@ const FragmentsInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose
                 <Gem className="text-cyan-400 w-8 h-8" />
               </div>
               <h3 className="text-2xl font-black text-white uppercase tracking-wide mb-6 drop-shadow-md">
-                Как это работает?
+                {translate('fragments:info.title')}
               </h3>
 
               <div className="space-y-4 text-left">
                 <div className="bg-gradient-to-br from-cyan-900/40 to-blue-900/20 rounded-2xl p-4 border border-cyan-500/30 shadow-lg">
                   <p className="text-white/90 font-medium text-sm leading-relaxed text-center">
-                    Собирай фрагменты подарков за выполнение заданий и выводи их себе прямо в Telegram!
+                    {translate('fragments:info.lead')}
                   </p>
                 </div>
                 <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
                   <p className="text-white/80 font-medium text-xs leading-relaxed text-center">
-                    Количество наград строго ограничено. Успей забрать свой эксклюзивный дроп первым.
+                    {translate('fragments:info.stock')}
                   </p>
                 </div>
               </div>
@@ -177,7 +173,7 @@ const FragmentsInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose
                 onClick={onClose}
                 className="mt-6 w-full py-3.5 bg-white/10 hover:bg-white/15 rounded-xl text-white font-bold text-sm transition-colors active:scale-95"
               >
-                Понятно
+                {translate('fragments:info.close')}
               </button>
             </div>
           </motion.div>
@@ -217,7 +213,7 @@ function ClaimableCard({ drop, onClaim, claiming = false }: { drop: FragmentDrop
               <p className="text-cyan-400 text-xs font-bold mt-0.5">{drop.subtitle}</p>
             </div>
             <div className="bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">
-              {drop.remainingStock}/{drop.totalStock} шт.
+              {translate('fragments:stock', { remaining: formatNumber(drop.remainingStock), total: formatNumber(drop.totalStock) })}
             </div>
           </div>
 
@@ -233,7 +229,7 @@ function ClaimableCard({ drop, onClaim, claiming = false }: { drop: FragmentDrop
             }}
           >
             <span className="relative z-10 flex items-center gap-2">
-              {claiming ? 'Отправляем...' : '🎁 Забрать'}
+              {claiming ? translate('fragments:sending') : `🎁 ${translate('fragments:claim')}`}
             </span>
             <motion.span
               className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent skew-x-[-25deg]"
@@ -269,7 +265,7 @@ function InProgressCard({ drop }: { drop: FragmentDrop }) {
               <p className="text-pink-400 text-xs font-bold mt-0.5">{drop.subtitle}</p>
             </div>
             <div className="bg-yellow-500/20 border border-yellow-500/40 text-yellow-400 text-[10px] font-bold px-2 py-1 rounded-md flex items-center gap-1 shrink-0">
-              {drop.remainingStock}/{drop.totalStock} шт.
+              {translate('fragments:stock', { remaining: formatNumber(drop.remainingStock), total: formatNumber(drop.totalStock) })}
             </div>
           </div>
 
@@ -278,7 +274,7 @@ function InProgressCard({ drop }: { drop: FragmentDrop }) {
           {drop.progressCurrent != null && drop.progressTarget != null && (
             <div className="mt-3">
               <div className="flex justify-between items-end mb-1.5">
-                <span className="text-[10px] text-white/50 font-bold uppercase tracking-wide">Прогресс</span>
+                <span className="text-[10px] text-white/50 font-bold uppercase tracking-wide">{translate('common:progress')}</span>
                 <span className="text-sm font-black text-white">
                   {drop.progressCurrent}
                   <span className="text-white/40 text-xs font-bold">/{drop.progressTarget}</span>
@@ -310,7 +306,7 @@ function CompletedCard({ drop }: { drop: FragmentDrop }) {
         </div>
 
         <div className="flex-1">
-          <h3 className="font-bold text-base leading-tight text-emerald-400">Подарок получен</h3>
+          <h3 className="font-bold text-base leading-tight text-emerald-400">{translate('fragments:deliveredTitle')}</h3>
           <p className="text-white/50 text-xs mt-0.5 line-through">{drop.subtitle}</p>
           <p className="text-white/40 text-xs mt-2">{drop.description}</p>
         </div>
@@ -334,14 +330,14 @@ function SoldOutCard({ drop }: { drop: FragmentDrop }) {
               <p className="text-white/40 text-xs font-bold mt-0.5">{drop.subtitle}</p>
             </div>
             <div className="bg-white/5 border border-white/10 text-white/40 text-[10px] font-bold px-2 py-1 rounded-md shrink-0">
-              0/{drop.totalStock} шт.
+              {translate('fragments:stock', { remaining: 0, total: formatNumber(drop.totalStock) })}
             </div>
           </div>
 
           <p className="text-white/40 text-xs mt-2 mb-2">{drop.description}</p>
 
           <div className="mt-2 w-full py-1.5 bg-black/20 rounded-lg text-center text-[10px] font-bold text-white/40 uppercase tracking-widest border border-white/5">
-            Все разобрали 😔
+            {translate('fragments:soldOut')} 😔
           </div>
         </div>
       </div>
@@ -360,11 +356,11 @@ function ClaimingCard({ drop }: { drop: FragmentDrop }) {
         <div className="flex-1">
           <h3 className="font-bold text-base leading-tight text-white">{drop.title}</h3>
           <p className="text-yellow-400 text-xs font-bold mt-0.5">{drop.subtitle}</p>
-          <p className="text-white/60 text-xs mt-2 mb-3">Подарок отправляется в твой Telegram...</p>
+          <p className="text-white/60 text-xs mt-2 mb-3">{translate('fragments:sendingDescription')}</p>
 
           <div className="w-full py-2.5 bg-yellow-500/10 border border-yellow-500/20 rounded-[0.8rem] flex items-center justify-center gap-2">
             <Loader2 size={14} className="text-yellow-400 animate-spin" />
-            <span className="text-yellow-400 text-sm font-bold">Отправляем...</span>
+            <span className="text-yellow-400 text-sm font-bold">{translate('fragments:sending')}</span>
           </div>
         </div>
       </div>
@@ -384,15 +380,15 @@ function FailedCard({ drop, onRetry }: { drop: FragmentDrop; onRetry: () => void
         </div>
 
         <div className="flex-1">
-          <h3 className="font-bold text-base leading-tight text-red-400">Ошибка доставки</h3>
+          <h3 className="font-bold text-base leading-tight text-red-400">{translate('fragments:failedTitle')}</h3>
           <p className="text-white/50 text-xs mt-0.5">{drop.subtitle}</p>
-          <p className="text-white/50 text-xs mt-2 mb-3">Убедись, что бот не заблокирован, и попробуй снова.</p>
+          <p className="text-white/50 text-xs mt-2 mb-3">{translate('fragments:failedDescription')}</p>
 
           <button
             onClick={onRetry}
             className="w-full py-2.5 text-sm font-bold uppercase tracking-wider text-white rounded-[0.8rem] bg-red-500/20 border border-red-500/30 hover:bg-red-500/30 active:scale-95 transition-all"
           >
-            Повторить
+            {translate('common:retry')}
           </button>
         </div>
       </div>
@@ -510,7 +506,7 @@ export default function FragmentsTab() {
         <button
           onClick={() => setInfoOpen(true)}
           className="absolute top-3.5 right-3.5 z-20 w-10 h-10 flex items-center justify-center rounded-xl bg-white/10 border border-white/20 text-white/75 hover:text-white hover:bg-white/15 active:scale-95 transition-all backdrop-blur-sm shadow-[0_4px_14px_rgba(0,0,0,0.28)]"
-          aria-label="Информация"
+          aria-label={translate('fragments:info.title')}
         >
           <Info size={18} />
         </button>
@@ -520,9 +516,9 @@ export default function FragmentsTab() {
           className="text-cyan-400 mx-auto mb-2 relative z-10 drop-shadow-[0_0_15px_rgba(34,211,238,0.5)]"
         />
         <h1 className="text-[26px] leading-tight font-black text-white uppercase tracking-wide drop-shadow-md relative z-10">
-          ЛИМИТИРОВАННЫЕ ДРОПЫ
+          {translate('fragments:banner.title')}
         </h1>
-        <p className="text-white/60 text-xs mt-1.5 relative z-10">Выполняй хардкорные задания</p>
+        <p className="text-white/60 text-xs mt-1.5 relative z-10">{translate('fragments:banner.subtitle')}</p>
       </div>
 
       {/* Error toast */}
@@ -551,7 +547,7 @@ export default function FragmentsTab() {
       {inProgress.length > 0 && (
         <>
           <SectionDivider
-            label="В ПРОЦЕССЕ"
+            label={translate('fragments:section.inProgress')}
             lineClass="via-yellow-400/20"
             icon={<Flame size={10} className="text-yellow-400" />}
             delay={0.05}
@@ -566,7 +562,7 @@ export default function FragmentsTab() {
       {hasDone && (
         <>
           <SectionDivider
-            label="ЗАВЕРШЕННЫЕ"
+            label={translate('fragments:section.completed')}
             lineClass="via-green-400/20"
             icon={<CheckCircle2 size={10} className="text-green-400" />}
             delay={0.08}

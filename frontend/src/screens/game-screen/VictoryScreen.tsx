@@ -17,10 +17,12 @@ import { AnimatedRewardCounter } from './AnimatedRewardCounter';
 import {
   DIFFICULTY_CONFIG,
   getDifficultyTier,
+  getVictoryTitle,
   formatTime,
   type DifficultyTier,
   type DifficultyValue,
 } from './difficultyConfig';
+import { formatNumber, translate } from '../../i18n';
 
 export type NextButtonState = 'idle' | 'saving' | 'loading' | 'error';
 export type PendingVictoryAction = 'next' | 'menu' | null;
@@ -48,20 +50,20 @@ interface VictoryScreenProps {
 function getButtonLabel(state: NextButtonState, elapsed: number): string {
   switch (state) {
     case 'saving':
-      return elapsed > 1000 ? 'Проверяем решение...' : 'Сохраняем...';
+      return elapsed > 1000 ? translate('game:victory.checking') : translate('game:victory.saving');
     case 'loading':
-      return 'Открываем уровень...';
+      return translate('game:victory.openingLevel');
     case 'error':
-      return 'Повторить';
+      return translate('game:victory.retry');
     default:
-      return 'Следующий';
+      return translate('game:victory.next');
   }
 }
 
 function getHelperText(state: NextButtonState, pendingAction: PendingVictoryAction): string | null {
-  if (state === 'saving' && pendingAction === 'next') return 'Откроем следующий уровень после сохранения';
-  if (state === 'saving' && pendingAction === 'menu') return 'Вернёмся в меню после сохранения';
-  if (state === 'saving') return 'Сохраняем прогресс...';
+  if (state === 'saving' && pendingAction === 'next') return translate('game:victory.nextAfterSave');
+  if (state === 'saving' && pendingAction === 'menu') return translate('game:victory.menuAfterSave');
+  if (state === 'saving') return translate('game:victory.savingProgress');
   return null;
 }
 
@@ -170,7 +172,7 @@ export function VictoryScreen({
           className={`text-5xl font-black text-transparent bg-clip-text bg-gradient-to-b ${cfg.victoryTextGradient} mb-6 tracking-tighter uppercase text-center`}
           style={{ filter: 'drop-shadow(0px 4px 15px rgba(0,0,0,0.8))' }}
         >
-          {cfg.victoryTitle}
+          {getVictoryTitle(tier)}
         </motion.h2>
 
         {/* ===== ПЛАШКА УРОВНЯ + BADGE ===== */}
@@ -181,7 +183,7 @@ export function VictoryScreen({
           className="flex items-center gap-3 mb-5 bg-[#0a0f1d]/95 pl-5 pr-2 py-1.5 rounded-full border border-white/20 shadow-[0_4px_20px_rgba(0,0,0,0.5)] backdrop-blur-xl"
         >
           <span className="text-white font-bold uppercase tracking-widest text-sm">
-            Уровень {level}
+            {translate('game:victory.level', { level })}
           </span>
           <div className="w-px h-5 bg-white/20" />
           <div
@@ -214,7 +216,7 @@ export function VictoryScreen({
           <div className="flex flex-col relative z-10 min-w-[110px]">
             <div className="flex flex-col">
               <span className="text-[10px] font-bold text-white/50 uppercase tracking-widest leading-none mb-1.5">
-                Получено монет
+                {translate('game:victory.rewardReceived')}
               </span>
               <span className="text-2xl font-black text-yellow-300 leading-none drop-shadow-[0_0_10px_rgba(250,204,21,0.4)] flex items-end">
                 <span className="text-yellow-500 text-xl mr-0.5">+</span>
@@ -231,10 +233,10 @@ export function VictoryScreen({
                 >
                   <div className="mt-2 pt-2 border-t border-yellow-500/20 flex flex-col gap-1">
                     <span className="text-[9px] font-bold text-white/40 uppercase tracking-widest leading-none">
-                      Текущий баланс
+                      {translate('game:victory.currentBalance')}
                     </span>
                     <span className="text-sm font-black text-yellow-500 flex items-center gap-1.5 leading-none">
-                      {totalCoins?.toLocaleString('ru-RU') ?? '---'} <Coins size={12} className="opacity-80" />
+                      {totalCoins != null ? formatNumber(totalCoins) : '---'} <Coins size={12} className="opacity-80" />
                     </span>
                   </div>
                 </motion.div>
@@ -252,7 +254,7 @@ export function VictoryScreen({
         >
           <Timer size={16} className={cfg.headerColor} />
           <span className="text-sm tracking-wide">
-            Время:{' '}
+            {translate('game:victory.time')}:{' '}
             <span className="font-mono text-white font-bold ml-1 text-base tracking-wider">
               {formatTime(timeSeconds)}
             </span>
@@ -293,12 +295,12 @@ export function VictoryScreen({
             <motion.button
               whileTap={{ scale: 0.96 }}
               onClick={onShare}
-              className="w-full py-4 rounded-[20px] text-white font-black text-base uppercase tracking-widest bg-gradient-to-r from-blue-600 to-cyan-600 border border-white/20 shadow-xl hover:brightness-110 transition-all flex items-center justify-center gap-2"
-            >
-              <span>📤</span>
-              <span>Поделиться результатом</span>
-            </motion.button>
-          )}
+            className="w-full py-4 rounded-[20px] text-white font-black text-base uppercase tracking-widest bg-gradient-to-r from-blue-600 to-cyan-600 border border-white/20 shadow-xl hover:brightness-110 transition-all flex items-center justify-center gap-2"
+          >
+            <span>📤</span>
+            <span>{translate('game:victory.shareResult')}</span>
+          </motion.button>
+        )}
 
           {/* === ГЛАВНАЯ КНОПКА === */}
           <motion.button
@@ -342,7 +344,7 @@ export function VictoryScreen({
 
             {/* Текст */}
             <span className={isBusy ? 'text-lg' : ''}>
-              {isDaily && !isBusy && !isError ? 'Готово!' : getButtonLabel(nextButtonState, stateElapsed)}
+              {isDaily && !isBusy && !isError ? translate('game:victory.done') : getButtonLabel(nextButtonState, stateElapsed)}
             </span>
           </motion.button>
 
@@ -350,7 +352,7 @@ export function VictoryScreen({
             onClick={onMenu}
             className="text-white/40 font-bold text-xs tracking-widest uppercase hover:text-white/80 transition-colors py-2 px-6"
           >
-            Вернуться в меню
+            {translate('common:backToMenu')}
           </button>
         </motion.div>
       </div>

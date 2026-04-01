@@ -6,6 +6,7 @@
 
 import React, { ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { formatNumber, translate } from '../i18n';
 
 // ============================================
 // HEADER
@@ -52,7 +53,7 @@ export function Header({
         {coins !== undefined && (
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-yellow-500/20">
             <span className="text-lg">🪙</span>
-            <span className="font-semibold text-yellow-400">{coins.toLocaleString()}</span>
+            <span className="font-semibold text-yellow-400">{formatNumber(coins)}</span>
           </div>
         )}
         {energy !== undefined && (
@@ -114,7 +115,7 @@ export function GameControls({
       
       {/* Level */}
       <div className="flex flex-col items-center">
-        <span className="text-sm text-white/60">Уровень</span>
+        <span className="text-sm text-white/60">{translate('game:ui.levelLabel')}</span>
         <span className="text-2xl font-bold text-white">{level}</span>
       </div>
       
@@ -124,18 +125,18 @@ export function GameControls({
           icon="↩️"
           onClick={onUndo}
           disabled={!canUndo}
-          tooltip="Отмена"
+          tooltip={translate('game:ui.undo')}
         />
         <ControlButton
           icon="💡"
           onClick={onHint}
           badge={hintsLeft > 0 ? hintsLeft : undefined}
-          tooltip="Подсказка"
+          tooltip={translate('game:ui.hint')}
         />
         <ControlButton
           icon="🔄"
           onClick={onRestart}
-          tooltip="Рестарт"
+          tooltip={translate('game:ui.restart')}
         />
       </div>
     </div>
@@ -252,11 +253,11 @@ export function VictoryModal({
           animate={{ y: 0, opacity: 1 }}
           className="text-4xl font-bold text-white mb-2"
         >
-          🎉 Победа!
+          🎉 {translate('game:ui.victoryTitle')}
         </motion.div>
         
         {/* Level */}
-        <p className="text-white/60 mb-6">Уровень {level} пройден</p>
+        <p className="text-white/60 mb-6">{translate('game:ui.levelCompleted', { level })}</p>
         
         {/* Stars */}
         <div className="flex justify-center gap-2 mb-6">
@@ -291,7 +292,7 @@ export function VictoryModal({
             className="w-full mb-4 py-3 rounded-xl bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-bold flex items-center justify-center gap-2 hover:brightness-110 transition-all"
           >
             <span>📺</span>
-            <span>Удвоить за рекламу</span>
+            <span>{translate('game:ui.doubleForAd')}</span>
           </button>
         )}
         
@@ -301,19 +302,19 @@ export function VictoryModal({
             onClick={onHome}
             className="flex-1 py-3 rounded-xl bg-white/10 text-white font-semibold hover:bg-white/20 transition-colors"
           >
-            🏠 Меню
+            🏠 {translate('common:menu')}
           </button>
           <button
             onClick={onReplay}
             className="flex-1 py-3 rounded-xl bg-white/10 text-white font-semibold hover:bg-white/20 transition-colors"
           >
-            🔄 Ещё раз
+            🔄 {translate('game:ui.playAgain')}
           </button>
           <button
             onClick={onNext}
             className="flex-1 py-3 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold hover:brightness-110 transition-all"
           >
-            Далее ➡️
+            {translate('game:ui.next')} ➡️
           </button>
         </div>
       </div>
@@ -349,10 +350,10 @@ export function GameOverModal({
           animate={{ scale: 1, opacity: 1 }}
           className="text-4xl font-bold text-red-400 mb-2"
         >
-          💔 Поражение
+          💔 {translate('game:ui.defeatTitle')}
         </motion.div>
         
-        <p className="text-white/60 mb-6">Уровень {level}</p>
+        <p className="text-white/60 mb-6">{translate('game:victory.level', { level })}</p>
         
         {/* Animation */}
         <motion.div
@@ -370,7 +371,7 @@ export function GameOverModal({
             className="w-full mb-4 py-3 rounded-xl bg-gradient-to-r from-red-500 to-pink-500 text-white font-bold flex items-center justify-center gap-2 hover:brightness-110 transition-all"
           >
             <span>📺</span>
-            <span>+1 жизнь за рекламу</span>
+            <span>{translate('game:ui.extraLifeAd')}</span>
           </button>
         )}
         
@@ -380,13 +381,13 @@ export function GameOverModal({
             onClick={onHome}
             className="flex-1 py-3 rounded-xl bg-white/10 text-white font-semibold hover:bg-white/20 transition-colors"
           >
-            🏠 Меню
+            🏠 {translate('common:menu')}
           </button>
           <button
             onClick={onRetry}
             className="flex-1 py-3 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold hover:brightness-110 transition-all"
           >
-            🔄 Попробовать снова
+            🔄 {translate('game:ui.retryLevel')}
           </button>
         </div>
       </div>
@@ -423,9 +424,9 @@ export function NoEnergyModal({
     <Modal isOpen={isOpen} onClose={onClose} className="w-full max-w-sm p-6">
       <div className="text-center">
         <div className="text-5xl mb-4">⚡</div>
-        <h2 className="text-2xl font-bold text-white mb-2">Нет энергии</h2>
+        <h2 className="text-2xl font-bold text-white mb-2">{translate('game:ui.noEnergy')}</h2>
         <p className="text-white/60 mb-4">
-          Следующая через {formatTime(secondsToNext)}
+          {translate('game:ui.nextEnergyIn', { time: formatTime(secondsToNext) })}
         </p>
         
         <div className="space-y-3">
@@ -434,7 +435,7 @@ export function NoEnergyModal({
             className="w-full py-3 rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 text-white font-bold flex items-center justify-center gap-2"
           >
             <span>📺</span>
-            <span>Смотреть рекламу</span>
+            <span>{translate('game:ui.watchAd')}</span>
           </button>
           
           <button
@@ -442,14 +443,14 @@ export function NoEnergyModal({
             className="w-full py-3 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold flex items-center justify-center gap-2"
           >
             <span>⭐</span>
-            <span>Купить энергию</span>
+            <span>{translate('game:ui.buyEnergy')}</span>
           </button>
           
           <button
             onClick={onClose}
             className="w-full py-3 rounded-xl bg-white/10 text-white font-semibold"
           >
-            Подождать
+            {translate('game:ui.wait')}
           </button>
         </div>
       </div>
@@ -521,7 +522,7 @@ export function Button({
 // LOADER
 // ============================================
 
-export function Loader({ text = 'Загрузка...' }: { text?: string }) {
+export function Loader({ text = translate('common:loading') }: { text?: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-12">
       <motion.div

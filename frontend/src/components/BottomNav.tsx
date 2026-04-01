@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useRef, type MouseEvent } from 'react';
 import { motion } from 'framer-motion';
 import { Users, ClipboardList, Gamepad2, Trophy, ShoppingBag } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { UI_ANIMATIONS } from '../config/constants';
 
 export type TabId = 'friends' | 'tasks' | 'play' | 'leaderboard' | 'shop';
@@ -12,17 +13,17 @@ interface BottomNavProps {
 
 interface TabConfig {
   id: TabId;
-  label: string;
+  labelKey: string;
   icon: typeof Users;
   isMain?: boolean;
 }
 
 const tabs: TabConfig[] = [
-  { id: 'friends', label: 'Друзья', icon: Users },
-  { id: 'tasks', label: 'Задания', icon: ClipboardList },
-  { id: 'play', label: 'Играть', icon: Gamepad2, isMain: true },
-  { id: 'leaderboard', label: 'Топ', icon: Trophy },
-  { id: 'shop', label: 'Магазин', icon: ShoppingBag },
+  { id: 'friends', labelKey: 'nav:friends', icon: Users },
+  { id: 'tasks', labelKey: 'nav:tasks', icon: ClipboardList },
+  { id: 'play', labelKey: 'nav:play', icon: Gamepad2, isMain: true },
+  { id: 'leaderboard', labelKey: 'nav:leaderboard', icon: Trophy },
+  { id: 'shop', labelKey: 'nav:shop', icon: ShoppingBag },
 ];
 
 const fadeDuration = UI_ANIMATIONS.fade / 1000;
@@ -30,6 +31,7 @@ const scaleDuration = UI_ANIMATIONS.scale / 1000;
 
 const BottomNavComponent = ({ activeTab, onTabChange }: BottomNavProps) => {
   const navRef = useRef<HTMLDivElement>(null);
+  const { t } = useTranslation();
 
   const handleTabClick = useCallback(
     (event: MouseEvent<HTMLButtonElement>) => {
@@ -38,12 +40,12 @@ const BottomNavComponent = ({ activeTab, onTabChange }: BottomNavProps) => {
         return;
       }
 
-      const tg = (window as any).Telegram?.WebApp;
+      const tg = (window as Window & { Telegram?: { WebApp?: { HapticFeedback?: { impactOccurred: (style: string) => void } } } }).Telegram?.WebApp;
       if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
 
       onTabChange(id);
     },
-    [activeTab, onTabChange]
+    [activeTab, onTabChange],
   );
 
   useEffect(() => {
@@ -106,12 +108,11 @@ const BottomNavComponent = ({ activeTab, onTabChange }: BottomNavProps) => {
                   ...UI_ANIMATIONS.spring,
                   duration: scaleDuration,
                 }}
-                className={`
-                  ${tab.isMain
+                className={
+                  tab.isMain
                     ? `w-16 h-16 bg-gradient-to-tr from-blue-600 to-cyan-500 rounded-full flex items-center justify-center shadow-lg shadow-cyan-500/30 border-4 border-slate-900 ${isActive ? 'drop-shadow-glow' : ''}`
                     : 'w-10 h-10 flex items-center justify-center'
-                  }
-                `}
+                }
               >
                 <tab.icon
                   size={tab.isMain ? 32 : 24}
@@ -130,7 +131,7 @@ const BottomNavComponent = ({ activeTab, onTabChange }: BottomNavProps) => {
                   transition={{ duration: fadeDuration }}
                   className="text-[10px] font-medium mt-1"
                 >
-                  {tab.label}
+                  {t(tab.labelKey)}
                 </motion.span>
               )}
             </button>

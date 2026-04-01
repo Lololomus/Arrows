@@ -9,6 +9,15 @@
 import { API_URL, API_ENDPOINTS } from '../config/constants';
 import { normalizeAuthResponse, normalizeUserResponse, type RawAuthResponse, type RawUserResponse } from './authTransforms';
 import { ensureFreshSession, markAuthExpired, reauthenticate } from '../services/authSession';
+import {
+  getErrorCodeMessage,
+  getShopItemDescription,
+  getShopItemName,
+  getTaskBaseDescription,
+  getTaskBaseTitle,
+  getTaskTierTitle,
+} from '../i18n/content';
+import { translate } from '../i18n';
 import { useAppStore } from '../stores/store';
 import type {
   AuthResponse,
@@ -181,11 +190,15 @@ function normalizeRewardChannel(raw: RawRewardChannel): RewardChannel {
 }
 
 function normalizeTask(raw: RawTaskDto): TaskDto {
+  const taskId = raw.id;
+  const baseTitle = getTaskBaseTitle(taskId, raw.baseTitle ?? raw.base_title ?? '');
+  const baseDescription = getTaskBaseDescription(taskId, raw.baseDescription ?? raw.base_description ?? '');
+
   return {
-    id: raw.id,
+    id: taskId,
     kind: raw.kind,
-    baseTitle: raw.baseTitle ?? raw.base_title ?? '',
-    baseDescription: raw.baseDescription ?? raw.base_description ?? '',
+    baseTitle,
+    baseDescription,
     progress: raw.progress,
     status: raw.status,
     nextTierIndex: raw.nextTierIndex ?? raw.next_tier_index ?? null,
@@ -195,7 +208,7 @@ function normalizeTask(raw: RawTaskDto): TaskDto {
       rewardCoins: tier.rewardCoins ?? tier.reward_coins ?? 0,
       rewardHints: tier.rewardHints ?? tier.reward_hints ?? 0,
       rewardRevives: tier.rewardRevives ?? tier.reward_revives ?? 0,
-      title: tier.title,
+      title: getTaskTierTitle(tier.claimId ?? tier.claim_id ?? '', tier.title),
       claimed: tier.claimed,
     })),
     channel: raw.channel
@@ -253,7 +266,8 @@ interface RawShopCatalog {
 function normalizeShopItem(raw: RawShopItem, itemType: ShopItem['itemType']): ShopItem {
   return {
     id: raw.id,
-    name: raw.name,
+    name: getShopItemName(raw.id, raw.name),
+    description: getShopItemDescription(raw.id),
     itemType,
     priceCoins: raw.price_coins ?? null,
     priceStars: raw.price_stars ?? null,
@@ -303,12 +317,17 @@ const DEV_AUTH_ENABLED = ['1', 'true', 'yes', 'on'].includes(
 );
 const DEV_AUTH_USER_ID = String(import.meta.env.VITE_DEV_AUTH_USER_ID || '').trim();
 const DEV_AUTH_ACTIVE = DEV_AUTH_ENABLED && DEV_AUTH_USER_ID.length > 0;
-const SESSION_EXPIRED_MESSAGE = 'Сессия истекла. Переоткройте Mini App из Telegram.';
-const AUTH_REQUIRED_MESSAGE = 'Требуется авторизация';
-
 // ============================================
 // API ERROR
 // ============================================
+
+function getSessionExpiredMessage(): string {
+  return translate('auth:sessionExpired');
+}
+
+function getAuthRequiredMessage(): string {
+  return translate('errors:status.401');
+}
 
 export class ApiError extends Error {
   constructor(
@@ -320,6 +339,16 @@ export class ApiError extends Error {
     this.name = 'ApiError';
   }
 }
+
+class TunnelDownError extends Error {
+  constructor() {
+    super('tunnel_down');
+    this.name = 'TunnelDownError';
+  }
+}
+
+const TUNNEL_RETRY_INTERVAL_MS = 5000;
+const TUNNEL_RETRY_TIMEOUT_MS = 120_000;
 
 // ============================================
 // BASE REQUEST FUNCTION
@@ -399,7 +428,7 @@ async function executeRequest(
   });
 }
 
-async function request<T>(
+async function requestCore<T>(
   endpoint: string,
   options: RequestOptions = {}
 ): Promise<T> {
@@ -408,7 +437,7 @@ async function request<T>(
   const stateBeforeRequest = useAppStore.getState();
 
   if (managesSession && stateBeforeRequest.authStatus === 'expired') {
-    throw new ApiError(401, stateBeforeRequest.authMessage || SESSION_EXPIRED_MESSAGE);
+    throw new ApiError(401, stateBeforeRequest.authMessage || getSessionExpiredMessage());
   }
 
   if (managesSession) {
@@ -417,9 +446,9 @@ async function request<T>(
     } catch {
       const expiredState = useAppStore.getState();
       if (expiredState.authStatus === 'expired') {
-        throw new ApiError(401, expiredState.authMessage || SESSION_EXPIRED_MESSAGE);
+        throw new ApiError(401, expiredState.authMessage || getSessionExpiredMessage());
       }
-      throw new ApiError(401, AUTH_REQUIRED_MESSAGE);
+      throw new ApiError(401, getAuthRequiredMessage());
     }
   }
 
@@ -427,19 +456,23 @@ async function request<T>(
   const response = await executeRequest(endpoint, options, token);
   const data = await parseResponseData(response);
 
+  if (typeof data === 'string' && /<html/i.test(data)) {
+    throw new TunnelDownError();
+  }
+
   if (!response.ok) {
     if (response.status === 401 && managesSession && !options._retry) {
       try {
         await reauthenticate('401');
       } catch {
         const expiredState = useAppStore.getState();
-        throw new ApiError(401, expiredState.authMessage || SESSION_EXPIRED_MESSAGE);
+        throw new ApiError(401, expiredState.authMessage || getSessionExpiredMessage());
       }
-      return request<T>(endpoint, { ...options, _retry: true });
+      return requestCore<T>(endpoint, { ...options, _retry: true });
     }
 
     if (response.status === 401 && managesSession && options._retry) {
-      markAuthExpired(SESSION_EXPIRED_MESSAGE);
+      markAuthExpired(getSessionExpiredMessage());
     }
 
     const { message, code } = parseApiErrorPayload(data);
@@ -447,6 +480,40 @@ async function request<T>(
   }
 
   return data as T;
+}
+
+async function request<T>(
+  endpoint: string,
+  options: RequestOptions = {}
+): Promise<T> {
+  try {
+    return await requestCore<T>(endpoint, options);
+  } catch (err) {
+    if (!(err instanceof TunnelDownError)) throw err;
+
+    useAppStore.getState().setServerUnavailable(true);
+    const deadline = Date.now() + TUNNEL_RETRY_TIMEOUT_MS;
+
+    try {
+      while (Date.now() < deadline) {
+        await new Promise<void>((r) => setTimeout(r, TUNNEL_RETRY_INTERVAL_MS));
+        try {
+          const result = await requestCore<T>(endpoint, options);
+          useAppStore.getState().setServerUnavailable(false);
+          return result;
+        } catch (retryErr) {
+          if (!(retryErr instanceof TunnelDownError)) {
+            useAppStore.getState().setServerUnavailable(false);
+            throw retryErr;
+          }
+        }
+      }
+    } finally {
+      useAppStore.getState().setServerUnavailable(false);
+    }
+
+    throw new ApiError(503, 'Server unavailable');
+  }
 }
 
 // ============================================
@@ -466,10 +533,41 @@ export const authApi = {
   getMe: async (): Promise<User> =>
     normalizeUserResponse(await request<RawUserResponse>(API_ENDPOINTS.auth.me)),
 
+  updateLocale: async (locale: User['locale']): Promise<User> =>
+    normalizeUserResponse(await request<RawUserResponse>(API_ENDPOINTS.auth.locale, {
+      method: 'PUT',
+      body: JSON.stringify({ locale }),
+    })),
+
   refresh: async (): Promise<AuthResponse> =>
     normalizeAuthResponse(await request<RawAuthResponse>(API_ENDPOINTS.auth.refresh, {
       method: 'POST',
     })),
+};
+
+export const handleApiError = (error: unknown): string => {
+  if (error instanceof ApiError) {
+    const byCode = getErrorCodeMessage(error.code, '');
+    if (byCode) {
+      return byCode;
+    }
+
+    const statusKey = `errors:status.${error.status}`;
+    const byStatus = translate(statusKey);
+    if (byStatus !== statusKey) {
+      return byStatus;
+    }
+
+    if (error.message?.trim()) {
+      return error.message;
+    }
+  }
+
+  if (error instanceof Error && error.message?.trim()) {
+    return error.message;
+  }
+
+  return legacyHandleApiError(error) || translate('errors:generic.unknown');
 };
 
 // ============================================
@@ -1307,10 +1405,11 @@ export const fragmentsApi = {
     const raw = await request<Record<string, unknown>>(API_ENDPOINTS.fragments.claim(dropId), {
       method: 'POST',
     });
+    const code = typeof raw.code === 'string' ? raw.code : undefined;
     return {
       success: Boolean(raw.success),
       claimStatus: String(raw.claim_status ?? ''),
-      message: String(raw.message ?? ''),
+      message: getErrorCodeMessage(code, String(raw.message ?? raw.code ?? '')),
     };
   },
 
@@ -1336,19 +1435,21 @@ export const checkApiHealth = async (): Promise<boolean> => {
   }
 };
 
-export const handleApiError = (error: unknown): string => {
+const legacyHandleApiError = (error: unknown): string => {
   if (error instanceof ApiError) {
-    switch (error.status) {
-      case 401: return 'Требуется авторизация';
-      case 403: return 'Доступ запрещён';
-      case 404: return 'Не найдено';
-      case 400:
-        if (error.code === 'NO_ENERGY') return 'Недостаточно энергии';
-        return error.message;
-      case 500: return 'Ошибка сервера';
-      default: return error.message;
+    const byCode = getErrorCodeMessage(error.code, '');
+    if (byCode) {
+      return byCode;
     }
+
+    const statusKey = `errors:status.${error.status}`;
+    const byStatus = translate(statusKey);
+    if (byStatus !== statusKey) {
+      return byStatus;
+    }
+
+    return error.message;
   }
   if (error instanceof Error) return error.message;
-  return 'Неизвестная ошибка';
+  return translate('errors:generic.unknown');
 };

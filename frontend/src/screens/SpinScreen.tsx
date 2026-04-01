@@ -11,6 +11,7 @@ import { Info, RotateCcw } from 'lucide-react';
 import { useAppStore } from '../stores/store';
 import { spinApi, type SpinRollResponse, ApiError } from '../api/client';
 import { ADSGRAM_BLOCK_IDS } from '../config/constants';
+import { exists, formatNumber, formatTimeUntil, getAppLocale, translate } from '../i18n';
 import { runRewardedFlow, getRewardedFlowMessage } from '../services/rewardedAds';
 import { clearPendingRewardIntent, rememberPendingRewardIntent } from '../services/rewardReconciler';
 
@@ -46,40 +47,40 @@ interface Sector {
 
 interface ExtendedSpinResult extends SpinRollResponse, Omit<Sector, 'prizeType' | 'prizeAmount'> {}
 
-const RARITY_CONFIG: Record<Rarity, { color: string; bg: string; glow: string; label: string; particles: string[] }> = {
+const RARITY_CONFIG: Record<Rarity, { color: string; bg: string; glow: string; labelKey: string; particles: string[] }> = {
   common: {
     color: 'text-emerald-400',
     bg: 'from-emerald-500 to-teal-400',
     glow: 'rgba(16,185,129,0.4)',
-    label: 'Обычная награда',
+    labelKey: 'game:spin.rarity.common',
     particles: ['#34d399', '#10b981', '#059669', '#ffffff']
   },
   uncommon: {
     color: 'text-blue-400',
     bg: 'from-blue-500 to-cyan-400',
     glow: 'rgba(59,130,246,0.4)',
-    label: 'Необычная',
+    labelKey: 'game:spin.rarity.uncommon',
     particles: ['#60a5fa', '#3b82f6', '#2563eb', '#ffffff']
   },
   rare: {
     color: 'text-purple-400',
     bg: 'from-purple-500 to-fuchsia-400',
     glow: 'rgba(168,85,247,0.5)',
-    label: 'Редкая',
+    labelKey: 'game:spin.rarity.rare',
     particles: ['#c084fc', '#a855f7', '#9333ea', '#f0abfc']
   },
   epic: {
     color: 'text-amber-400',
     bg: 'from-amber-500 to-orange-400',
     glow: 'rgba(245,158,11,0.6)',
-    label: 'Эпическая!',
+    labelKey: 'game:spin.rarity.epic',
     particles: ['#fbbf24', '#f59e0b', '#d97706', '#fcd34d', '#ffffff']
   },
   legendary: {
     color: 'text-rose-400',
     bg: 'from-rose-500 to-red-500',
     glow: 'rgba(225,29,72,0.7)',
-    label: 'ЛЕГЕНДАРНАЯ!!!',
+    labelKey: 'game:spin.rarity.legendary',
     particles: ['#fb7185', '#e11d48', '#be123c', '#fda4af', '#ffffff']
   },
 };
@@ -90,30 +91,57 @@ const HINT_SECTOR_COLOR = '#06b6d4';
 const REVIVE_SECTOR_COLOR = '#f43f5e';
 
 const SECTORS: Sector[] = [
-  { label: '10 монет',      wheelLabel: '🪙 10',  icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'common',    prizeType: 'coins',  prizeAmount: 10  },
-  { label: '25 монет',      wheelLabel: '🪙 25',  icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'common',    prizeType: 'coins',  prizeAmount: 25  },
-  { label: '1 подсказка',   wheelLabel: '💡 1',   icon: '💡', color: HINT_SECTOR_COLOR,   rarity: 'uncommon',  prizeType: 'hints',  prizeAmount: 1   },
-  { label: '50 монет',      wheelLabel: '🪙 50',  icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'uncommon',  prizeType: 'coins',  prizeAmount: 50  },
-  { label: '100 монет',     wheelLabel: '🪙 100', icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'rare',      prizeType: 'coins',  prizeAmount: 100 },
-  { label: '3 подсказки',   wheelLabel: '💡 3',   icon: '💡', color: HINT_SECTOR_COLOR,   rarity: 'rare',      prizeType: 'hints',  prizeAmount: 3   },
-  { label: '250 монет',     wheelLabel: '🪙 250', icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'epic',      prizeType: 'coins',  prizeAmount: 250 },
-  { label: '1 возрождение', wheelLabel: '❤️ 1',  icon: '❤️', color: REVIVE_SECTOR_COLOR, rarity: 'legendary', prizeType: 'revive', prizeAmount: 1   },
+  { label: '10 coins',      wheelLabel: '🪙 10',  icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'common',    prizeType: 'coins',  prizeAmount: 10  },
+  { label: '25 coins',      wheelLabel: '🪙 25',  icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'common',    prizeType: 'coins',  prizeAmount: 25  },
+  { label: '1 hint',        wheelLabel: '💡 1',   icon: '💡', color: HINT_SECTOR_COLOR,   rarity: 'uncommon',  prizeType: 'hints',  prizeAmount: 1   },
+  { label: '50 coins',      wheelLabel: '🪙 50',  icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'uncommon',  prizeType: 'coins',  prizeAmount: 50  },
+  { label: '100 coins',     wheelLabel: '🪙 100', icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'rare',      prizeType: 'coins',  prizeAmount: 100 },
+  { label: '3 hints',       wheelLabel: '💡 3',   icon: '💡', color: HINT_SECTOR_COLOR,   rarity: 'rare',      prizeType: 'hints',  prizeAmount: 3   },
+  { label: '250 coins',     wheelLabel: '🪙 250', icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'epic',      prizeType: 'coins',  prizeAmount: 250 },
+  { label: '1 revive',      wheelLabel: '❤️ 1',  icon: '❤️', color: REVIVE_SECTOR_COLOR, rarity: 'legendary', prizeType: 'revive', prizeAmount: 1   },
 ];
 
 const SECTOR_COUNT = SECTORS.length;
 const SECTOR_ANGLE = 360 / SECTOR_COUNT;
 
 function formatTimeLeft(targetIso: string | null, nowTs: number): string | null {
-  if (!targetIso) return null;
-  const targetTs = Date.parse(targetIso);
-  if (!Number.isFinite(targetTs)) return null;
-  const diffMs = targetTs - nowTs;
-  if (diffMs <= 0) return null;
-  const mins = Math.ceil(diffMs / 60_000);
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  if (h <= 0) return `${Math.max(1, m)} мин`;
-  return `${h}ч ${String(m).padStart(2, '0')}мин`;
+  return formatTimeUntil(targetIso, nowTs);
+}
+
+function getPluralSuffix(count: number): 'one' | 'few' | 'many' | 'other' {
+  const locale = getAppLocale();
+  if (locale === 'ru') {
+    const mod10 = count % 10;
+    const mod100 = count % 100;
+    if (mod10 === 1 && mod100 !== 11) return 'one';
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'few';
+    return 'many';
+  }
+  return count === 1 ? 'one' : 'other';
+}
+
+function getRarityLabel(rarity: Rarity): string {
+  return translate(RARITY_CONFIG[rarity].labelKey);
+}
+
+function formatSpinPrizeLabel(prizeType: Sector['prizeType'], prizeAmount: number): string {
+  const count = formatNumber(prizeAmount);
+  const suffix = getPluralSuffix(prizeAmount);
+
+  switch (prizeType) {
+    case 'coins':
+      return translate(`game:spin.prizeLabel.coins_${suffix}`, { count });
+    case 'hints':
+      return translate(`game:spin.prizeLabel.hints_${suffix}`, { count });
+    case 'revive':
+      return translate(`game:spin.prizeLabel.revive_${suffix}`, { count });
+    default:
+      return `${count}`;
+  }
+}
+
+function formatTierBadge(tier: number): string {
+  return translate('game:spin.tierBadge', { count: tier });
 }
 
 // ============================================
@@ -184,40 +212,40 @@ function SpinInfoModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
           >
             <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-6 shrink-0" />
             <h3 className="text-2xl font-black text-white uppercase tracking-wide mb-6 text-center drop-shadow-md">
-              Уровни удачи
+              {translate('game:spin.tiersTitle')}
             </h3>
 
             <div className="space-y-3 overflow-y-auto custom-scrollbar">
               <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-emerald-400 font-black text-sm uppercase tracking-widest drop-shadow-[0_0_8px_rgba(52,211,153,0.3)]">Tier 1</span>
-                  <span className="text-white/50 text-[11px] font-bold bg-white/5 px-2 py-1 rounded-md">0–5 ДНЕЙ</span>
+                  <span className="text-emerald-400 font-black text-sm uppercase tracking-widest drop-shadow-[0_0_8px_rgba(52,211,153,0.3)]">{formatTierBadge(1)}</span>
+                  <span className="text-white/50 text-[11px] font-bold bg-white/5 px-2 py-1 rounded-md">0-5</span>
                 </div>
-                <h4 className="text-white font-bold mb-1 text-base">Базовые шансы</h4>
-                <p className="text-white/50 text-xs leading-relaxed">Стандартная рулетка. Хороший старт для ежедневного накопления небольших сумм монет.</p>
+                <h4 className="text-white font-bold mb-1 text-base">{translate('game:spin.tier1Label')}</h4>
+                <p className="text-white/50 text-xs leading-relaxed">{translate('game:spin.tier1Desc')}</p>
               </div>
 
               <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-blue-400 font-black text-sm uppercase tracking-widest drop-shadow-[0_0_8px_rgba(96,165,250,0.3)]">Tier 2</span>
-                  <span className="text-blue-200/50 text-[11px] font-bold bg-blue-500/10 px-2 py-1 rounded-md">6–13 ДНЕЙ</span>
+                  <span className="text-blue-400 font-black text-sm uppercase tracking-widest drop-shadow-[0_0_8px_rgba(96,165,250,0.3)]">{formatTierBadge(2)}</span>
+                  <span className="text-blue-200/50 text-[11px] font-bold bg-blue-500/10 px-2 py-1 rounded-md">6-13</span>
                 </div>
-                <h4 className="text-white font-bold mb-1 text-base">Улучшенные призы</h4>
-                <p className="text-blue-100/60 text-xs leading-relaxed">Шанс выпадения крупных паков монет (100+) и бесплатных подсказок значительно выше.</p>
+                <h4 className="text-white font-bold mb-1 text-base">{translate('game:spin.tier2Label')}</h4>
+                <p className="text-blue-100/60 text-xs leading-relaxed">{translate('game:spin.tier2Desc')}</p>
               </div>
 
               <div className="bg-gradient-to-br from-yellow-500/20 to-orange-500/10 border border-yellow-500/30 rounded-2xl p-4 relative overflow-hidden">
                 <div className="flex justify-between items-center mb-2 relative z-10">
-                  <span className="text-yellow-400 font-black text-sm uppercase tracking-widest drop-shadow-[0_0_12px_rgba(250,204,21,0.5)]">Tier 3</span>
-                  <span className="text-yellow-200/60 text-[11px] font-bold bg-yellow-500/10 px-2 py-1 rounded-md">14+ ДНЕЙ</span>
+                  <span className="text-yellow-400 font-black text-sm uppercase tracking-widest drop-shadow-[0_0_12px_rgba(250,204,21,0.5)]">{formatTierBadge(3)}</span>
+                  <span className="text-yellow-200/60 text-[11px] font-bold bg-yellow-500/10 px-2 py-1 rounded-md">14+</span>
                 </div>
-                <h4 className="text-white font-bold mb-1 text-base relative z-10">Максимальная удача</h4>
-                <p className="text-yellow-100/70 text-xs leading-relaxed relative z-10">Доступ к редким призам. Возрождения, джекпоты и связки подсказок выпадают чаще всего!</p>
+                <h4 className="text-white font-bold mb-1 text-base relative z-10">{translate('game:spin.tier3Label')}</h4>
+                <p className="text-yellow-100/70 text-xs leading-relaxed relative z-10">{translate('game:spin.tier3Desc')}</p>
               </div>
             </div>
 
             <button onClick={onClose} className="mt-6 w-full py-3.5 bg-white/10 hover:bg-white/15 rounded-xl text-white font-bold text-sm transition-colors">
-              Понятно
+              {translate('game:spin.tiersClose')}
             </button>
           </motion.div>
         </>
@@ -399,19 +427,19 @@ function SleekStreakTimeline({ streak, onInfoClick }: { streak: number; onInfoCl
   const days = Array.from({ length: 7 }, (_, i) => startDay + i);
 
   let tierInfo = {
-    name: 'Tier 1', color: 'text-emerald-400', progressColor: 'bg-emerald-500',
+    name: formatTierBadge(1), color: 'text-emerald-400', progressColor: 'bg-emerald-500',
     trackColor: 'bg-emerald-500/20', pastDot: 'bg-emerald-500/20 text-emerald-400',
     currentDot: 'bg-emerald-500 text-white ring-4 ring-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.5)]'
   };
   if (displayStreak >= 14) {
     tierInfo = {
-      name: 'Tier 3', color: 'text-yellow-400', progressColor: 'bg-yellow-400',
+      name: formatTierBadge(3), color: 'text-yellow-400', progressColor: 'bg-yellow-400',
       trackColor: 'bg-yellow-400/20', pastDot: 'bg-yellow-400/20 text-yellow-300',
       currentDot: 'bg-yellow-400 text-slate-900 ring-4 ring-yellow-400/30 shadow-[0_0_15px_rgba(250,204,21,0.5)]'
     };
   } else if (displayStreak >= 6) {
     tierInfo = {
-      name: 'Tier 2', color: 'text-blue-400', progressColor: 'bg-blue-500',
+      name: formatTierBadge(2), color: 'text-blue-400', progressColor: 'bg-blue-500',
       trackColor: 'bg-blue-500/20', pastDot: 'bg-blue-500/20 text-blue-400',
       currentDot: 'bg-blue-500 text-white ring-4 ring-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.5)]'
     };
@@ -433,7 +461,7 @@ function SleekStreakTimeline({ streak, onInfoClick }: { streak: number; onInfoCl
       </button>
 
       <h2 className="text-3xl font-black text-white drop-shadow-md mb-6 tracking-tight">
-        День {displayStreak}
+        {translate('game:spin.day', { count: displayStreak })}
       </h2>
       <div className="relative w-full max-w-[280px]">
         <div className="absolute top-1/2 left-[14px] right-[14px] h-1.5 -translate-y-1/2 rounded-full overflow-hidden bg-white/5">
@@ -510,7 +538,7 @@ function PrizeResult({
 
       <div className="mt-4 z-10 w-full px-4 flex flex-col items-center">
         <h3 className={`text-4xl font-black text-transparent bg-clip-text drop-shadow-lg bg-gradient-to-b ${config.bg}`}>
-          {result.label}
+          {formatSpinPrizeLabel(result.prizeType, result.prizeAmount)}
         </h3>
 
         <motion.div
@@ -518,7 +546,7 @@ function PrizeResult({
           animate={{ opacity: 1, scale: 1 }}
           className={`font-black uppercase tracking-[0.15em] text-xs mt-2 px-4 py-1.5 rounded-full border border-white/10 bg-white/5 backdrop-blur-md ${config.color} drop-shadow-md`}
         >
-          {config.label}
+          {getRarityLabel(result.rarity)}
         </motion.div>
 
         <div className="mt-8 flex flex-col gap-3 w-full">
@@ -531,7 +559,7 @@ function PrizeResult({
               }`}
             >
               <RotateCcw size={18} />
-              {isRetryingAd ? (adStatusMessage ?? 'Загрузка рекламы...') : 'РЕСПИН ЗА РЕКЛАМУ'}
+              {isRetryingAd ? (adStatusMessage ?? translate('game:spin.loadingAd')) : translate('game:spin.retryAd').toUpperCase()}
               <motion.div
                 className="absolute inset-0 w-1/2 h-full bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-12"
                 initial={{ x: '-200%' }} animate={{ x: '300%' }}
@@ -546,9 +574,10 @@ function PrizeResult({
             className={`relative w-full py-4 rounded-2xl text-white font-black text-[16px] transition-all overflow-hidden shadow-lg flex items-center justify-center gap-2
               ${isCollecting
                 ? 'bg-slate-800 text-slate-400 scale-95'
-                : `bg-gradient-to-r ${config.bg} shadow-[0_0_20px_${config.glow}] hover:brightness-110 active:scale-95`}`}
+                : `bg-gradient-to-r ${config.bg} hover:brightness-110 active:scale-95`}`}
+            style={isCollecting ? undefined : { boxShadow: `0 0 20px ${config.glow}` }}
           >
-            {isCollecting ? 'ПОЛУЧАЕМ...' : 'ЗАБРАТЬ'}
+            {isCollecting ? translate('game:spin.collecting').toUpperCase() : translate('game:spin.collect').toUpperCase()}
             {!isCollecting && (
               <motion.div
                 className="absolute inset-0 w-1/2 h-full bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12"
@@ -564,7 +593,7 @@ function PrizeResult({
               disabled={isCollecting || isRetryingAd}
               className="w-full py-2.5 text-white/50 hover:text-white font-semibold text-[15px] transition-colors"
             >
-              Забрать позже
+              {translate('game:spin.closeLater')}
             </button>
           )}
         </div>
@@ -689,9 +718,9 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
       setAdStatusMessage(null);
       return;
     }
-    const t1 = setTimeout(() => setAdStatusMessage('Загружаем рекламу...'), 100);
-    const t2 = setTimeout(() => setAdStatusMessage('Почти готово...'), 6_000);
-    const t3 = setTimeout(() => setAdStatusMessage('Медленное соединение, подождите...'), 16_000);
+    const t1 = setTimeout(() => setAdStatusMessage(translate('game:spin.loadingAd')), 100);
+    const t2 = setTimeout(() => setAdStatusMessage(translate('game:spin.almostReady')), 6_000);
+    const t3 = setTimeout(() => setAdStatusMessage(translate('game:spin.slowConnection')), 16_000);
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
   }, [isRetryingAd]);
 
@@ -839,17 +868,15 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
         setSpinning(false);
         setIsPreparing(false);
         if (err instanceof ApiError) {
-          if (err.message.includes('Collect pending prize')) {
-            setError('Сначала заберите приз.');
-          } else if (err.message.includes('Spin already used today') || err.message.includes('Spin on cooldown')) {
-            setError('Спин на кулдауне. Подождите.');
+          if (err.code && exists(`errors:codes.${err.code}`)) {
+            setError(translate(`errors:codes.${err.code}`));
           } else {
             setError(err.message);
           }
         } else if (err instanceof Error && err.message === 'SPIN_TIMEOUT') {
-          setError('Сервер не отвечает. Попробуй ещё раз.');
+          setError(translate('errors:generic.server'));
         } else {
-          setError('Не удалось запустить рулетку. Попробуй ещё раз.');
+          setError(translate('errors:generic.server'));
         }
       }
     }
@@ -897,7 +924,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
           if (isMountedRef.current) {
             setSpinning(false);
             if (previousResult) setResult(previousResult);
-            setError('Не удалось запустить респин. Попробуй позже.');
+            setError(translate('errors:generic.server'));
           }
           return;
         }
@@ -1003,9 +1030,9 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
           setResult(previousResult);
         }
         if (err instanceof ApiError && err.code === 'SPIN_RETRY_AD_REQUIRED') {
-          setError('Сначала посмотрите рекламу.');
+          setError(translate('errors:codes.SPIN_RETRY_AD_REQUIRED'));
         } else {
-          setError('Не удалось загрузить рекламу.');
+          setError(translate('errors:generic.network'));
         }
       }
     } finally {
@@ -1036,7 +1063,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
     } catch {
       if (isMountedRef.current) {
         setIsCollecting(false);
-        setError('Не удалось получить приз. Попробуй ещё раз.');
+        setError(translate('errors:generic.server'));
       }
     }
   };
@@ -1175,7 +1202,13 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
                 ${(spinning || !spinAvailable) ? 'bg-slate-800 text-slate-500 scale-95'
                            : 'bg-gradient-to-r from-purple-600 to-pink-600 shadow-[0_8px_30px_rgba(236,72,153,0.4)] active:scale-95'}`}
             >
-              {isPreparing ? 'ПОДГОТОВКА...' : spinning ? 'КРУТИМ...' : spinAvailable ? 'КРУТИТЬ РУЛЕТКУ' : 'СПИН НЕДОСТУПЕН'}
+              {isPreparing
+                ? translate('game:spin.preparing').toUpperCase()
+                : spinning
+                  ? translate('game:spin.spinning').toUpperCase()
+                  : spinAvailable
+                    ? translate('game:spin.title').toUpperCase()
+                    : translate('game:spin.unavailable').toUpperCase()}
               {spinAvailable && !spinning && (
                 <motion.div
                   className="absolute inset-0 w-1/2 h-full bg-gradient-to-r from-transparent via-white/30 to-transparent skew-x-12"
@@ -1185,12 +1218,12 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
             </button>
             {!spinAvailable && spinCooldownLabel && (
               <p className="text-center text-white/60 text-sm -mt-1">
-                Доступно через {spinCooldownLabel}
+                {translate('game:spin.availableIn', { time: spinCooldownLabel })}
               </p>
             )}
 
             <button onClick={onClose} className="w-full py-2.5 text-white/50 hover:text-white font-semibold text-[15px] transition-colors">
-              Позже
+              {translate('common:later')}
             </button>
           </>
         )}

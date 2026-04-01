@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { ARROW_COLORS } from '../../config/constants';
+import { translate } from '../../i18n';
 import { useParticleRuntimeProfile } from './particleRuntimeProfile';
 
 interface GridArrowPopFlyLoaderProps {
@@ -41,9 +42,9 @@ function randomFour(palette: string[], prev?: [string, string, string, string]):
 export function GridArrowPopFlyLoader({
   size = 84,
   className = '',
-  ariaLabel = 'Loading',
+  ariaLabel = translate('common:loading'),
   showText = false,
-  text = 'Загрузка',
+  text = translate('common:loading'),
   cycleMs = DEFAULT_CYCLE_MS,
   colorPalette,
   withBackdrop = true,

@@ -7,6 +7,9 @@ export interface RawUserResponse {
   username: string | null;
   first_name?: string | null;
   firstName?: string | null;
+  locale?: 'ru' | 'en' | string | null;
+  locale_manually_set?: boolean | null;
+  localeManuallySet?: boolean | null;
   photo_url?: string | null;
   current_level?: number;
   currentLevel?: number;
@@ -47,6 +50,8 @@ export function normalizeUserResponse(raw: RawUserResponse): User {
     telegramId: raw.telegramId ?? raw.telegram_id ?? 0,
     username: raw.username ?? null,
     firstName: raw.firstName ?? raw.first_name ?? null,
+    locale: raw.locale === 'ru' ? 'ru' : 'en',
+    localeManuallySet: Boolean(raw.localeManuallySet ?? raw.locale_manually_set),
     photo_url: raw.photo_url ?? null,
     currentLevel: raw.currentLevel ?? raw.current_level ?? 1,
     totalStars: raw.totalStars ?? raw.total_stars ?? 0,

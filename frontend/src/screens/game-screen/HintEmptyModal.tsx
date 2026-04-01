@@ -8,6 +8,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Lightbulb, Play } from 'lucide-react';
 import { adsApi, authApi } from '../../api/client';
 import { ADSGRAM_BLOCK_IDS } from '../../config/constants';
+import { translate } from '../../i18n';
 import { useAppStore } from '../../stores/store';
 import { useRewardStore } from '../../stores/rewardStore';
 import { clearPendingRewardIntent, rememberPendingRewardIntent } from '../../services/rewardReconciler';
@@ -53,9 +54,9 @@ export function HintEmptyModal({
       setAdStatusMessage(null);
       return;
     }
-    const t1 = setTimeout(() => setAdStatusMessage('Загружаем рекламу...'), 100);
-    const t2 = setTimeout(() => setAdStatusMessage('Почти готово...'), 6_000);
-    const t3 = setTimeout(() => setAdStatusMessage('Медленное соединение, подождите...'), 16_000);
+    const t1 = setTimeout(() => setAdStatusMessage(translate('game:spin.loadingAd')), 100);
+    const t2 = setTimeout(() => setAdStatusMessage(translate('game:spin.almostReady')), 6_000);
+    const t3 = setTimeout(() => setAdStatusMessage(translate('game:spin.slowConnection')), 16_000);
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
   }, [loading]);
 
@@ -94,7 +95,7 @@ export function HintEmptyModal({
       setPendingIntentId(trackedIntent.intentId);
     }
     setError(null);
-    setInfoMessage('Проверяем просмотр (до 1 мин)...');
+    setInfoMessage(translate('game:hintsEmpty.checkingView'));
   }, [pendingIntentId, trackedIntent]);
 
   useEffect(() => {
@@ -135,7 +136,7 @@ export function HintEmptyModal({
       clearPendingRewardIntent('reward_hint', pendingIntentId);
       setPendingIntentId(null);
       setInfoMessage(null);
-      setError('Подтверждение не получено. Нажмите ещё раз — подсказки гарантированы.');
+      setError(translate('game:hintsEmpty.pendingConfirmation'));
     }, 60_000);
     return () => clearTimeout(timer);
   }, [pendingIntentId]);
@@ -170,12 +171,12 @@ export function HintEmptyModal({
         }
         setPendingIntentId(null);
         setInfoMessage(null);
-        setError('Нажмите ещё раз — подсказки гарантированы.');
+        setError(translate('game:hintsEmpty.pendingConfirmation'));
       } catch {
         clearPendingRewardIntent('reward_hint', pendingIntentId);
         setPendingIntentId(null);
         setInfoMessage(null);
-        setError('Нажмите ещё раз — подсказки гарантированы.');
+        setError(translate('game:hintsEmpty.pendingConfirmation'));
       } finally {
         setLoading(false);
       }
@@ -218,7 +219,7 @@ export function HintEmptyModal({
         if (result.intentId) {
           setPendingIntentId(result.intentId);
           rememberPendingRewardIntent({ intentId: result.intentId, placement: 'reward_hint' });
-          setInfoMessage('Связь с сервером прервалась. Мы продолжим проверку автоматически.');
+          setInfoMessage(translate('game:hintsEmpty.autoChecking'));
         } else {
           setError(getRewardedFlowMessage('reward_hint', result));
         }
@@ -252,7 +253,7 @@ export function HintEmptyModal({
       onClose();
       consumeHintOnce();
     } catch {
-      setError('Не удалось связаться с сервером. Попробуйте еще раз.');
+      setError(translate('errors:generic.network'));
     } finally {
       setLoading(false);
     }
@@ -280,10 +281,10 @@ export function HintEmptyModal({
             </div>
 
             <h3 className="text-xl font-bold text-white mb-2">
-              Подсказки закончились
+              {translate('game:hintsEmpty.title')}
             </h3>
             <p className="text-sm text-white/60 mb-5">
-              Смотрите рекламу — получите {hintRewardAmount} подсказки.
+              {translate('game:hintsEmpty.description', { count: hintRewardAmount })}
             </p>
 
             {infoMessage && <p className="text-sm text-amber-300 mb-3">{infoMessage}</p>}
@@ -298,10 +299,10 @@ export function HintEmptyModal({
                 >
                   <Play size={18} />
                   {loading
-                    ? (adStatusMessage ?? 'Загрузка...')
+                    ? (adStatusMessage ?? translate('common:loading'))
                     : pendingIntentId
-                      ? 'Проверить награду'
-                      : 'Смотреть рекламу'}
+                      ? translate('game:hintsEmpty.checkReward')
+                      : translate('game:hintsEmpty.watchAd')}
                 </button>
               )}
 
@@ -309,7 +310,7 @@ export function HintEmptyModal({
                 onClick={onClose}
                 className="w-full py-2.5 text-white/50 text-sm"
               >
-                Закрыть
+                {translate('game:hintsEmpty.close')}
               </button>
             </div>
           </motion.div>

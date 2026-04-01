@@ -33,6 +33,7 @@ from app.services.admin_stars_topup import (
     validate_admin_topup_checkout,
 )
 from app.services.bot_notifications import notify_spin_ready, notify_spin_streak_reset, notify_streak_warning
+from app.services.i18n import bot_text, normalize_locale
 from app.services.referrals import extract_referral_code, store_pending_referral_code
 
 SPIN_READY_DELAY = timedelta(hours=24)
@@ -55,36 +56,28 @@ dp = Dispatcher()
 def get_player_name(user: types.User) -> str:
     if user.username:
         return user.username
-    return user.first_name or "игрок"
+    locale = normalize_locale(getattr(user, "language_code", None))
+    return user.first_name or bot_text("player_name_fallback", locale)
 
 
 def build_welcome_text(user: types.User) -> str:
+    locale = normalize_locale(getattr(user, "language_code", None))
     player_name = html.escape(get_player_name(user))
-    return (
-        f"Привет, <b>{player_name}</b>! 👋\n\n"
-        "ArrowReward – это увлекательная логическая головоломка, которая награждает своих игроков. 🏆\n\n"
-        "Как играть: 🕹️\n"
-        "• Нажми на стрелку и она полетит;\n"
-        "• Избегай столкновений;\n"
-        "• Проходи уровни и соревнуйся с друзьями!\n\n"
-        "Получай монеты за игру. 💰\n"
-        "Поднимайся в топ и забирай призы. 🥇\n\n"
-        "Нажми кнопку ниже, чтобы начать! 👇"
-    )
+    return bot_text("start_text", locale, player_name=player_name)
 
 
-def build_start_keyboard(webapp_url: str) -> InlineKeyboardMarkup:
+def build_start_keyboard(webapp_url: str, locale: str | None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Запустить ArrowReward",
+                    text=bot_text("start_button", locale),
                     web_app=WebAppInfo(url=webapp_url),
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="инфо",
+                    text=bot_text("info_button", locale),
                     callback_data="info",
                 )
             ],
@@ -92,12 +85,12 @@ def build_start_keyboard(webapp_url: str) -> InlineKeyboardMarkup:
     )
 
 
-def build_info_keyboard() -> InlineKeyboardMarkup:
+def build_info_keyboard(locale: str | None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Назад",
+                    text=bot_text("back_button", locale),
                     callback_data="back_to_start",
                 )
             ],
@@ -175,10 +168,11 @@ async def cmd_start(message: types.Message):
     webapp_url = settings.WEBAPP_URL
     if start_param:
         webapp_url += f"?startapp={start_param}"
+    locale = normalize_locale(getattr(message.from_user, "language_code", None))
 
     await message.answer(
         build_welcome_text(message.from_user),
-        reply_markup=build_start_keyboard(webapp_url),
+        reply_markup=build_start_keyboard(webapp_url, locale),
         parse_mode="HTML",
     )
 
@@ -186,9 +180,10 @@ async def cmd_start(message: types.Message):
 @dp.callback_query(lambda c: c.data == "info")
 async def process_info(callback: types.CallbackQuery):
     """Handle info button."""
+    locale = normalize_locale(getattr(callback.from_user, "language_code", None))
     await callback.message.edit_text(
-        "Обратная связь и поддержка:\n\n@ArrowRewardSupport",
-        reply_markup=build_info_keyboard(),
+        bot_text("info_text", locale),
+        reply_markup=build_info_keyboard(locale),
         parse_mode="HTML",
     )
     await callback.answer()
@@ -197,9 +192,10 @@ async def process_info(callback: types.CallbackQuery):
 @dp.callback_query(lambda c: c.data == "back_to_start")
 async def process_back(callback: types.CallbackQuery):
     """Return to start card."""
+    locale = normalize_locale(getattr(callback.from_user, "language_code", None))
     await callback.message.edit_text(
         build_welcome_text(callback.from_user),
-        reply_markup=build_start_keyboard(settings.WEBAPP_URL),
+        reply_markup=build_start_keyboard(settings.WEBAPP_URL, locale),
         parse_mode="HTML",
     )
     await callback.answer()
@@ -389,7 +385,7 @@ async def _send_personal_spin_notifications() -> None:
                     and user.pending_spin_prize_type is None
                     and not _already_notified(user, "ready", anchor)
                 ):
-                    delivery = await notify_spin_ready(user.telegram_id)
+                    delivery = await notify_spin_ready(user.telegram_id, user.locale)
                     if delivery in ("sent", "blocked"):
                         _mark_notification_sent(user, "ready", anchor)
                         if delivery == "sent":
@@ -400,14 +396,14 @@ async def _send_personal_spin_notifications() -> None:
                     continue
 
                 if now >= warn_at and now < reset_at and not _already_notified(user, "warning", anchor):
-                    delivery = await notify_streak_warning(user.telegram_id, streak, _get_tier(streak))
+                    delivery = await notify_streak_warning(user.telegram_id, streak, _get_tier(streak), user.locale)
                     if delivery in ("sent", "blocked"):
                         _mark_notification_sent(user, "warning", anchor)
                         if delivery == "sent":
                             sent_warning += 1
 
                 if now >= reset_at and not _already_notified(user, "reset", anchor):
-                    delivery = await notify_spin_streak_reset(user.telegram_id, streak)
+                    delivery = await notify_spin_streak_reset(user.telegram_id, streak, user.locale)
                     if delivery in ("sent", "blocked"):
                         _mark_notification_sent(user, "reset", anchor)
                         if delivery == "sent":

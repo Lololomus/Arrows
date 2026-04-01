@@ -4,6 +4,8 @@ import type {
   RewardIntentCreateRequest,
   RewardIntentStatusResponse,
 } from '../game/types';
+import { getErrorCodeMessage } from '../i18n/content';
+import { translate } from '../i18n';
 import { preflightAdsgramAd, showRewardedAd } from './adsgram';
 
 const POLL_INTERVAL_MS = 2_000;
@@ -18,7 +20,6 @@ export type RewardedFlowOutcome =
   | 'provider_error'
   | 'unavailable'
   | 'error'
-  // Ad completed; reward applied optimistically — server confirm runs in background.
   | 'completed';
 
 export interface RewardedFlowResult {
@@ -109,12 +110,6 @@ export async function pollRewardIntent(
 }
 
 export interface RewardedFlowOptions {
-  /**
-   * When true, grant the reward to the UI immediately after the ad completes
-   * and confirm with the server in the background (fire-and-forget).
-   * Use for time-critical UX like hints and lives.
-   * When false (default), block until server confirms before returning 'granted'.
-   */
   optimistic?: boolean;
 }
 
@@ -160,12 +155,7 @@ export async function runRewardedFlow(
   const adResult = await showRewardedAd(blockId);
   if (adResult.success) {
     if (options.optimistic) {
-      // Give the reward to the UI immediately. Server confirmation runs in
-      // the background — the webhook or reconciler will finalise it.
-      void adsApi.clientCompleteRewardIntent(intent.intentId).catch(() => {
-        // Network failure: the webhook may have already granted the intent.
-        // The reconciler will pick it up via getActiveRewardIntents().
-      });
+      void adsApi.clientCompleteRewardIntent(intent.intentId).catch(() => undefined);
       return { outcome: 'completed', intentId: intent.intentId, retriable: false };
     }
 
@@ -184,7 +174,6 @@ export async function runRewardedFlow(
       if (error instanceof ApiError && error.status === 401) {
         throw error;
       }
-      // Fallback to polling if client-complete fails (webhook may still grant)
       return pollRewardIntent(intent.intentId);
     }
   }
@@ -193,7 +182,7 @@ export async function runRewardedFlow(
     try {
       await adsApi.cancelRewardIntent(intent.intentId);
     } catch {
-      // Best effort only: stale pending intents still expire on the server.
+      // Best effort only.
     }
     return {
       outcome: 'not_completed',
@@ -211,62 +200,49 @@ export async function runRewardedFlow(
   };
 }
 
+function getPlacementFallbackMessage(placement: RewardPlacement): string {
+  if (placement === 'reward_hint') {
+    return translate('errors:generic.server');
+  }
+  if (placement === 'reward_revive') {
+    return translate('errors:generic.server');
+  }
+  if (placement === 'reward_spin_retry') {
+    return getErrorCodeMessage('SPIN_RETRY_NOT_AVAILABLE', translate('errors:generic.server'));
+  }
+  return translate('errors:generic.server');
+}
+
 export function getRewardedFlowMessage(
   placement: RewardPlacement,
   result: Pick<RewardedFlowResult, 'outcome' | 'failureCode' | 'error'>,
 ): string {
   if (result.outcome === 'timeout') {
-    return 'Проверяем просмотр рекламы (до 1 мин). Или нажмите «Проверить награду».';
+    return translate('tasks:dailyCoins.checking');
   }
 
   if (result.outcome === 'unavailable') {
-    return 'Реклама временно недоступна';
+    return translate('errors:generic.network');
   }
 
   if (result.outcome === 'not_completed') {
-    return 'Реклама была закрыта до завершения. Награда не зачислена.';
+    return getErrorCodeMessage('AD_NOT_COMPLETED', translate('errors:generic.server'));
   }
 
   if (result.outcome === 'provider_error') {
-    return 'Проверяем просмотр рекламы (до 1 мин). Или нажмите «Проверить награду».';
+    return translate('tasks:dailyCoins.checking');
   }
 
   if (result.outcome === 'error') {
-    return 'Не удалось связаться с сервером. Попробуйте ещё раз.';
+    return translate('errors:generic.network');
   }
 
-  switch (result.failureCode) {
-    case 'DAILY_LIMIT_REACHED':
-      return 'Лимит наград на сегодня исчерпан';
-    case 'HINT_BALANCE_NOT_ZERO':
-      return 'У вас уже есть подсказки';
-    case 'REVIVE_ALREADY_USED':
-      return 'Награда уже была выдана';
-    case 'REVIVE_LIMIT_REACHED':
-      return 'Лимит воскрешений на этом уровне исчерпан';
-    case 'ADS_LOCKED_BEFORE_LEVEL_21':
-      return 'Реклама доступна с уровня 21';
-    case 'AD_NOT_COMPLETED':
-      return 'Реклама была закрыта до завершения. Награда не зачислена.';
-    case 'INTENT_EXPIRED':
-    case 'INTENT_SUPERSEDED':
-      return 'Проверка награды истекла, попробуйте снова';
-    case 'REWARD_INTENT_ALREADY_PENDING':
-      return 'Награда уже проверяется. Мы продолжим проверку автоматически.';
-    case 'SPIN_RETRY_NOT_AVAILABLE':
-      return 'Респин сейчас недоступен.';
-    case 'SPIN_RETRY_ALREADY_GRANTED':
-      return 'Респин уже доступен.';
-    default:
-      if (placement === 'reward_hint') {
-        return 'Не удалось получить подсказку';
-      }
-      if (placement === 'reward_revive') {
-        return 'Не удалось получить воскрешение';
-      }
-      if (placement === 'reward_spin_retry') {
-        return 'Не удалось получить респин';
-      }
-      return 'Не удалось получить награду';
+  if (result.failureCode) {
+    const byCode = getErrorCodeMessage(result.failureCode);
+    if (byCode) {
+      return byCode;
+    }
   }
+
+  return getPlacementFallbackMessage(placement);
 }

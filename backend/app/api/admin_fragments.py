@@ -19,12 +19,14 @@ from ..schemas import (
     FragmentDropUpdateRequest,
     ResolveClaimRequest,
 )
+from ..services.i18n import get_localized_text, normalize_translation_map
 from ..services.fragment_gifts import (
     get_cached_stars_balance,
     set_cached_stars_balance,
     set_drops_paused,
     utcnow_naive,
 )
+from .error_utils import api_error
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,52 @@ router = APIRouter(prefix="/admin/fragments", tags=["admin-fragments"])
 def _require_admin_key(x_api_key: str = Header("")) -> None:
     if not settings.ADMIN_API_KEY or x_api_key != settings.ADMIN_API_KEY:
         raise HTTPException(status_code=403, detail="Unauthorized")
+
+
+def _prepare_required_translations(
+    *,
+    legacy_value: str | None,
+    translations: dict[str, str] | None,
+    field_name: str,
+) -> tuple[dict[str, str], str]:
+    normalized = normalize_translation_map(translations, fallback_text=legacy_value)
+    resolved = get_localized_text(normalized, "ru", fallback_text=legacy_value)
+    if not resolved:
+        raise api_error(422, "TRANSLATIONS_REQUIRED", f"{field_name} translations are required")
+    return normalized, resolved
+
+
+def _prepare_optional_translations(
+    *,
+    legacy_value: str | None,
+    translations: dict[str, str] | None,
+) -> tuple[dict[str, str] | None, str | None]:
+    normalized = normalize_translation_map(translations, fallback_text=legacy_value)
+    resolved = get_localized_text(normalized, "ru", fallback_text=legacy_value)
+    return normalized or None, resolved
+
+
+def _merge_translations(
+    current_translations: dict | None,
+    current_legacy: str | None,
+    *,
+    legacy_override: str | None = None,
+    translations_override: dict[str, str] | None = None,
+    required: bool = False,
+    field_name: str = "field",
+) -> tuple[dict[str, str] | None, str | None]:
+    merged = normalize_translation_map(current_translations, fallback_text=current_legacy)
+    override_map = normalize_translation_map(translations_override)
+    if override_map:
+        merged.update(override_map)
+    if legacy_override is not None:
+        stripped = legacy_override.strip()
+        if stripped:
+            merged["ru"] = stripped
+    resolved = get_localized_text(merged, "ru", fallback_text=legacy_override or current_legacy)
+    if required and not resolved:
+        raise api_error(422, "TRANSLATIONS_REQUIRED", f"{field_name} translations are required")
+    return (merged or None), resolved
 
 
 async def _get_ledger_balance(db: AsyncSession) -> int:
@@ -93,10 +141,21 @@ async def create_drop(
     db: AsyncSession = Depends(get_db),
     _: None = Depends(_require_admin_key),
 ):
+    title_translations, title = _prepare_required_translations(
+        legacy_value=body.title,
+        translations=body.title_translations,
+        field_name="title",
+    )
+    description_translations, description = _prepare_optional_translations(
+        legacy_value=body.description,
+        translations=body.description_translations,
+    )
     drop = FragmentDrop(
         slug=body.slug,
-        title=body.title,
-        description=body.description,
+        title=title,
+        description=description,
+        title_translations=title_translations,
+        description_translations=description_translations,
         emoji=body.emoji,
         telegram_gift_id=body.telegram_gift_id,
         gift_star_cost=body.gift_star_cost,
@@ -161,6 +220,32 @@ async def update_drop(
                 status_code=409,
                 detail=f"Cannot reduce total_stock below {min_stock} (reserved + delivered)",
             )
+
+    if body.title is not None or body.title_translations is not None:
+        next_translations, next_title = _merge_translations(
+            drop.title_translations,
+            drop.title,
+            legacy_override=body.title,
+            translations_override=body.title_translations,
+            required=True,
+            field_name="title",
+        )
+        drop.title_translations = next_translations
+        drop.title = next_title
+        updates.pop("title", None)
+        updates.pop("title_translations", None)
+
+    if body.description is not None or body.description_translations is not None:
+        next_translations, next_description = _merge_translations(
+            drop.description_translations,
+            drop.description,
+            legacy_override=body.description,
+            translations_override=body.description_translations,
+        )
+        drop.description_translations = next_translations
+        drop.description = next_description
+        updates.pop("description", None)
+        updates.pop("description_translations", None)
 
     # Apply updates first (in memory, not committed), then budget-check
     old_total_stock = drop.total_stock
@@ -395,6 +480,11 @@ def _drop_to_dict(drop: FragmentDrop) -> dict:
         "slug": drop.slug,
         "title": drop.title,
         "description": drop.description,
+        "title_translations": normalize_translation_map(drop.title_translations, fallback_text=drop.title),
+        "description_translations": normalize_translation_map(
+            drop.description_translations,
+            fallback_text=drop.description,
+        ),
         "emoji": drop.emoji,
         "telegram_gift_id": drop.telegram_gift_id,
         "gift_star_cost": drop.gift_star_cost,

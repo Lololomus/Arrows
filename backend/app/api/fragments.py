@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,7 @@ from ..schemas import (
     FragmentDropDto,
     FragmentDropsResponse,
 )
+from ..services.i18n import get_localized_text
 from ..services.fragment_gifts import (
     get_cached_stars_balance,
     get_user_progress,
@@ -25,6 +26,7 @@ from ..services.fragment_gifts import (
     reserve_claim,
     send_gift_to_user,
 )
+from .error_utils import api_error
 from .auth import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -131,8 +133,16 @@ async def get_drops(
         dto_list.append(FragmentDropDto(
             id=drop.id,
             slug=drop.slug,
-            title=drop.title,
-            description=drop.description,
+            title=get_localized_text(
+                drop.title_translations,
+                user.locale,
+                fallback_text=drop.title,
+            ) or drop.slug,
+            description=get_localized_text(
+                drop.description_translations,
+                user.locale,
+                fallback_text=drop.description,
+            ),
             emoji=drop.emoji,
             condition_type=drop.condition_type,
             condition_target=drop.condition_target,
@@ -161,7 +171,7 @@ async def claim_drop(
     db: AsyncSession = Depends(get_db),
 ):
     if not settings.FRAGMENT_DROPS_ENABLED:
-        raise HTTPException(status_code=403, detail="Фрагменты временно недоступны")
+        raise api_error(403, "FRAGMENTS_DISABLED", "Fragment drops are temporarily unavailable")
 
     # Lock user row
     locked_user_result = await db.execute(
@@ -169,7 +179,7 @@ async def claim_drop(
     )
     locked_user = locked_user_result.scalar_one_or_none()
     if not locked_user:
-        raise HTTPException(status_code=401, detail="User not found")
+        raise api_error(401, "USER_NOT_FOUND", "User not found")
 
     # Lock drop row
     drop_result = await db.execute(
@@ -179,18 +189,12 @@ async def claim_drop(
     )
     drop = drop_result.scalar_one_or_none()
     if not drop:
-        raise HTTPException(status_code=404, detail={
-            "code": "DROP_NOT_FOUND",
-            "message": "Дроп не найден",
-        })
+        raise api_error(404, "DROP_NOT_FOUND", "Drop not found")
 
     # Check condition
     progress = get_user_progress(locked_user, drop.condition_type)
     if progress < drop.condition_target:
-        raise HTTPException(status_code=409, detail={
-            "code": "CONDITION_NOT_MET",
-            "message": "Условие еще не выполнено",
-        })
+        raise api_error(409, "CONDITION_NOT_MET", "Claim condition is not met yet")
 
     # Check for existing claim (retry scenario)
     existing_result = await db.execute(
@@ -202,48 +206,31 @@ async def claim_drop(
 
     if existing_claim:
         if existing_claim.status == "delivered":
-            raise HTTPException(status_code=409, detail={
-                "code": "ALREADY_CLAIMED",
-                "message": "Ты уже забрал этот подарок",
-            })
+            raise api_error(409, "ALREADY_CLAIMED", "This drop has already been claimed")
         if existing_claim.status in ("pending", "sending"):
             # Delivery already in progress
             return FragmentClaimResponse(
                 success=True,
                 claim_status="sending",
-                message="Подарок уже отправляется",
+                message="Gift delivery is already in progress",
+                code="CLAIM_IN_PROGRESS",
             )
         # status == "failed" → reset for retry, re-reserve stock
         # SAFETY: outcome_unknown claims may have been delivered — only admin can resolve
         if existing_claim.failure_reason == "outcome_unknown_manual_review":
-            raise HTTPException(status_code=409, detail={
-                "code": "MANUAL_REVIEW_REQUIRED",
-                "message": "Статус подарка неизвестен — обратись в поддержку",
-            })
+            raise api_error(409, "MANUAL_REVIEW_REQUIRED", "Claim requires manual review")
         if existing_claim.attempts >= settings.FRAGMENT_MAX_CLAIM_ATTEMPTS:
-            raise HTTPException(status_code=409, detail={
-                "code": "MAX_RETRIES_EXHAUSTED",
-                "message": "Превышен лимит попыток доставки",
-            })
+            raise api_error(409, "MAX_RETRIES_EXHAUSTED", "Maximum delivery attempts exceeded")
         available = drop.total_stock - drop.reserved_stock - drop.delivered_stock
         if available <= 0:
-            raise HTTPException(status_code=409, detail={
-                "code": "OUT_OF_STOCK",
-                "message": "Подарки закончились",
-            })
+            raise api_error(409, "OUT_OF_STOCK", "This drop is out of stock")
         # Same pause/balance checks as reserve_claim
         if settings.ENVIRONMENT != "development":
             if await is_drops_paused():
-                raise HTTPException(status_code=409, detail={
-                    "code": "INSUFFICIENT_BOT_STARS",
-                    "message": "Подарки временно недоступны",
-                })
+                raise api_error(409, "INSUFFICIENT_BOT_STARS", "Gift delivery is temporarily unavailable")
             cached_balance = await get_cached_stars_balance()
             if cached_balance is not None and cached_balance < drop.gift_star_cost:
-                raise HTTPException(status_code=409, detail={
-                    "code": "INSUFFICIENT_BOT_STARS",
-                    "message": "Подарки временно недоступны",
-                })
+                raise api_error(409, "INSUFFICIENT_BOT_STARS", "Gift delivery is temporarily unavailable")
         existing_claim.status = "pending"
         existing_claim.failure_reason = None
         existing_claim.failed_at = None
@@ -264,14 +251,16 @@ async def claim_drop(
         return FragmentClaimResponse(
             success=True,
             claim_status="delivered",
-            message="Подарок отправлен!",
+            message="Gift delivered",
+            code="CLAIM_DELIVERED",
         )
 
     # Retriable — delivery in progress
     return FragmentClaimResponse(
         success=True,
         claim_status="sending",
-        message="Подарок отправляется, это может занять до минуты",
+        message="Gift delivery is in progress",
+        code="CLAIM_SENDING",
     )
 
 
@@ -291,7 +280,7 @@ async def get_claim_status(
     )
     claim = claim_result.scalar_one_or_none()
     if not claim:
-        raise HTTPException(status_code=404, detail="Клейм не найден")
+        raise api_error(404, "CLAIM_NOT_FOUND", "Claim not found")
 
     return FragmentClaimStatusResponse(
         claim_status=claim.status,

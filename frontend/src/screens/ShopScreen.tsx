@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Coins, Diamond, Heart, Lightbulb, Minus, Plus, RefreshCcw, ShoppingBag } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useTonConnectUI } from '@tonconnect/ui-react';
+import { Coins, Diamond, Heart, Lightbulb, Minus, Plus, RefreshCcw, ShoppingBag } from 'lucide-react';
+import { handleApiError, shopApi } from '../api/client';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { HeaderBar } from '../components/ui/HeaderBar';
-import { shopApi } from '../api/client';
+import type { ShopItem } from '../game/types';
+import { getErrorCodeMessage } from '../i18n/content';
+import { formatNumber, translate } from '../i18n';
 import { useWalletConnectionController } from '../hooks/useWalletConnectionController';
 import { useAppStore } from '../stores/store';
-import type { ShopItem } from '../game/types';
 
 function buildCommentPayload(comment: string): string {
   const encoder = new TextEncoder();
@@ -27,7 +30,7 @@ function buildCommentPayload(comment: string): string {
   const absentCount = 0;
   const totalCellSize = 2 + dataBytes.length;
 
-  const boc = new Uint8Array(4 + 1 + 5 + 2 + 1 + dataBytes.length); // 13 header bytes + data
+  const boc = new Uint8Array(4 + 1 + 5 + 2 + 1 + dataBytes.length);
   let offset = 0;
 
   boc.set(bocMagic, offset); offset += 4;
@@ -56,7 +59,7 @@ const BOOST_IDS: BoostId[] = ['hints_1', 'revive_1'];
 const MAX_BOOST_QUANTITY = 10;
 
 const TON_SENT_TX_KEY = 'ton_pending_tx_id';
-const TON_SENT_TX_TTL_MS = 24 * 60 * 60 * 1000; // 24h — matches backend pending tx cutoff
+const TON_SENT_TX_TTL_MS = 24 * 60 * 60 * 1000;
 
 function readPendingTxId(): number | null {
   try {
@@ -82,24 +85,18 @@ function clearPendingTxId(): void {
 }
 
 const BOOST_UI: Record<BoostId, {
-  title: string;
-  description: string;
   priceFallback: number;
   iconWrapClass: string;
   iconClass: string;
   buttonClass: string;
 }> = {
   hints_1: {
-    title: 'Подсказки',
-    description: 'Показывают верный ход. Хранятся в общем запасе.',
     priceFallback: 25,
     iconWrapClass: 'border-cyan-500/20 bg-cyan-500/10',
     iconClass: 'text-cyan-400',
     buttonClass: 'bg-cyan-500 hover:bg-cyan-400',
   },
   revive_1: {
-    title: 'Возрождения',
-    description: 'Дают шанс продолжить игру после ошибки.',
     priceFallback: 50,
     iconWrapClass: 'border-rose-500/20 bg-rose-500/10',
     iconClass: 'text-rose-400',
@@ -115,6 +112,13 @@ function normalizeBoosts(items: ShopItem[]): Array<ShopItem & { id: BoostId }> {
   return items.filter((item): item is ShopItem & { id: BoostId } =>
     BOOST_IDS.includes(item.id as BoostId),
   );
+}
+
+function isWalletRejection(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes('interrupted')
+    || normalized.includes('cancel')
+    || normalized.includes('reject');
 }
 
 function BoostCard({
@@ -134,6 +138,7 @@ function BoostCard({
   onChangeQuantity: (value: number) => void;
   onPurchase: () => void;
 }) {
+  const { t } = useTranslation();
   const config = BOOST_UI[boostId];
   const unitPrice = item.priceCoins ?? config.priceFallback;
   const totalPrice = unitPrice * quantity;
@@ -151,8 +156,8 @@ function BoostCard({
           <Icon size={24} className={config.iconClass} strokeWidth={2.5} />
         </div>
         <div className="min-w-0">
-          <h2 className="text-xl font-bold text-[#f7f8fb]">{config.title}</h2>
-          <p className="mt-1 text-sm leading-relaxed text-[#a7abb8]">{config.description}</p>
+          <h2 className="text-xl font-bold text-[#f7f8fb]">{item.name}</h2>
+          <p className="mt-1 text-sm leading-relaxed text-[#a7abb8]">{item.description}</p>
         </div>
       </div>
 
@@ -162,17 +167,17 @@ function BoostCard({
             type="button"
             onClick={() => onChangeQuantity(quantity - 1)}
             disabled={quantity <= 1}
-            aria-label={`Уменьшить количество ${config.title.toLowerCase()}`}
+            aria-label={t('common:decreaseQty')}
             className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 text-[#9fa5b5] transition hover:bg-white/10 hover:text-white disabled:opacity-30"
           >
             <Minus size={18} />
           </button>
-          <span className="w-6 text-center text-lg font-bold text-[#f7f8fb]">{quantity}</span>
+          <span className="w-6 text-center text-lg font-bold text-[#f7f8fb]">{formatNumber(quantity)}</span>
           <button
             type="button"
             onClick={() => onChangeQuantity(quantity + 1)}
             disabled={quantity >= MAX_BOOST_QUANTITY}
-            aria-label={`Увеличить количество ${config.title.toLowerCase()}`}
+            aria-label={t('common:increaseQty')}
             className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 text-[#9fa5b5] transition hover:bg-white/10 hover:text-white disabled:opacity-30"
           >
             <Plus size={18} />
@@ -186,14 +191,14 @@ function BoostCard({
           className={`relative flex h-12 flex-1 items-center justify-center gap-2 rounded-2xl font-bold text-white transition-all active:scale-95 disabled:pointer-events-none disabled:opacity-50 ${config.buttonClass}`}
         >
           {isPurchasing ? (
-            <span className="animate-pulse">Обработка...</span>
+            <span className="animate-pulse">{t('common:processing')}</span>
           ) : (
             <>
-              <span>Купить</span>
+              <span>{t('common:buy')}</span>
               <div className="mx-1 h-4 w-px bg-black/20" />
               <div className="flex items-center gap-1.5">
                 <Coins size={16} className="text-amber-300 drop-shadow-sm" />
-                <span>{totalPrice}</span>
+                <span>{formatNumber(totalPrice)}</span>
               </div>
             </>
           )}
@@ -204,6 +209,7 @@ function BoostCard({
 }
 
 export function ShopScreen() {
+  const { t } = useTranslation();
   const user = useAppStore((s) => s.user);
   const updateUser = useAppStore((s) => s.updateUser);
   const [tonConnectUI] = useTonConnectUI();
@@ -232,8 +238,8 @@ export function ShopScreen() {
       setItems(normalizeBoosts(catalog.boosts));
       setTonItems([...catalog.arrowSkins, ...catalog.themes].filter((item) => item.priceTon != null));
       setUpgrades(catalog.upgrades ?? []);
-    } catch {
-      setError('Не удалось загрузить магазин');
+    } catch (catalogError) {
+      setError(handleApiError(catalogError));
       setItems([]);
       setTonItems([]);
       setUpgrades([]);
@@ -265,7 +271,7 @@ export function ShopScreen() {
     try {
       const result = await shopApi.purchaseCoins('boosts', item.id, quantity);
       if (!result.success) {
-        setPurchaseError(result.error ?? 'Покупка не удалась');
+        setPurchaseError(getErrorCodeMessage(result.error, translate('errors:generic.server')));
         return;
       }
 
@@ -276,8 +282,8 @@ export function ShopScreen() {
       });
 
       setQuantities((prev) => ({ ...prev, [item.id]: 1 }));
-    } catch {
-      setPurchaseError('Покупка не удалась');
+    } catch (purchaseErr) {
+      setPurchaseError(handleApiError(purchaseErr));
     } finally {
       setPurchasingId(null);
     }
@@ -287,7 +293,7 @@ export function ShopScreen() {
     if (purchasingId) return;
 
     if (!user?.walletAddress) {
-      setPurchaseError('Сначала подключите TON кошелёк');
+      setPurchaseError(t('shop:ton.connectWalletFirst'));
       return;
     }
 
@@ -298,7 +304,7 @@ export function ShopScreen() {
 
     setPurchasingId(item.id);
     setPurchaseError(null);
-    setTonStatus('Создаём транзакцию...');
+    setTonStatus(t('shop:ton.createTx'));
 
     try {
       const paymentInfo = await shopApi.purchaseTon(itemType, item.id);
@@ -306,7 +312,7 @@ export function ShopScreen() {
       const alreadySent = readPendingTxId() === paymentInfo.transaction_id;
 
       if (!alreadySent) {
-        setTonStatus('Подтвердите в кошельке...');
+        setTonStatus(t('shop:ton.confirmWallet'));
 
         const amountNano = paymentInfo.amount_nano ?? String(Math.round(paymentInfo.amount * 1e9));
         const commentPayload = buildCommentPayload(paymentInfo.comment);
@@ -325,7 +331,7 @@ export function ShopScreen() {
         savePendingTxId(paymentInfo.transaction_id);
       }
 
-      setTonStatus('Ожидаем подтверждение...');
+      setTonStatus(t('shop:ton.awaitingConfirmation'));
 
       for (let i = 0; i < 20; i++) {
         await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -342,13 +348,13 @@ export function ShopScreen() {
             return;
           }
         } catch {
-          // Continue polling.
+          // Keep polling until timeout.
         }
       }
 
       setTonStatus(null);
       void loadCatalog();
-      setPurchaseError('Транзакция отправлена, но подтверждение ещё не получено. Проверьте позже.');
+      setPurchaseError(t('shop:ton.pendingConfirmation'));
     } catch (errorValue) {
       console.error('[TON purchase error]', errorValue);
       const message = errorValue instanceof Error
@@ -356,16 +362,17 @@ export function ShopScreen() {
         : typeof errorValue === 'string'
           ? errorValue
           : JSON.stringify(errorValue);
-      if (message.includes('Interrupted') || message.includes('cancel') || message.includes('Reject') || message.includes('reject')) {
-        setTonStatus(null);
-      } else {
-        setPurchaseError(`Ошибка: ${message || 'неизвестная ошибка'}`);
-        setTonStatus(null);
+
+      setTonStatus(null);
+      if (isWalletRejection(message)) {
+        return;
       }
+
+      setPurchaseError(handleApiError(errorValue));
     } finally {
       setPurchasingId(null);
     }
-  }, [loadCatalog, purchasingId, tonConnectUI, user?.walletAddress]);
+  }, [loadCatalog, purchasingId, t, tonConnectUI, updateUser, user?.walletAddress]);
 
   const hasStoreContent = items.length > 0 || tonItems.length > 0 || upgrades.length > 0;
 
@@ -399,26 +406,26 @@ export function ShopScreen() {
         >
           <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-white/60">
             <ShoppingBag size={13} />
-            Beta Shop
+            {t('shop:badge')}
           </div>
 
           <p className="mt-3 text-[15px] leading-7 text-[#d2d7e5]">
-            Здесь вы можете купить различные улучшения для игры
+            {t('shop:intro')}
           </p>
 
           <div className="mt-3 grid grid-cols-2 gap-2">
             <div className="rounded-2xl border border-cyan-500/15 bg-cyan-500/[0.05] px-3 py-3">
-              <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#8bb8cb]">Подсказки</div>
+              <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#8bb8cb]">{t('shop:balances.hints')}</div>
               <div className="mt-1 flex items-center gap-2 text-xl font-black text-[#f7f8fb]">
                 <Lightbulb size={15} className="text-cyan-300" />
-                {hintBalance}
+                {formatNumber(hintBalance)}
               </div>
             </div>
             <div className="rounded-2xl border border-rose-500/15 bg-rose-500/[0.05] px-3 py-3">
-              <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#d2a1b1]">Возрождения</div>
+              <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#d2a1b1]">{t('shop:balances.revives')}</div>
               <div className="mt-1 flex items-center gap-2 text-xl font-black text-[#f7f8fb]">
                 <Heart size={15} className="text-rose-300" />
-                {reviveBalance}
+                {formatNumber(reviveBalance)}
               </div>
             </div>
           </div>
@@ -433,7 +440,7 @@ export function ShopScreen() {
         {loading ? (
           <div className="flex flex-1 items-center justify-center">
             <div className="rounded-3xl border border-white/10 bg-[#111526]/75 px-6 py-5 text-white/70 backdrop-blur-xl">
-              Загружаем магазин...
+              {t('shop:loading')}
             </div>
           </div>
         ) : error ? (
@@ -446,15 +453,15 @@ export function ShopScreen() {
                 className="mt-4 inline-flex items-center gap-2 rounded-2xl bg-white/10 px-4 py-3 font-bold text-white transition hover:bg-white/15"
               >
                 <RefreshCcw size={16} />
-                Повторить
+                {t('common:retry')}
               </button>
             </div>
           </div>
         ) : !hasStoreContent ? (
           <div className="flex flex-1 items-center justify-center">
             <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-[#111526]/75 p-6 text-center backdrop-blur-xl">
-              <p className="text-lg font-bold text-white">Магазин временно недоступен</p>
-              <p className="mt-2 text-sm text-white/60">Каталог пока не вернул доступные товары.</p>
+              <p className="text-lg font-bold text-white">{t('shop:unavailable')}</p>
+              <p className="mt-2 text-sm text-white/60">{t('shop:unavailableDescription')}</p>
             </div>
           </div>
         ) : (
@@ -466,7 +473,7 @@ export function ShopScreen() {
             )}
 
             <section className="space-y-4">
-              <div className="pl-1 text-sm font-bold uppercase tracking-[0.18em] text-[#677086]">Расходники</div>
+              <div className="pl-1 text-sm font-bold uppercase tracking-[0.18em] text-[#677086]">{t('shop:consumables')}</div>
 
               {BOOST_IDS.map((boostId) => {
                 const item = boostMap.get(boostId);
@@ -489,7 +496,7 @@ export function ShopScreen() {
 
             {upgrades.length > 0 && (
               <section className="mt-5 space-y-4">
-                <div className="pl-1 text-sm font-bold uppercase tracking-[0.18em] text-[#677086]">Улучшения</div>
+                <div className="pl-1 text-sm font-bold uppercase tracking-[0.18em] text-[#677086]">{t('shop:upgrades')}</div>
 
                 {upgrades.map((item) => {
                   const purchased = item.purchasedCount ?? 0;
@@ -511,7 +518,7 @@ export function ShopScreen() {
                         <div className="min-w-0">
                           <h2 className="text-xl font-bold text-[#f7f8fb]">{item.name}</h2>
                           <p className="mt-1 text-sm leading-relaxed text-[#a7abb8]">
-                            Увеличивает стартовые жизни.
+                            {item.description || t('shop:items.extra_life.description')}
                           </p>
                           <div className="mt-2 flex items-center gap-2">
                             <div className="flex gap-1">
@@ -522,7 +529,7 @@ export function ShopScreen() {
                                 />
                               ))}
                             </div>
-                            <span className="text-xs text-[#677086]">{purchased}/{maxP}</span>
+                            <span className="text-xs text-[#677086]">{formatNumber(purchased)}/{formatNumber(maxP)}</span>
                           </div>
                         </div>
                       </div>
@@ -535,16 +542,16 @@ export function ShopScreen() {
                           className="relative flex h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-pink-500 font-bold text-white transition-all hover:bg-pink-400 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
                         >
                           {purchasingId === item.id ? (
-                            <span className="animate-pulse">Обработка...</span>
+                            <span className="animate-pulse">{t('common:processing')}</span>
                           ) : isMaxed ? (
-                            <span>Максимум</span>
+                            <span>{t('common:max')}</span>
                           ) : noWallet ? (
-                            <span>Подключите кошелёк</span>
+                            <span>{t('common:connectWallet')}</span>
                           ) : (
                             <>
-                              <span>Купить</span>
+                              <span>{t('common:buy')}</span>
                               <div className="mx-1 h-4 w-px bg-black/20" />
-                              <span>{item.priceTon} TON</span>
+                              <span>{formatNumber(item.priceTon ?? 0)} TON</span>
                             </>
                           )}
                         </button>
@@ -559,7 +566,7 @@ export function ShopScreen() {
               <div className="mt-5">
                 <div className="mb-3 flex items-center gap-2">
                   <Diamond size={16} className="text-violet-400" />
-                  <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-violet-300/80">Premium</span>
+                  <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-violet-300/80">{t('shop:premium')}</span>
                 </div>
 
                 <div className="space-y-3">
@@ -585,10 +592,10 @@ export function ShopScreen() {
                           className="shrink-0 rounded-2xl bg-gradient-to-r from-violet-500 to-purple-600 px-4 py-2.5 text-sm font-black text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {item.owned
-                            ? 'Куплено'
+                            ? t('common:owned')
                             : purchasingId === item.id
                               ? '...'
-                              : `${item.priceTon} TON`}
+                              : `${formatNumber(item.priceTon ?? 0)} TON`}
                         </button>
                       </div>
                     </motion.div>

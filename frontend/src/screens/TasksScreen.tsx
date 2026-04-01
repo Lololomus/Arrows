@@ -19,6 +19,7 @@ import FragmentsTab from './FragmentsTab';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import type { TaskDto } from '../game/types';
 import { ADS_ENABLED, ADS_FIRST_ELIGIBLE_LEVEL, ADSGRAM_BLOCK_IDS } from '../config/constants';
+import { formatNumber, formatTimeUntil, translate } from '../i18n';
 import { isValidRewardedBlockId } from '../services/adsgram';
 import { clearPendingRewardIntent, rememberPendingRewardIntent } from '../services/rewardReconciler';
 import { getRewardedFlowMessage, runRewardedFlow } from '../services/rewardedAds';
@@ -88,7 +89,7 @@ function SectionDivider({
 
 // ─── Green "done" badge ───────────────────────────────────────────────────────
 
-function DoneBadge({ label = 'Готово', size = 'md' }: { label?: string; size?: 'sm' | 'md' }) {
+function DoneBadge({ label = translate('common:done'), size = 'md' }: { label?: string; size?: 'sm' | 'md' }) {
   const cls = size === 'sm'
     ? 'px-2.5 py-1.5 text-[10px] gap-1'
     : 'px-3 py-2 text-[10px] gap-1';
@@ -103,11 +104,7 @@ function DoneBadge({ label = 'Готово', size = 'md' }: { label?: string; si
 // ─── Ad task helper ───────────────────────────────────────────────────────────
 
 function formatResetTime(resetsAt: string, now: number): string {
-  const ts = Date.parse(resetsAt);
-  if (!Number.isFinite(ts)) return 'позже';
-  const mins = Math.ceil(Math.max(0, ts - now) / 60_000);
-  const h = Math.floor(mins / 60), m = mins % 60;
-  return h <= 0 ? `${Math.max(1, m)} мин` : `${h}ч ${String(m).padStart(2, '0')}мин`;
+  return formatTimeUntil(resetsAt, now) ?? translate('common:later');
 }
 
 // ─── DailyAdTaskCard ──────────────────────────────────────────────────────────
@@ -176,7 +173,7 @@ function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: 
   useEffect(() => {
     if (!trackedIntent) return;
     if (pendingId !== trackedIntent.intentId) setPendingId(trackedIntent.intentId);
-    setError(null); setInfoMsg('Проверяем награду...');
+    setError(null); setInfoMsg(translate('tasks:dailyCoins.checking'));
   }, [pendingId, trackedIntent]);
 
   useEffect(() => {
@@ -235,7 +232,7 @@ function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: 
         if (result.intentId) {
           setPendingId(result.intentId);
           rememberPendingRewardIntent({ intentId: result.intentId, placement: 'reward_daily_coins' });
-          setInfoMsg('Связь прервалась, проверяем автоматически...');
+          setInfoMsg(translate('tasks:dailyCoins.checking'));
         } else { setError(getRewardedFlowMessage('reward_daily_coins', result)); }
         return;
       }
@@ -255,7 +252,7 @@ function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: 
       if (result.status?.coins != null) updateUser({ coins: result.status.coins });
       else await syncCoins();
       onReward(20, triggerEl);
-    } catch { setError('Не удалось связаться с сервером.'); }
+    } catch { setError(translate('errors:generic.network')); }
     finally { setLoading(false); }
   }, [limit, loadStatus, loading, onReward, pendingId, syncCoins, updateUser, used]);
 
@@ -267,13 +264,17 @@ function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: 
   const waiting      = pendingId !== null;
   const isDisabled   = loading || waiting || limitReached;
   const resetHint = used > 0 && resetsAt
-    ? ` | сброс через ${formatResetTime(resetsAt, now)}`
+    ? ` | ${translate('tasks:dailyCoins.resetOnly', { time: formatResetTime(resetsAt, now) }).replace(/^.*? /, '')}`
     : '';
 
   const subtitle = limitReached
-    ? `Сброс через ${formatResetTime(resetsAt, now)}`
-    : waiting ? (infoMsg ?? 'Проверяем награду...')
-    : (error ?? `+20 монет | осталось ${remaining} из ${limit}${resetHint}`);
+    ? translate('tasks:dailyCoins.resetOnly', { time: formatResetTime(resetsAt, now) })
+    : waiting ? (infoMsg ?? translate('tasks:dailyCoins.checking'))
+    : (error ?? translate('tasks:dailyCoins.available', {
+      remaining: formatNumber(remaining),
+      limit: formatNumber(limit),
+      reset: resetHint,
+    }));
 
   return (
     <motion.div
@@ -288,9 +289,9 @@ function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: 
         </div>
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex items-center gap-2">
-            <h3 className="min-w-0 flex-1 truncate text-[14px] font-bold text-white">Монеты за рекламу</h3>
+            <h3 className="min-w-0 flex-1 truncate text-[14px] font-bold text-white">{translate('tasks:dailyCoins.title')}</h3>
             {limitReached
-              ? <DoneBadge label="Готово" />
+              ? <DoneBadge label={translate('common:done')} />
               : (
                 <motion.button
                   whileTap={{ scale: 0.92 }}
@@ -299,7 +300,7 @@ function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: 
                   className="shrink-0 flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white shadow-[0_4px_15px_rgba(245,158,11,0.3)] disabled:opacity-70"
                 >
                   <Play size={13} />
-                  {loading ? '...' : waiting ? 'Проверка' : 'Смотреть'}
+                  {loading ? '...' : waiting ? translate('common:checking') : translate('common:watch')}
                 </motion.button>
               )
             }
@@ -496,7 +497,7 @@ function BottomCoinStash({ balance, isPulsing }: { balance: number; isPulsing: b
             <Coins size={24} strokeWidth={2.5} className="drop-shadow-lg" />
           </motion.div>
           <div className="leading-tight">
-            <p className="mb-0.5 text-[12px] font-bold uppercase tracking-[0.25em] text-yellow-200/60">Баланс</p>
+            <p className="mb-0.5 text-[12px] font-bold uppercase tracking-[0.25em] text-yellow-200/60">{translate('common:coinStash')}</p>
             <motion.p
               key={balance}
               initial={{ scale: 1.3, color: '#ffffff' }}
@@ -504,13 +505,13 @@ function BottomCoinStash({ balance, isPulsing }: { balance: number; isPulsing: b
               transition={{ duration: 0.4, ease: 'easeOut' }}
               className="origin-left text-3xl font-black tracking-tight text-yellow-300 drop-shadow-[0_0_12px_rgba(250,204,21,0.4)] tabular-nums"
             >
-              {balance.toLocaleString()}
+              {formatNumber(balance)}
             </motion.p>
           </div>
         </div>
         <div className="flex shrink-0 flex-col items-end">
           <span className="rounded-full border border-yellow-300/40 bg-yellow-300/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-yellow-100/90 shadow-inner">
-            Wallet
+            {translate('common:wallet')}
           </span>
         </div>
       </div>
@@ -653,7 +654,7 @@ export function TasksScreen() {
 
   const handleOpenChannel = useCallback((task: TaskDto) => {
     const url = task.channel?.url ?? (task.channel?.username ? `https://t.me/${task.channel.username}` : null);
-    if (!url) { setTaskErrors((p) => ({ ...p, [task.id]: 'Канал пока не настроен' })); return; }
+    if (!url) { setTaskErrors((p) => ({ ...p, [task.id]: translate('tasks:channelNotConfigured') })); return; }
     triggerHaptic('light');
     clearTaskError(task.id);
     const tg = (window as Window & { Telegram?: any }).Telegram?.WebApp;
@@ -708,7 +709,9 @@ export function TasksScreen() {
     const rewardHints = nextTier?.rewardHints ?? lastTier?.rewardHints ?? 0;
     const rewardRevives = nextTier?.rewardRevives ?? lastTier?.rewardRevives ?? 0;
     const rewardLabel = formatTaskRewardLabel(rewardCoins, rewardHints, rewardRevives);
-    const rewardCaption = rewardHints > 0 || rewardRevives > 0 ? 'награда' : 'монет';
+    const rewardCaption = rewardHints > 0 || rewardRevives > 0
+      ? translate('tasks:rewardCaption.reward')
+      : translate('tasks:rewardCaption.coins');
     const progress = task.kind === 'stepped' ? task.progress : task.status === 'completed' ? 1 : 0;
     const pct      = Math.min(100, (progress / target) * 100);
     const isLoadingTask = loadingTaskIds.has(task.id);
@@ -719,7 +722,7 @@ export function TasksScreen() {
 
     let actionLabel = '';
     if (task.kind === 'single') {
-      actionLabel = isLoadingTask ? '...' : task.status === 'claimable' ? rewardLabel : openedChannelIds.has(task.id) ? 'Проверить' : 'Подписка';
+      actionLabel = isLoadingTask ? '...' : task.status === 'claimable' ? rewardLabel : openedChannelIds.has(task.id) ? translate('tasks:action.check') : translate('tasks:action.subscribe');
     } else if (task.status === 'claimable') {
       actionLabel = isLoadingTask ? '...' : rewardLabel;
     }
@@ -753,7 +756,7 @@ export function TasksScreen() {
               </h3>
 
               {isCompleted ? (
-                <DoneBadge label="Готово" size="sm" />
+                <DoneBadge label={translate('common:done')} size="sm" />
               ) : hasAction ? (
                 <motion.button
                   whileTap={{ scale: 0.92 }}
@@ -778,7 +781,7 @@ export function TasksScreen() {
 
             {/* Описание */}
             {isCompleted ? (
-              <p className="text-[11px] leading-tight text-white/35">Задание выполнено</p>
+              <p className="text-[11px] leading-tight text-white/35">{translate('tasks:taskCompleted')}</p>
             ) : (
               <>
                 <p className="text-[11px] leading-tight text-white/50 line-clamp-1">
@@ -829,7 +832,7 @@ export function TasksScreen() {
     // 2. Divider → ежедневные
     if (hasDailySection) {
       nodes.push(
-        <SectionDivider key="d-daily" label="Ежедневные"
+        <SectionDivider key="d-daily" label={translate('tasks:sections.daily')}
           icon={<Coins size={10} className="text-amber-400" />}
           lineClass="via-amber-400/20" delay={i++ * STAGGER}
         />
@@ -858,7 +861,7 @@ export function TasksScreen() {
     const anythingAbove = hasDailySection;
     if (anythingAbove && active.length > 0) {
       nodes.push(
-        <SectionDivider key="d-active" label="Задания"
+        <SectionDivider key="d-active" label={translate('tasks:sections.tasks')}
           icon={<Sparkles size={10} className="text-blue-400" />}
           lineClass="via-blue-400/20" delay={i++ * STAGGER}
         />
@@ -870,7 +873,7 @@ export function TasksScreen() {
 
     if (completed.length > 0) {
       nodes.push(
-        <SectionDivider key="d-completed" label="Выполнено"
+        <SectionDivider key="d-completed" label={translate('tasks:sections.completed')}
           icon={<CheckCircle2 size={10} className="text-green-400" />}
           lineClass="via-green-400/20" delay={i++ * STAGGER}
         />
@@ -958,11 +961,11 @@ export function TasksScreen() {
         />
         <button onClick={() => setActiveTab('tasks')}
           className={`z-10 flex-1 py-3 text-sm font-bold transition-colors ${activeTab === 'tasks' ? 'text-white' : 'text-white/50'}`}>
-          <ClipboardList size={16} className="mr-1 mb-1 inline" /> Задания
+          <ClipboardList size={16} className="mr-1 mb-1 inline" /> {translate('tasks:tabs.tasks')}
         </button>
         <button onClick={() => setActiveTab('fragments')}
           className={`z-10 flex-1 py-3 text-sm font-bold transition-colors ${activeTab === 'fragments' ? 'text-white' : 'text-white/50'}`}>
-          <Puzzle size={16} className="mr-1 mb-1 inline" /> Фрагменты
+          <Puzzle size={16} className="mr-1 mb-1 inline" /> {translate('tasks:tabs.fragments')}
         </button>
       </div>
 
@@ -1020,11 +1023,11 @@ export function TasksScreen() {
 
               {screenError ? (
                 <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
-                  <div className="font-bold">Не удалось загрузить задания</div>
+                  <div className="font-bold">{translate('tasks:loadFailedTitle')}</div>
                   <div className="mt-1 text-red-200/80">{screenError}</div>
                   <button onClick={() => void fetchTasks(true)}
                     className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold uppercase tracking-wider text-white">
-                    Повторить
+                    {translate('common:retry')}
                   </button>
                 </div>
               ) : loading ? (
@@ -1077,9 +1080,9 @@ export function TasksScreen() {
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-400/25 bg-amber-500/10 text-amber-300">
               <Lock size={28} />
             </div>
-            <h2 className="mt-4 text-xl font-black text-white">Задания скоро откроются</h2>
+            <h2 className="mt-4 text-xl font-black text-white">{translate('common:comingSoon')}</h2>
             <p className="mt-2 text-sm leading-relaxed text-white/60">
-              Этот раздел еще в работе. Пока награды и задания временно недоступны.
+              {translate('tasks:placeholderDescription')}
             </p>
           </div>
         </div>

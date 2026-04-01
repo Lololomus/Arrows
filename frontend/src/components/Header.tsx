@@ -1,4 +1,5 @@
 import { X, MoreHorizontal } from 'lucide-react';
+import { translate } from '../i18n';
 
 interface HeaderProps {
   title?: string;
@@ -24,7 +25,7 @@ export function Header({ title, onBack }: HeaderProps) {
       >
         <div className="flex items-center gap-1">
           <X size={20} />
-          <span className="text-sm font-medium">Закрыть</span>
+          <span className="text-sm font-medium">{translate('common:close')}</span>
         </div>
       </button>
       

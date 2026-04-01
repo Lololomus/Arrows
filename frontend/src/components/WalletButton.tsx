@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { Wallet } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useWalletConnectionController } from '../hooks/useWalletConnectionController';
 
 interface WalletButtonProps {
@@ -14,6 +15,7 @@ export function WalletButton({
   delay = 0.3,
 }: WalletButtonProps) {
   const walletController = useWalletConnectionController();
+  const { t } = useTranslation();
   const isConnected = walletController.walletMode === 'connected';
   const isBusy = walletController.walletMode === 'loading' || walletController.walletMode === 'confirming';
 
@@ -42,7 +44,7 @@ export function WalletButton({
               </div>
               <div className="leading-tight">
                 <p className="text-[11px] uppercase tracking-[0.22em] text-emerald-100/70">
-                  TON Wallet
+                  {t('common:tonWallet')}
                 </p>
                 <p className="text-lg font-bold text-emerald-200 drop-shadow-[0_0_12px_rgba(52,211,153,0.35)]">
                   {walletController.walletDisplay || '...'}
@@ -50,7 +52,7 @@ export function WalletButton({
               </div>
             </div>
             <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.15em] text-emerald-200/75">
-              Connected
+              {t('common:connected')}
             </span>
           </div>
         </motion.button>
@@ -66,13 +68,21 @@ export function WalletButton({
               onClick={walletController.onDisconnect}
               className="w-full rounded-xl border border-red-400/20 bg-[#1a1c30]/90 px-4 py-2.5 text-sm font-medium text-red-300 transition-colors hover:bg-red-500/10"
             >
-              Disconnect Wallet
+              {t('common:disconnectWallet')}
             </button>
           </motion.div>
         )}
       </motion.div>
     );
   }
+
+  const label = walletController.walletMode === 'loading'
+    ? t('common:connectWallet')
+    : walletController.walletMode === 'confirming'
+      ? t('common:confirming')
+      : walletController.walletMode === 'reconnect_required'
+        ? t('common:reconnectWallet')
+        : t('common:connectWallet');
 
   return (
     <motion.div {...animationProps} className={`relative ${className}`}>
@@ -92,17 +102,9 @@ export function WalletButton({
             </div>
             <div className="leading-tight">
               <p className="text-[11px] uppercase tracking-[0.22em] text-blue-100/70">
-                TON Wallet
+                {t('common:tonWallet')}
               </p>
-              <p className="text-lg font-bold text-blue-200">
-                {walletController.walletMode === 'loading'
-                  ? 'Connecting...'
-                  : walletController.walletMode === 'confirming'
-                    ? 'Confirming...'
-                    : walletController.walletMode === 'reconnect_required'
-                      ? 'Reconnect Wallet'
-                      : 'Connect Wallet'}
-              </p>
+              <p className="text-lg font-bold text-blue-200">{label}</p>
             </div>
           </div>
           <span className="rounded-full border border-blue-400/30 bg-blue-400/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.15em] text-blue-200/75">

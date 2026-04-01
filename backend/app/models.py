@@ -7,7 +7,7 @@ Arrow Puzzle - Database Models
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, BigInteger, String, Boolean, DateTime,
-    ForeignKey, Text, Numeric, Date, JSON, UniqueConstraint, func
+    ForeignKey, Text, Numeric, Date, JSON, UniqueConstraint, func, text
 )
 from sqlalchemy.orm import relationship
 
@@ -27,6 +27,8 @@ class User(Base):
     telegram_id = Column(BigInteger, unique=True, nullable=False, index=True)
     username = Column(String(64), nullable=True)
     first_name = Column(String(128), nullable=True)
+    locale = Column(String(8), nullable=False, server_default="en")
+    locale_manually_set = Column(Boolean, nullable=False, server_default=text("false"))
     photo_url = Column(String(512), nullable=True)
     userbot_access_hash = Column(BigInteger, nullable=True)
     userbot_peer_status = Column(String(32), nullable=False, server_default="unknown", index=True)
@@ -101,6 +103,8 @@ class User(Base):
             "telegram_id": self.telegram_id,
             "username": self.username,
             "first_name": self.first_name,
+            "locale": self.locale,
+            "locale_manually_set": self.locale_manually_set,
             "photo_url": self.photo_url,
             "current_level": self.current_level,
             "total_stars": self.total_stars,
@@ -402,6 +406,8 @@ class FragmentDrop(Base):
     slug = Column(String(64), unique=True, nullable=False, index=True)
     title = Column(String(256), nullable=False)
     description = Column(Text, nullable=True)
+    title_translations = Column(JSON, nullable=True)
+    description_translations = Column(JSON, nullable=True)
     emoji = Column(String(16), nullable=False, server_default="🎁")
 
     # Telegram Gift

@@ -10,6 +10,7 @@ import { useParticleRuntimeProfile } from '../components/ui/particleRuntimeProfi
 import { useReferral } from '../hooks/hooks';
 import { useCountdown } from '../hooks/useCountdown';
 import type { ReferralLeaderboardEntry } from '../game/types';
+import { formatNumber, getAppLocale, translate } from '../i18n';
 
 // --- ХЕЛПЕРЫ ДЛЯ TELEGRAM ---
 const triggerHaptic = (style: 'light' | 'medium' | 'heavy' | 'selection') => {
@@ -41,7 +42,42 @@ const CYAN_RANK_STYLES: Record<number, { bg: string; border: string; rankClass: 
 };
 
 const DEFAULT_RANK_STYLE = { bg: 'bg-white/5', border: 'border-white/5', rankClass: 'text-white/40', icon: '', particleColor: undefined };
-const DEFAULT_PLAYER_NAME = 'Player';
+
+function getDefaultPlayerName(): string {
+  return translate('common:playerFallback');
+}
+
+function formatParticipantsLabel(count: number): string {
+  const locale = getAppLocale();
+  const formattedCount = formatNumber(count);
+
+  if (locale === 'ru') {
+    const mod10 = count % 10;
+    const mod100 = count % 100;
+    if (mod10 === 1 && mod100 !== 11) {
+      return translate('friends:leaderboard.participant_one', { count: formattedCount });
+    }
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+      return translate('friends:leaderboard.participant_few', { count: formattedCount });
+    }
+    return translate('friends:leaderboard.participant_many', { count: formattedCount });
+  }
+
+  return translate(count === 1 ? 'friends:leaderboard.participant_one' : 'friends:leaderboard.participant_other', {
+    count: formattedCount,
+  });
+}
+
+function formatCompactCountdown(days: number, hours: number, minutes: number): string {
+  const formattedDays = formatNumber(days);
+  const formattedHours = String(hours).padStart(2, '0');
+  const formattedMinutes = String(minutes).padStart(2, '0');
+  const dayLabel = translate('common:units.dayCompact');
+  const hourLabel = translate('common:units.hourCompact');
+  const minuteLabel = translate('common:units.minuteCompact');
+
+  return `${formattedDays}${dayLabel} ${formattedHours}${hourLabel} ${formattedMinutes}${minuteLabel}`;
+}
 
 const normalizeUsername = (rawUsername: unknown): string | null => {
   if (typeof rawUsername !== 'string') return null;
@@ -49,7 +85,7 @@ const normalizeUsername = (rawUsername: unknown): string | null => {
   return normalized.length > 0 ? normalized : null;
 };
 
-const normalizeDisplayName = (rawDisplayName: unknown, rawUsername?: unknown, fallback = DEFAULT_PLAYER_NAME): string => {
+const normalizeDisplayName = (rawDisplayName: unknown, rawUsername?: unknown, fallback = getDefaultPlayerName()): string => {
   if (typeof rawDisplayName === 'string') {
     const trimmed = rawDisplayName.trim();
     if (trimmed.length > 0) return trimmed;
@@ -70,7 +106,7 @@ function mapApiToPlayers(entries: ReferralLeaderboardEntry[]): ReferralPlayer[] 
     const normalizedUsername = normalizeUsername(entry.username);
     return {
       rank: entry.rank,
-      displayName: normalizeDisplayName(entry.first_name, entry.username, DEFAULT_PLAYER_NAME),
+      displayName: normalizeDisplayName(entry.first_name, entry.username, getDefaultPlayerName()),
       username: normalizedUsername,
       referrals: entry.score,
       avatarSeed: entry.user_id,
@@ -175,32 +211,32 @@ const ReferralInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose:
                 <Gift className="text-cyan-400 w-8 h-8" />
               </div>
               <h3 className="text-2xl font-black text-white uppercase tracking-wide mb-6 drop-shadow-md">
-                Правила и Награды
+                {translate('friends:leaderboard.rulesTitle')}
               </h3>
               
               <div className="space-y-4 text-left">
                 {/* БЛОК С ПРИЗАМИ */}
                 <div className="bg-gradient-to-br from-cyan-900/40 to-blue-900/20 rounded-2xl p-4 border border-cyan-500/30 shadow-lg">
-                  <h4 className="text-cyan-400 font-bold text-base mb-3 text-center uppercase tracking-wider drop-shadow-sm">Призовой фонд</h4>
+                  <h4 className="text-cyan-400 font-bold text-base mb-3 text-center uppercase tracking-wider drop-shadow-sm">{translate('friends:leaderboard.prizePool')}</h4>
                   <div className="space-y-2">
                     <div className="flex items-center justify-between bg-black/20 rounded-xl p-3 border border-yellow-500/30">
                       <div className="flex items-center gap-3">
                         <span className="text-2xl drop-shadow-md">🥇</span>
-                        <span className="text-white font-medium">1 место</span>
+                        <span className="text-white font-medium">{translate('friends:leaderboard.placeLabel', { rank: 1 })}</span>
                       </div>
                       <span className="text-yellow-400 font-black text-lg drop-shadow-glow">$150</span>
                     </div>
                     <div className="flex items-center justify-between bg-black/20 rounded-xl p-3 border border-gray-400/30">
                       <div className="flex items-center gap-3">
                         <span className="text-2xl drop-shadow-md">🥈</span>
-                        <span className="text-white font-medium">2 место</span>
+                        <span className="text-white font-medium">{translate('friends:leaderboard.placeLabel', { rank: 2 })}</span>
                       </div>
                       <span className="text-gray-300 font-black text-lg">$100</span>
                     </div>
                     <div className="flex items-center justify-between bg-black/20 rounded-xl p-3 border border-orange-500/30">
                       <div className="flex items-center gap-3">
                         <span className="text-2xl drop-shadow-md">🥉</span>
-                        <span className="text-white font-medium">3 место</span>
+                        <span className="text-white font-medium">{translate('friends:leaderboard.placeLabel', { rank: 3 })}</span>
                       </div>
                       <span className="text-orange-400 font-black text-lg">$50</span>
                     </div>
@@ -209,13 +245,13 @@ const ReferralInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose:
 
                 <div className="bg-white/5 rounded-2xl p-4 border border-white/5 mt-4">
                   <p className="text-white/90 font-medium text-sm leading-relaxed">
-                    Зови друзей и поднимайся в топе. Приглашенным пользователем считается игрок, достигший <span className="text-cyan-400 font-bold">50-го уровня</span> в режиме Arcade.
+                    {translate('friends:leaderboard.inviteRule')}
                   </p>
                 </div>
                 
                 <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
                   <p className="text-white/90 font-medium text-sm leading-relaxed">
-                    Также <span className="text-cyan-400 font-bold">5 случайных пользователей</span>, попавших в топ-1000, получат утешительные призы.
+                    {translate('friends:leaderboard.consolationRule')}
                   </p>
                 </div>
               </div>
@@ -317,7 +353,7 @@ const TopReferralItem = memo(({ player, index, animateEntry }: { player: Referra
         <PlayerIdentityText displayName={player.displayName} username={player.username} />
       </div>
       <div className="font-mono text-base font-black relative z-20 text-cyan-400 drop-shadow-md shrink-0 pl-2 text-right flex items-center gap-1.5">
-        {player.referrals.toLocaleString()} <UserPlus size={16} className="text-cyan-500/70" />
+        {formatNumber(player.referrals)} <UserPlus size={16} className="text-cyan-500/70" />
       </div>
     </motion.div>
   );
@@ -330,7 +366,7 @@ const RegularReferralItem = memo(({ player, isCurrentUser }: { player: ReferralP
   return (
     <div className={`flex items-center px-3 py-2 rounded-2xl border relative overflow-hidden h-[72px] mb-3 ${isCurrentUser ? 'bg-blue-500/8 border-blue-500/40 shadow-[0_0_10px_rgba(59,130,246,0.15)]' : `${styles.bg} ${styles.border}`}`}>
       <div className="flex items-center justify-center w-8 mr-2 relative z-10 shrink-0">
-        <span className={`font-bold text-lg ${isCurrentUser ? 'text-blue-300' : styles.rankClass}`}>{player.rank}</span>
+        <span className={`font-bold text-lg ${isCurrentUser ? 'text-blue-300' : styles.rankClass}`}>{formatNumber(player.rank)}</span>
       </div>
       <div className="relative z-10 mr-3">
         <AsyncAvatar seed={player.avatarSeed} rank={player.rank} photoUrl={player.photoUrl} />
@@ -343,7 +379,7 @@ const RegularReferralItem = memo(({ player, isCurrentUser }: { player: ReferralP
         />
       </div>
       <div className="font-mono text-base font-black relative z-10 text-cyan-400/80 shrink-0 pl-2 text-right flex items-center gap-1.5">
-        {player.referrals.toLocaleString()} <UserPlus size={16} className="text-white/30" />
+        {formatNumber(player.referrals)} <UserPlus size={16} className="text-white/30" />
       </div>
     </div>
   );
@@ -401,7 +437,7 @@ const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger, myPosition, mySc
 }) => {
   const currentUserRank = useMemo(() => {
     const normalizedUsername = normalizeUsername(user?.username);
-    const displayName = normalizeDisplayName(user?.firstName ?? user?.first_name, normalizedUsername, DEFAULT_PLAYER_NAME);
+    const displayName = normalizeDisplayName(user?.firstName ?? user?.first_name, normalizedUsername, getDefaultPlayerName());
 
     return {
       rank: myPosition ?? 0,
@@ -443,7 +479,7 @@ const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger, myPosition, mySc
   };
 
   const rankDisplay = currentUserRank.rank > 0
-    ? `#${currentUserRank.rank.toLocaleString()}`
+    ? `#${formatNumber(currentUserRank.rank)}`
     : '—';
 
   return (
@@ -459,7 +495,7 @@ const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger, myPosition, mySc
       />
 
       <div className="flex flex-col items-center justify-center w-8 mr-2 leading-none relative z-10 shrink-0">
-         <span className="text-white/40 font-bold text-[10px] uppercase mb-1">Место</span>
+         <span className="text-white/40 font-bold text-[10px] uppercase mb-1">{translate('friends:leaderboard.place')}</span>
          <span className={`font-black tracking-tighter transition-colors ${isDocked ? 'text-blue-200 text-sm' : 'text-cyan-300 text-sm drop-shadow-md'}`}>
            {rankDisplay}
          </span>
@@ -474,7 +510,7 @@ const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger, myPosition, mySc
       </div>
 
       <div className={`font-mono text-xl font-black drop-shadow-md relative z-10 transition-colors flex items-center gap-1.5 ${isDocked ? 'text-blue-200' : 'text-cyan-300'}`}>
-        {currentUserRank.referrals.toLocaleString()} <UserPlus size={18} className="opacity-70" />
+        {formatNumber(currentUserRank.referrals)} <UserPlus size={18} className="opacity-70" />
       </div>
     </motion.div>
   );
@@ -649,14 +685,14 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
         
         <button 
           onClick={() => { triggerHaptic('light'); setIsInfoModalOpen(true); }}
-          aria-label="Информация о сезоне"
+          aria-label={translate('friends:leaderboard.seasonInfoLabel')}
           className="absolute top-3.5 right-3.5 z-20 w-10 h-10 flex items-center justify-center rounded-xl bg-white/10 border border-white/20 text-white/75 hover:text-white hover:bg-white/15 active:scale-95 transition-all backdrop-blur-sm shadow-[0_4px_14px_rgba(0,0,0,0.28)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/50"
         >
           <Info size={21} />
         </button>
 
         <Trophy size={56} className="mx-auto text-cyan-400 mb-2 drop-shadow-glow relative z-10" />
-        <h2 className="text-3xl font-black text-white uppercase tracking-wide drop-shadow-md relative z-10">Топ рефоводов</h2>
+        <h2 className="text-3xl font-black text-white uppercase tracking-wide drop-shadow-md relative z-10">{translate('friends:leaderboard.title')}</h2>
         
         {/* ДИНАМИЧЕСКИЙ ТАЙМЕР В СТИЛЕ CYAN */}
         {seasonEndsAt && (
@@ -665,13 +701,13 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
               <>
                 <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_#22d3ee]"></div>
                 <p className="text-cyan-200/90 text-sm font-mono font-medium tracking-wide">
-                  {days}д {hours.toString().padStart(2, '0')}ч {minutes.toString().padStart(2, '0')}м
+                  {formatCompactCountdown(days, hours, minutes)}
                 </p>
               </>
             ) : (
               <>
                 <div className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_#ef4444]"></div>
-                <p className="text-red-300/90 text-sm font-mono font-medium tracking-wide">Сезон завершен</p>
+                <p className="text-red-300/90 text-sm font-mono font-medium tracking-wide">{translate('friends:leaderboard.seasonEnded')}</p>
               </>
             )}
           </div>
@@ -691,8 +727,8 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
           ) : leaderboard.length === 0 ? (
             <div className="text-center py-16">
               <div className="text-5xl mb-4">🏆</div>
-              <p className="text-white/50 text-sm">Пока нет участников</p>
-              <p className="text-white/30 text-xs mt-1">Приглашай друзей и стань первым!</p>
+              <p className="text-white/50 text-sm">{translate('friends:leaderboard.noParticipants')}</p>
+              <p className="text-white/30 text-xs mt-1">{translate('friends:leaderboard.becomeFirst')}</p>
             </div>
           ) : (
             <motion.div
@@ -726,8 +762,11 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
                     <div className="w-12 h-[1px] bg-white/20 mb-3" />
                     <p className="text-white/30 text-xs font-medium">
                       {referralTotalParticipants > leaderboard.length
-                        ? `Топ-${leaderboard.length} из ${referralTotalParticipants}`
-                        : `${leaderboard.length} ${leaderboard.length === 1 ? 'участник' : leaderboard.length < 5 ? 'участника' : 'участников'}`
+                        ? translate('friends:leaderboard.topOfTotal', {
+                            top: formatNumber(leaderboard.length),
+                            total: formatNumber(referralTotalParticipants),
+                          })
+                        : formatParticipantsLabel(leaderboard.length)
                       }
                     </p>
                   </div>

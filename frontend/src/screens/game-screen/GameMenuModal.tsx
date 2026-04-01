@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { AlertTriangle } from 'lucide-react';
+import { translate } from '../../i18n';
 
 interface GameMenuModalProps {
   action: 'restart' | 'menu' | 'unsaved_menu' | null;
@@ -21,10 +22,10 @@ export function GameMenuModal({
   const isRestart = action === 'restart';
   const isUnsavedMenu = action === 'unsaved_menu';
   const title = isRestart
-    ? 'Начать заново?'
+    ? translate('game:menu.restartTitle')
     : isUnsavedMenu
-      ? 'Прогресс ещё не сохранён'
-      : 'Выйти в меню?';
+      ? translate('game:menu.unsavedTitle')
+      : translate('game:menu.exitTitle');
 
   return (
     <AnimatePresence>
@@ -47,13 +48,13 @@ export function GameMenuModal({
 
             {isUnsavedMenu && (
               <p className="text-sm leading-relaxed text-white/65">
-                Победа уже показана, но сервер ещё не подтвердил сохранение. Можно повторить сохранение или выйти без него.
+                {translate('game:menu.unsavedDescription')}
               </p>
             )}
 
             <div className={`mt-6 ${isUnsavedMenu ? 'flex flex-col gap-3' : 'flex gap-3'}`}>
               <button onClick={onCancel} className="flex-1 py-3 bg-white/5 rounded-xl text-white">
-                Отмена
+                {translate('common:cancel')}
               </button>
 
               {isUnsavedMenu ? (
@@ -62,13 +63,13 @@ export function GameMenuModal({
                     onClick={onConfirmRetrySave}
                     className="flex-1 py-3 bg-emerald-600 rounded-xl text-white font-bold"
                   >
-                    Повторить
+                    {translate('game:menu.retrySave')}
                   </button>
                   <button
                     onClick={onConfirmExitUnsaved}
                     className="flex-1 py-3 bg-red-500 rounded-xl text-white font-bold"
                   >
-                    Выйти без сохранения
+                    {translate('game:menu.exitWithoutSave')}
                   </button>
                 </>
               ) : (
@@ -76,7 +77,7 @@ export function GameMenuModal({
                   onClick={isRestart ? onConfirmRestart : onConfirmMenu}
                   className="flex-1 py-3 bg-red-500 rounded-xl text-white font-bold"
                 >
-                  {isRestart ? 'Рестарт' : 'Выйти'}
+                  {isRestart ? translate('game:menu.restart') : translate('game:menu.exit')}
                 </button>
               )}
             </div>

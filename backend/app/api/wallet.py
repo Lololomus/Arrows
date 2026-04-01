@@ -22,6 +22,7 @@ from ..schemas import (
     WalletDisconnectResponse,
 )
 from ..services.ton_proof import verify_ton_proof
+from .error_utils import api_error
 from .auth import get_current_user
 
 
@@ -71,7 +72,7 @@ async def connect_wallet(
     expected_payload = await redis.get(key)
 
     if not expected_payload:
-        raise HTTPException(status_code=400, detail="Proof payload expired or not found")
+        raise api_error(400, "PROOF_PAYLOAD_EXPIRED", "Proof payload expired or not found")
 
     if isinstance(expected_payload, bytes):
         expected_payload = expected_payload.decode("utf-8")
@@ -92,7 +93,7 @@ async def connect_wallet(
     )
 
     if not is_valid:
-        return WalletConnectResponse(success=False, error="Invalid proof")
+        return WalletConnectResponse(success=False, error="INVALID_PROOF")
 
     # 4. Delete used challenge (single-use)
     await redis.delete(key)
@@ -103,7 +104,7 @@ async def connect_wallet(
     try:
         canonical_address = _normalize_address(request.address)
     except Exception:
-        return WalletConnectResponse(success=False, error="Invalid address format")
+        return WalletConnectResponse(success=False, error="INVALID_ADDRESS_FORMAT")
 
     # 6. Check if wallet already bound to another user
     result = await db.execute(
@@ -116,7 +117,7 @@ async def connect_wallet(
     if existing:
         return WalletConnectResponse(
             success=False,
-            error="Wallet already connected to another account",
+            error="WALLET_ALREADY_CONNECTED",
         )
 
     # 7. Bind wallet

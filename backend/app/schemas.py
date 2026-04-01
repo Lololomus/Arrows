@@ -5,7 +5,7 @@ Arrow Puzzle - Pydantic Schemas
 """
 
 from datetime import datetime
-from typing import Literal, Optional, List, Union
+from typing import Literal, Optional, List, Union, Dict
 from pydantic import BaseModel, Field
 
 
@@ -16,6 +16,10 @@ from pydantic import BaseModel, Field
 class TelegramAuthRequest(BaseModel):
     """Запрос авторизации через Telegram."""
     init_data: str
+
+
+class UserLocaleUpdateRequest(BaseModel):
+    locale: Literal["ru", "en"]
 
 
 class AuthResponse(BaseModel):
@@ -43,16 +47,21 @@ class UserResponse(BaseModel):
     telegram_id: int
     username: Optional[str]
     first_name: Optional[str]
+    locale: Literal["ru", "en"] = "en"
+    locale_manually_set: bool = False
     photo_url: Optional[str]
     current_level: int
     total_stars: int
     coins: int
     hint_balance: int
     revive_balance: int
+    extra_lives: int = 0
     energy: int
     is_premium: bool
     active_arrow_skin: str
     active_theme: str
+    referrals_count: int = 0
+    referrals_pending: int = 0
     wallet_address: Optional[str] = None
 
     class Config:
@@ -583,6 +592,7 @@ class FragmentClaimResponse(BaseModel):
     success: bool
     claim_status: str
     message: str
+    code: Optional[str] = None
 
 
 class FragmentClaimStatusResponse(BaseModel):
@@ -599,8 +609,10 @@ class FragmentClaimStatusResponse(BaseModel):
 class FragmentDropCreateRequest(BaseModel):
     """Создание новой кампании дропа."""
     slug: str = Field(min_length=1, max_length=64, pattern=r'^[a-z0-9_]+$')
-    title: str = Field(min_length=1, max_length=256)
+    title: Optional[str] = Field(default=None, min_length=1, max_length=256)
     description: Optional[str] = None
+    title_translations: Optional[Dict[str, str]] = None
+    description_translations: Optional[Dict[str, str]] = None
     emoji: str = Field(default="🎁", max_length=16)
     telegram_gift_id: str
     gift_star_cost: int = Field(gt=0)
@@ -613,6 +625,8 @@ class FragmentDropUpdateRequest(BaseModel):
     """Обновление кампании."""
     title: Optional[str] = None
     description: Optional[str] = None
+    title_translations: Optional[Dict[str, str]] = None
+    description_translations: Optional[Dict[str, str]] = None
     emoji: Optional[str] = None
     gift_star_cost: Optional[int] = Field(default=None, gt=0)
     total_stock: Optional[int] = Field(default=None, gt=0)

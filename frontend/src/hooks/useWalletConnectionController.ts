@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTonAddress, useTonConnectUI, useTonWallet } from '@tonconnect/ui-react';
-import { walletApi } from '../api/client';
+import { ApiError, walletApi } from '../api/client';
+import { getErrorCodeMessage } from '../i18n/content';
+import { translate } from '../i18n';
 import { useAppStore } from '../stores/store';
 
 type ConnectionState = 'idle' | 'loading' | 'confirming';
@@ -17,6 +19,10 @@ function formatSuffixAddress(address: string | null | undefined): string {
   const normalized = address.trim();
   if (!normalized) return '...';
   return `...${normalized.slice(-4)}`;
+}
+
+function walletUiError(code?: string, fallback?: string): string {
+  return getErrorCodeMessage(code, fallback ?? translate('errors:generic.server'));
 }
 
 export function useWalletConnectionController() {
@@ -70,7 +76,7 @@ export function useWalletConnectionController() {
 
       const proof = nextWallet.connectItems?.tonProof;
       if (!proof || !('proof' in proof)) {
-        setError('Wallet confirmation failed');
+        setError(walletUiError('INVALID_PROOF'));
         setState('idle');
         try {
           await tonConnectUI.disconnect();
@@ -98,12 +104,16 @@ export function useWalletConnectionController() {
           return;
         }
 
-        setError(result.error || 'Wallet confirmation failed');
+        setError(walletUiError(result.error, result.error));
         await tonConnectUI.disconnect();
         setState('idle');
       } catch (connectError) {
         console.error('[Wallet] Backend verification failed:', connectError);
-        setError('Wallet confirmation failed');
+        if (connectError instanceof ApiError) {
+          setError(walletUiError(connectError.code, connectError.message));
+        } else {
+          setError(translate('errors:generic.server'));
+        }
         try {
           await tonConnectUI.disconnect();
         } catch (disconnectError) {
@@ -139,7 +149,11 @@ export function useWalletConnectionController() {
       await tonConnectUI.openModal();
     } catch (connectError) {
       console.error('[Wallet] Failed to start connection:', connectError);
-      setError('Unable to start wallet connection');
+      if (connectError instanceof ApiError) {
+        setError(walletUiError(connectError.code, connectError.message));
+      } else {
+        setError(translate('errors:generic.server'));
+      }
       setState('idle');
     }
   }, [prepareProofPayload, resetDisconnectMenu, tonConnectUI]);
@@ -156,7 +170,11 @@ export function useWalletConnectionController() {
       setError(null);
     } catch (disconnectError) {
       console.error('[Wallet] Disconnect failed:', disconnectError);
-      setError('Unable to disconnect wallet');
+      if (disconnectError instanceof ApiError) {
+        setError(walletUiError(disconnectError.code, disconnectError.message));
+      } else {
+        setError(translate('errors:generic.server'));
+      }
     } finally {
       resetDisconnectMenu();
     }

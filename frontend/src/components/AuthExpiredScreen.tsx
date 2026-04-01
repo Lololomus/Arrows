@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 
 interface AuthExpiredScreenProps {
   message: string;
@@ -6,6 +7,7 @@ interface AuthExpiredScreenProps {
 }
 
 export function AuthExpiredScreen({ message, onRetry }: AuthExpiredScreenProps) {
+  const { t } = useTranslation(['auth', 'common']);
   const handleReopen = () => {
     const tg = (window as any).Telegram?.WebApp;
     if (tg?.close) {
@@ -25,10 +27,10 @@ export function AuthExpiredScreen({ message, onRetry }: AuthExpiredScreenProps) 
           className="w-full max-w-md rounded-3xl border border-white/10 bg-slate-900/80 p-6 shadow-2xl backdrop-blur-xl"
         >
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300/80">
-            Session expired
+            {t('auth:title')}
           </p>
           <h1 className="mt-3 text-3xl font-black leading-tight text-white">
-            Нужно переоткрыть Mini App
+            {t('auth:reopenMiniApp')}
           </h1>
           <p className="mt-4 text-sm leading-6 text-slate-300">
             {message}
@@ -38,13 +40,13 @@ export function AuthExpiredScreen({ message, onRetry }: AuthExpiredScreenProps) 
               onClick={handleReopen}
               className="rounded-2xl bg-emerald-400 px-4 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-300"
             >
-              Открыть заново
+              {t('common:reopen')}
             </button>
             <button
               onClick={onRetry}
               className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
             >
-              Повторить
+              {t('common:retry')}
             </button>
           </div>
         </motion.div>

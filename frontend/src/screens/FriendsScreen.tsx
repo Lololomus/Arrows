@@ -6,6 +6,7 @@ import { FriendsLeaderboardScreen } from './FriendsLeaderboardScreen';
 import { useReferral } from '../hooks/hooks';
 import type { ReferralInfo } from '../game/types';
 import { PUBLIC_BOT_USERNAME, REFERRAL_REWARD_INVITER } from '../config/constants';
+import { formatNumber, translate } from '../i18n';
 
 type FriendsTab = 'friends' | 'leaderboard';
 
@@ -47,14 +48,14 @@ function ReferralProgressBar({
         {isActive ? (
           <>
             <span className="text-green-300/80 flex items-center gap-1">
-              <CheckCircle size={10} /> Активен
+              <CheckCircle size={10} /> {translate('friends:status.active')}
             </span>
-            <span className="text-green-300/80 font-semibold">Ур. {currentLevel}</span>
+            <span className="text-green-300/80 font-semibold">{translate('friends:status.levelShort')} {formatNumber(currentLevel)}</span>
           </>
         ) : (
           <>
             <span className="text-yellow-300/70 flex items-center gap-1">
-              <Clock size={10} /> Ещё {remaining} ур. до бонуса
+              <Clock size={10} /> {translate('friends:status.remainingToBonus', { count: formatNumber(remaining) })}
             </span>
             <span className="text-white/40">{progress}%</span>
           </>
@@ -85,7 +86,7 @@ function ReferralCard({
   const isConfirmed = referral.status === 'confirmed';
   const hasReachedConfirmLevel = typeof confirmLevel === 'number' && confirmLevel > 0 && referral.current_level >= confirmLevel;
   const isActive = isConfirmed || hasReachedConfirmLevel;
-  const displayName = referral.first_name || referral.username || 'Игрок';
+  const displayName = referral.first_name || referral.username || translate('common:playerFallback');
 
   return (
     <motion.div
@@ -96,7 +97,7 @@ function ReferralCard({
       className="flex items-center justify-between bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/5"
     >
       <div className="flex items-center gap-3 flex-1 min-w-0">
-        <div className="text-white/30 font-bold text-lg w-6 text-center shrink-0">{index + 1}</div>
+        <div className="text-white/30 font-bold text-lg w-6 text-center shrink-0">{formatNumber(index + 1)}</div>
         <div className="w-11 h-11 rounded-full bg-gradient-to-br from-blue-400/20 to-purple-500/20 border border-white/10 flex items-center justify-center text-xl shrink-0 overflow-hidden">
           {referral.photo_url ? (
             <img src={referral.photo_url} alt="" className="w-full h-full rounded-full object-cover" />
@@ -119,18 +120,18 @@ function ReferralCard({
 
       <div className="shrink-0 ml-3">
         {isActive ? (
-          <div className="text-center">
-            <div className="flex items-center gap-1.5 bg-green-500/15 text-green-300 text-xs px-3 py-1.5 rounded-xl font-medium">
-              <CheckCircle size={14} /> Активен
-            </div>
+            <div className="text-center">
+              <div className="flex items-center gap-1.5 bg-green-500/15 text-green-300 text-xs px-3 py-1.5 rounded-xl font-medium">
+              <CheckCircle size={14} /> {translate('friends:status.active')}
+              </div>
             {confirmLevel ? (
-              <div className="mt-1 text-green-300 text-[10px] font-bold">Ур. {referral.current_level}</div>
+              <div className="mt-1 text-green-300 text-[10px] font-bold">{translate('friends:status.levelShort')} {formatNumber(referral.current_level)}</div>
             ) : null}
           </div>
         ) : (
           <div className="text-center">
-            <div className="text-white/60 text-xs font-bold">Ур. {referral.current_level}</div>
-            <div className="text-white/30 text-[10px]">/ {confirmLevel ?? '...'}</div>
+            <div className="text-white/60 text-xs font-bold">{translate('friends:status.levelShort')} {formatNumber(referral.current_level)}</div>
+            <div className="text-white/30 text-[10px]">/ {confirmLevel != null ? formatNumber(confirmLevel) : '...'}</div>
           </div>
         )}
       </div>
@@ -147,13 +148,13 @@ function EmptyReferralList({ onShare }: { onShare: () => void }) {
           <Users size={32} className="text-white/20" />
         </div>
       </div>
-      <p className="text-white/60 text-sm mb-1">Пока никого нет</p>
-      <p className="text-white/40 text-xs mb-5">Пригласи друга и получи {REFERRAL_REWARD_INVITER} монет!</p>
+      <p className="text-white/60 text-sm mb-1">{translate('friends:empty.title')}</p>
+      <p className="text-white/40 text-xs mb-5">{translate('friends:empty.subtitle', { count: formatNumber(REFERRAL_REWARD_INVITER) })}</p>
       <button
         onClick={onShare}
         className="bg-gradient-to-r from-blue-600 to-purple-600 text-white font-bold py-3 px-6 rounded-2xl text-sm"
       >
-        <UserPlus size={16} className="inline mr-1.5 mb-0.5" /> Пригласить
+        <UserPlus size={16} className="inline mr-1.5 mb-0.5" /> {translate('friends:empty.invite')}
       </button>
     </div>
   );
@@ -199,8 +200,8 @@ function FriendsListContent({
             />
             <div className="relative z-10 bg-gradient-to-br from-yellow-500/20 to-orange-500/20 border border-yellow-500/30 rounded-2xl p-4 text-center">
               <Coins size={28} className="mx-auto mb-2 text-yellow-400" />
-              <div className="text-yellow-400 font-bold text-lg">+{REFERRAL_REWARD_INVITER}</div>
-              <div className="text-yellow-200/60 text-xs">монет тебе</div>
+              <div className="text-yellow-400 font-bold text-lg">+{formatNumber(REFERRAL_REWARD_INVITER)}</div>
+              <div className="text-yellow-200/60 text-xs">{translate('friends:cards.coinsToYou')}</div>
             </div>
           </div>
           <div className="relative rounded-2xl overflow-hidden">
@@ -214,7 +215,7 @@ function FriendsListContent({
             <div className="relative z-10 bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-blue-500/30 rounded-2xl p-4 text-center">
               <Gift size={28} className="mx-auto mb-2 text-cyan-400" />
               <div className="text-cyan-400 font-bold text-lg">+100</div>
-              <div className="text-cyan-200/60 text-xs">монет другу</div>
+              <div className="text-cyan-200/60 text-xs">{translate('friends:cards.coinsToFriend')}</div>
             </div>
           </div>
         </div>
@@ -222,22 +223,22 @@ function FriendsListContent({
         {/* Статистика */}
         <div className="grid grid-cols-3 gap-2">
           <div className="bg-white/5 rounded-2xl p-3 border border-white/10 flex flex-col items-center justify-center">
-            <div className="text-white/40 text-[10px] uppercase tracking-wider mb-1">Подтв.</div>
-            <div className="text-white font-black text-xl">{stats.count}</div>
+            <div className="text-white/40 text-[10px] uppercase tracking-wider mb-1">{translate('friends:stats.confirmed')}</div>
+            <div className="text-white font-black text-xl">{formatNumber(stats.count)}</div>
           </div>
           <div className="bg-yellow-500/10 rounded-2xl p-3 border border-yellow-500/20 flex flex-col items-center justify-center">
-            <div className="text-yellow-500/60 text-[10px] uppercase tracking-wider mb-1">Ожидают</div>
-            <div className="text-yellow-400 font-black text-xl">{stats.pending}</div>
+            <div className="text-yellow-500/60 text-[10px] uppercase tracking-wider mb-1">{translate('friends:stats.pending')}</div>
+            <div className="text-yellow-400 font-black text-xl">{formatNumber(stats.pending)}</div>
           </div>
           <div className="bg-green-500/10 rounded-2xl p-3 border border-green-500/20 flex flex-col items-center justify-center">
-            <div className="text-green-500/60 text-[10px] uppercase tracking-wider mb-1">Заработано</div>
-            <div className="text-green-400 font-black text-xl">+{stats.earned}</div>
+            <div className="text-green-500/60 text-[10px] uppercase tracking-wider mb-1">{translate('friends:stats.earned')}</div>
+            <div className="text-green-400 font-black text-xl">+{formatNumber(stats.earned)}</div>
           </div>
         </div>
 
         {/* Реферальная ссылка */}
         <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
-          <div className="text-white/70 text-xs mb-2 font-medium">Твоя реферальная ссылка:</div>
+          <div className="text-white/70 text-xs mb-2 font-medium">{translate('friends:referralLink')}</div>
           <div className="flex gap-2">
             <div className="flex-1 bg-black/30 rounded-xl px-3 py-2 text-white/50 text-xs font-mono truncate">
               {link || `t.me/${PUBLIC_BOT_USERNAME}?start=ref_${code || '...'}`}
@@ -261,7 +262,7 @@ function FriendsListContent({
             className="z-0 opacity-60"
           />
           <span className="relative z-10">
-            <Share2 size={20} className="inline mr-2 mb-1" /> Пригласить друга
+            <Share2 size={20} className="inline mr-2 mb-1" /> {translate('friends:inviteFriend')}
           </span>
         </button>
       </motion.div>
@@ -269,9 +270,9 @@ function FriendsListContent({
       {/* Список приглашённых */}
       <div>
         <div className="p-4 border-b border-white/5 mb-2">
-          <h3 className="text-white text-lg font-bold text-center">Приглашённые друзья</h3>
+          <h3 className="text-white text-lg font-bold text-center">{translate('friends:invitedFriends')}</h3>
           <p className="text-white/50 text-xs text-center mt-1">
-            {referrals.length > 0 ? `Всего: ${referrals.length}` : 'Пока пусто'}
+            {referrals.length > 0 ? translate('friends:total', { count: formatNumber(referrals.length) }) : translate('friends:listEmpty')}
           </p>
         </div>
 
@@ -352,13 +353,13 @@ export function FriendsScreen() {
           onClick={() => setActiveTab('friends')}
           className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${activeTab === 'friends' ? 'text-white' : 'text-white/50'}`}
         >
-          <Users size={16} className="inline mr-1 mb-1" /> Мои друзья
+          <Users size={16} className="inline mr-1 mb-1" /> {translate('friends:tabs.friends')}
         </button>
         <button
           onClick={() => setActiveTab('leaderboard')}
           className={`flex-1 py-3 text-sm font-bold z-10 transition-colors ${activeTab === 'leaderboard' ? 'text-white' : 'text-white/50'}`}
         >
-          <Trophy size={16} className="inline mr-1 mb-1" /> Leaderboard
+          <Trophy size={16} className="inline mr-1 mb-1" /> {translate('friends:tabs.leaderboard')}
         </button>
       </div>
 

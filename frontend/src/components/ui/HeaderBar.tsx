@@ -1,6 +1,8 @@
 import { motion } from 'framer-motion';
 import { Coins } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { WalletMode } from '../../hooks/useWalletConnectionController';
+import { formatNumber } from '../../i18n';
 
 function CubeIcon() {
   return (
@@ -22,16 +24,16 @@ function CubeIcon() {
   );
 }
 
-function getWalletLabel(walletMode: WalletMode): string {
+function getWalletLabel(walletMode: WalletMode, t: (key: string) => string): string {
   switch (walletMode) {
     case 'reconnect_required':
-      return 'Reconnect Wallet';
+      return t('common:reconnectWallet');
     case 'loading':
-      return 'Connecting...';
+      return t('common:connectWallet');
     case 'confirming':
-      return 'Confirming...';
+      return t('common:confirming');
     default:
-      return 'Connect Wallet';
+      return t('common:connectWallet');
   }
 }
 
@@ -60,6 +62,8 @@ export function HeaderBar({
   animated = true,
   delay = 0.2,
 }: HeaderBarProps) {
+  const { t } = useTranslation();
+
   const animationProps = animated
     ? {
         initial: { opacity: 0, y: 12, scale: 0.98 },
@@ -87,10 +91,10 @@ export function HeaderBar({
 
             <div className="min-w-0">
               <span className="block text-[12px] font-bold uppercase leading-tight tracking-[0.25em] text-yellow-200/60">
-                Coin Stash
+                {t('common:coinStash')}
               </span>
               <span className="mt-[2px] block truncate text-3xl font-black leading-none tracking-tight text-yellow-300 drop-shadow-[0_0_12px_rgba(250,204,21,0.4)] tabular-nums">
-                {balance.toLocaleString('ru-RU')}
+                {formatNumber(balance)}
               </span>
             </div>
           </div>
@@ -107,7 +111,7 @@ export function HeaderBar({
                 <span>{walletDisplay || '...'}</span>
               </div>
             ) : (
-              <span>{getWalletLabel(walletMode)}</span>
+              <span>{getWalletLabel(walletMode, t)}</span>
             )}
           </button>
         </div>
@@ -124,7 +128,7 @@ export function HeaderBar({
             onClick={onDisconnect}
             className="w-full rounded-xl border border-red-400/20 bg-[#1a1c30]/90 px-4 py-2.5 text-sm font-medium text-red-300 transition-colors hover:bg-red-500/10"
           >
-            Disconnect Wallet
+            {t('common:disconnectWallet')}
           </button>
         </motion.div>
       )}
