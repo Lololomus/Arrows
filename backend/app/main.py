@@ -13,7 +13,7 @@ from slowapi.errors import RateLimitExceeded
 
 from .config import settings
 from .database import init_db, close_redis
-from .api import ads, admin_fragments, auth, fragments, game, shop, social, spin, tasks, wallet, webhooks
+from .api import ads, admin_fragments, admin_userbot, auth, fragments, game, shop, social, spin, tasks, wallet, webhooks
 from .middleware.security import (
     limiter,
     add_security_headers,
@@ -21,6 +21,8 @@ from .middleware.security import (
 )
 from .services.ton_processor import ton_processor_loop
 from .services.fragment_processor import fragment_processor_loop
+from .services.userbot_client import userbot_client
+from .services.userbot_processor import userbot_processor_loop
 
 
 # ============================================
@@ -64,17 +66,27 @@ async def lifespan(app: FastAPI):
     _fragment_task = asyncio.create_task(fragment_processor_loop())
     print("✅ Fragment processor started")
 
+    _userbot_task = None
+    if settings.USERBOT_ENABLED:
+        _userbot_task = asyncio.create_task(userbot_processor_loop())
+        print("✅ Userbot processor started")
+
     yield
 
     # Shutdown
     print("🛑 Shutting down...")
     _ton_task.cancel()
     _fragment_task.cancel()
-    for t in (_ton_task, _fragment_task):
+    if _userbot_task is not None:
+        _userbot_task.cancel()
+    for t in (_ton_task, _fragment_task, _userbot_task):
+        if t is None:
+            continue
         try:
             await t
         except asyncio.CancelledError:
             pass
+    await userbot_client.disconnect()
     await close_redis()
     print("✅ Redis closed")
 
@@ -159,6 +171,7 @@ app.include_router(spin.router, prefix=api_prefix)
 app.include_router(tasks.router, prefix=api_prefix)
 app.include_router(fragments.router, prefix=api_prefix)
 app.include_router(admin_fragments.router, prefix=api_prefix)
+app.include_router(admin_userbot.router, prefix=api_prefix)
 app.include_router(wallet.router, prefix=api_prefix)
 app.include_router(webhooks.router, prefix=api_prefix)
 

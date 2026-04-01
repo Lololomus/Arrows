@@ -70,16 +70,56 @@ type PrizeTier = {
 const PRIZE_BADGE_BASE_CLASS = 'inline-flex items-center justify-center min-w-[56px] px-3 py-1 rounded-full border text-[12px] font-black tracking-tight whitespace-nowrap shrink-0 leading-none';
 
 const PRIZE_TIERS_BY_RANK: Record<number, PrizeTier> = {
-  1: { label: '$80', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
-  2: { label: '$30', badgeClass: 'text-gray-200 border-gray-400/40 bg-black/20' },
-  3: { label: '$25', badgeClass: 'text-orange-300 border-orange-500/40 bg-black/20' },
-  4: { label: '1000 Stars', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
-  5: { label: '500 Stars', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
-  6: { label: '350 Stars', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
-  7: { label: '350 Stars', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
-  8: { label: '300 Stars', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
-  9: { label: '250 Stars', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
-  10: { label: '200 Stars', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  1: { label: '~$500', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  2: { label: '~$270', badgeClass: 'text-gray-200 border-gray-400/40 bg-black/20' },
+  3: { label: '~$230', badgeClass: 'text-orange-300 border-orange-500/40 bg-black/20' },
+  4: { label: '~$180', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  5: { label: '~$120', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  6: { label: '~$105', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  7: { label: '100 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
+  8: { label: '90 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
+  9: { label: '80 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
+  10: { label: '70 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
+  11: { label: '50 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
+  12: { label: '50 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
+  13: { label: '50 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
+  14: { label: '50 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
+  15: { label: '50 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
+  16: { label: '50 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
+  17: { label: '50 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
+  18: { label: '50 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
+  19: { label: '50 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
+  20: { label: '50 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
+  21: { label: '2000 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  22: { label: '2000 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  23: { label: '2000 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  24: { label: '2000 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  25: { label: '1500 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  26: { label: '1500 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  27: { label: '1500 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  28: { label: '1500 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  29: { label: '1500 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  30: { label: '1500 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  31: { label: '1000 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  32: { label: '1000 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  33: { label: '1000 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  34: { label: '1000 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  35: { label: '1000 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  36: { label: '1000 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  37: { label: '1000 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  38: { label: '1000 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  39: { label: '1000 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  40: { label: '500 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  41: { label: '500 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  42: { label: '500 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  43: { label: '500 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  44: { label: '500 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  45: { label: '500 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  46: { label: '300 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  47: { label: '300 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  48: { label: '300 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  49: { label: '300 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  50: { label: '300 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
 };
 
 type SeasonPrizeRow = {
@@ -96,9 +136,32 @@ type SeasonStarsPrize = {
 };
 
 const SEASON_TOP_PRIZE_ROWS: readonly SeasonPrizeRow[] = [
-  { icon: '🥇', placeLabel: '1 место', rewardLabel: '$80', borderClass: 'border-yellow-500/30', rewardClass: 'text-yellow-300' },
-  { icon: '🥈', placeLabel: '2 место', rewardLabel: '$30', borderClass: 'border-gray-400/30', rewardClass: 'text-gray-300' },
-  { icon: '🥉', placeLabel: '3 место', rewardLabel: '$25', borderClass: 'border-orange-500/30', rewardClass: 'text-orange-300' },
+  { icon: '🥇', placeLabel: '1 место', rewardLabel: 'Precious Peach ~$500', borderClass: 'border-yellow-500/30', rewardClass: 'text-yellow-300' },
+  { icon: '🥈', placeLabel: '2 место', rewardLabel: 'Heroic Helmet ~$270', borderClass: 'border-gray-400/30', rewardClass: 'text-gray-300' },
+  { icon: '🥉', placeLabel: '3 место', rewardLabel: 'Astral Shard ~$230', borderClass: 'border-orange-500/30', rewardClass: 'text-orange-300' },
+];
+
+type SeasonPrizeGroup = {
+  rankLabel: string;
+  reward: string;
+  rewardClass: string;
+  borderClass: string;
+};
+
+const SEASON_PRIZE_GROUPS: readonly SeasonPrizeGroup[] = [
+  { rankLabel: '4', reward: 'Loot Bag ~$180', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
+  { rankLabel: '5', reward: 'Perfume Bottle ~$120', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
+  { rankLabel: '6', reward: 'Ion Gem ~$105', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
+  { rankLabel: '7', reward: '100 USDt', rewardClass: 'text-green-300', borderClass: 'border-green-500/20' },
+  { rankLabel: '8', reward: '90 USDt', rewardClass: 'text-green-300', borderClass: 'border-green-500/20' },
+  { rankLabel: '9', reward: '80 USDt', rewardClass: 'text-green-300', borderClass: 'border-green-500/20' },
+  { rankLabel: '10', reward: '70 USDt', rewardClass: 'text-green-300', borderClass: 'border-green-500/20' },
+  { rankLabel: '11–20', reward: '50 USDt', rewardClass: 'text-green-300', borderClass: 'border-green-500/20' },
+  { rankLabel: '21–24', reward: '2000 ⭐', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
+  { rankLabel: '25–30', reward: '1500 ⭐', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
+  { rankLabel: '31–39', reward: '1000 ⭐', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
+  { rankLabel: '40–45', reward: '500 ⭐', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
+  { rankLabel: '46–50', reward: '300 ⭐', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
 ];
 
 const SEASON_STARS_PRIZES: readonly SeasonStarsPrize[] = [
@@ -346,64 +409,61 @@ const SeasonInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose: (
             drag="y"
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={0.2}
-            onDragEnd={(e, info) => {
+            onDragEnd={(_e, info) => {
               if (info.offset.y > 100 || info.velocity.y > 500) {
                 onClose();
               }
             }}
-            className="fixed bottom-0 left-0 right-0 z-[2001] bg-[#1a1a24] rounded-t-[32px] border-t border-[#ca8a04]/30 p-6 pb-12 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]"
-            style={{ paddingBottom: 'calc(3rem + var(--app-safe-bottom))' }}
+            className="fixed bottom-0 left-0 right-0 z-[2001] bg-[#1a1a24] rounded-t-[32px] border-t border-[#ca8a04]/30 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] flex flex-col"
+            style={{ maxHeight: '85vh', paddingBottom: 'var(--app-safe-bottom)' }}
           >
             {/* Ползунок для свайпа */}
-            <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-6" />
+            <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mt-4 mb-3 shrink-0" />
 
-            <div className="text-center">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-yellow-500/10 border border-yellow-500/20 mb-4">
-                <Gift className="text-yellow-400 w-8 h-8" />
+            {/* Заголовок — фиксированный */}
+            <div className="text-center px-6 pb-4 shrink-0">
+              <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-yellow-500/10 border border-yellow-500/20 mb-3">
+                <Gift className="text-yellow-400 w-7 h-7" />
               </div>
-              <h3 className="text-2xl font-black text-white uppercase tracking-wide mb-6 drop-shadow-md">
+              <h3 className="text-2xl font-black text-white uppercase tracking-wide drop-shadow-md">
                 Награды сезона
               </h3>
-              
-              <div className="space-y-4 text-left">
-                {/* БЛОК С ПРИЗАМИ */}
-                <div className="bg-gradient-to-br from-yellow-900/30 to-orange-900/10 rounded-2xl p-4 border border-yellow-500/30 shadow-lg">
-                  <h4 className="text-yellow-400 font-bold text-base mb-3 text-center uppercase tracking-wider drop-shadow-sm">Призовой фонд</h4>
-                  <div className="space-y-2">
-                    {SEASON_TOP_PRIZE_ROWS.map((row) => (
-                      <div key={row.placeLabel} className={`flex items-center justify-between bg-black/20 rounded-xl p-2.5 border ${row.borderClass}`}>
-                        <div className="flex items-center gap-3">
-                          <span className="text-xl drop-shadow-md">{row.icon}</span>
-                          <span className="text-white font-medium">{row.placeLabel}</span>
-                        </div>
-                        <span className={`${row.rewardClass} font-black text-base whitespace-nowrap`}>{row.rewardLabel}</span>
-                      </div>
-                    ))}
+            </div>
 
-                    <div className="bg-black/20 rounded-xl p-3 border border-yellow-500/25">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-lg drop-shadow-sm">⭐</span>
-                        <span className="text-white font-semibold text-sm">4–10 места</span>
-                        <span className="ml-auto text-yellow-300/90 text-[11px] font-bold uppercase tracking-wide">Stars</span>
+            {/* Скроллящийся контент */}
+            <div className="overflow-y-auto overscroll-contain px-6 pb-6 flex-1 min-h-0">
+              <div className="space-y-3">
+                {/* ТОП-3 */}
+                <div className="space-y-2">
+                  {SEASON_TOP_PRIZE_ROWS.map((row) => (
+                    <div key={row.placeLabel} className={`flex items-center justify-between bg-black/20 rounded-xl p-2.5 border ${row.borderClass}`}>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xl drop-shadow-md">{row.icon}</span>
+                        <span className="text-white font-medium">{row.placeLabel}</span>
                       </div>
-                      <div className="grid grid-cols-3 gap-1.5">
-                        {SEASON_STARS_PRIZES.map((row) => (
-                          <div key={row.rankLabel} className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-2 py-1.5 flex items-center justify-between">
-                            <span className="text-white/75 text-[11px] font-semibold leading-none">#{row.rankLabel}</span>
-                            <span className="text-yellow-300 font-black text-[13px] leading-none">{row.stars}</span>
-                          </div>
-                        ))}
-                      </div>
+                      <span className={`${row.rewardClass} font-black text-base whitespace-nowrap`}>{row.rewardLabel}</span>
                     </div>
-                  </div>
+                  ))}
+                </div>
+
+                {/* 4–50 места — компактная таблица */}
+                <div className="bg-black/20 rounded-xl border border-white/10 overflow-hidden">
+                  {SEASON_PRIZE_GROUPS.map((group, i) => (
+                    <div
+                      key={group.rankLabel}
+                      className={`flex items-center justify-between px-3 py-2.5 ${i > 0 ? 'border-t border-white/5' : ''}`}
+                    >
+                      <span className="text-white/60 text-sm font-semibold">#{group.rankLabel}</span>
+                      <span className={`${group.rewardClass} font-black text-sm`}>{group.reward}</span>
+                    </div>
+                  ))}
                 </div>
 
                 <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
                   <p className="text-white/90 font-medium text-sm leading-relaxed">
-                    По завершении сезона награды получат игроки, занявшие <span className="text-yellow-400 font-bold">1–10 места</span> в лидерборде.
+                    По завершении сезона награды получат игроки, занявшие <span className="text-yellow-400 font-bold">1–50 места</span> в лидерборде.
                   </p>
                 </div>
-                
               </div>
             </div>
           </motion.div>
@@ -726,7 +786,7 @@ export function LeaderboardScreen() {
   const stickyBottomPx = bottomNavHeight + CARD_GAP_PX;
   const shouldAnimateListEnter = listRenderVersion > 0;
 
-  // Подключаем таймер (по умолчанию будет 1 апреля 2026, пока бэк не отдаст реальное)
+  // Подключаем таймер (по умолчанию будет 1 мая 2026 03:00 МСК, пока бэк не отдаст реальное)
   const { days, hours, minutes, isFinished } = useCountdown(seasonEndsAt);
 
   const applyLeaderboardMeta = useCallback((data: Awaited<ReturnType<typeof socialApi.getLeaderboard>>) => {
@@ -735,7 +795,7 @@ export function LeaderboardScreen() {
     setMyInTop(data.myInTop);
     setTotalParticipants(data.totalParticipants);
     // Берем с бэкенда или используем фоллбэк дату
-    setSeasonEndsAt((data as any).seasonEndsAt || '2026-04-01T00:00:00Z');
+    setSeasonEndsAt((data as any).seasonEndsAt || '2026-05-01T00:00:00Z');
   }, []);
 
   const resetLeaderboardMeta = useCallback(() => {
@@ -979,7 +1039,7 @@ export function LeaderboardScreen() {
         </button>
 
         <Trophy size={56} className="mx-auto text-yellow-400 mb-2 drop-shadow-glow relative z-10" />
-        <h2 className="text-3xl font-black text-white uppercase tracking-wide drop-shadow-md relative z-10">БЕТА сезон</h2>
+        <h2 className="text-3xl font-black text-white uppercase tracking-wide drop-shadow-md relative z-10">#1 сезон</h2>
         
         {/* ДИНАМИЧЕСКИЙ ТАЙМЕР */}
         {seasonEndsAt && (

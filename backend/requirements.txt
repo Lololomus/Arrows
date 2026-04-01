@@ -21,6 +21,7 @@ cryptography
 
 # Telegram
 aiogram>=3.0.0
+telethon>=1.42.0
 
 # HTTP
 httpx

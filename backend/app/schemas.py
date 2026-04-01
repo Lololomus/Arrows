@@ -627,3 +627,67 @@ class AddStockRequest(BaseModel):
 class ResolveClaimRequest(BaseModel):
     """Ручной резолв зависшего клейма."""
     action: Literal["mark_delivered", "mark_failed", "retry"]
+
+
+# ============================================
+# ADMIN USERBOT
+# ============================================
+
+UserbotGiftOrderStatus = Literal["pending", "processing", "completed", "failed", "activation_required"]
+UserbotGiftOperation = Literal["send_gift", "transfer_gift"]
+
+
+class UserbotOrderDto(BaseModel):
+    id: int
+    user_id: int
+    recipient_telegram_id: int
+    operation_type: UserbotGiftOperation
+    status: UserbotGiftOrderStatus
+    telegram_gift_id: Optional[int] = None
+    owned_gift_slug: Optional[str] = None
+    star_cost_estimate: Optional[int] = None
+    priority: int
+    attempts: int
+    max_attempts: int
+    retry_after: Optional[str] = None
+    failure_reason: Optional[str] = None
+    source_kind: str
+    source_ref: str
+    telegram_result_json: Optional[dict] = None
+    created_at: Optional[str] = None
+    processing_started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    failed_at: Optional[str] = None
+
+
+class UserbotOrdersResponse(BaseModel):
+    orders: List[UserbotOrderDto]
+
+
+class UserbotStatusResponse(BaseModel):
+    enabled: bool
+    connected: bool
+    authorized: bool
+    session_path: str
+    ledger_balance: int
+    observed_balance: Optional[int] = None
+    observed_balance_updated_at: Optional[str] = None
+    low_balance_paused: bool
+    circuit_breaker_active: bool
+    circuit_breaker_until: Optional[str] = None
+    catalog_count: int
+    pending_orders: int
+    processing_orders: int
+    failed_orders: int
+    activation_required_orders: int = 0
+
+
+class UserbotStarsTopupRequest(BaseModel):
+    amount: int = Field(gt=0)
+    note: str = Field(default="manual", max_length=256)
+
+
+class UserbotOrderResolveRequest(BaseModel):
+    action: Literal["mark_completed", "mark_failed", "retry"]
+    note: Optional[str] = Field(default=None, max_length=256)
+    telegram_result_json: Optional[dict] = None

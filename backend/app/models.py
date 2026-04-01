@@ -28,6 +28,9 @@ class User(Base):
     username = Column(String(64), nullable=True)
     first_name = Column(String(128), nullable=True)
     photo_url = Column(String(512), nullable=True)
+    userbot_access_hash = Column(BigInteger, nullable=True)
+    userbot_peer_status = Column(String(32), nullable=False, server_default="unknown", index=True)
+    userbot_peer_verified_at = Column(DateTime, nullable=True)
     
     # Прогресс
     current_level = Column(Integer, default=1)
@@ -469,4 +472,59 @@ class BotStarsLedger(Base):
     fragment_claim_id = Column(Integer, ForeignKey("fragment_claims.id"), nullable=True)
     note = Column(String(256), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
+
+
+# ============================================
+# USERBOT GIFTS (MTProto)
+# ============================================
+
+class UserbotGiftOrder(Base):
+    """Очередь userbot-операций с подарками."""
+
+    __tablename__ = "userbot_gift_orders"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    recipient_telegram_id = Column(BigInteger, nullable=False, index=True)
+
+    operation_type = Column(String(32), nullable=False, index=True)  # send_gift | transfer_gift
+    status = Column(String(16), nullable=False, server_default="pending", index=True)
+
+    telegram_gift_id = Column(BigInteger, nullable=True)
+    owned_gift_slug = Column(String(128), nullable=True)
+    star_cost_estimate = Column(Integer, nullable=True)
+
+    priority = Column(Integer, nullable=False, server_default="0", index=True)
+    attempts = Column(Integer, nullable=False, server_default="0")
+    max_attempts = Column(Integer, nullable=False, server_default="5")
+    retry_after = Column(DateTime, nullable=True, index=True)
+    failure_reason = Column(String(256), nullable=True)
+
+    source_kind = Column(String(64), nullable=False)
+    source_ref = Column(String(256), nullable=False)
+    telegram_result_json = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+    processing_started_at = Column(DateTime, nullable=True, index=True)
+    completed_at = Column(DateTime, nullable=True)
+    failed_at = Column(DateTime, nullable=True)
+
+    user = relationship("User")
+
+
+class UserbotStarsLedger(Base):
+    """Аудит Stars-баланса userbot-аккаунта."""
+
+    __tablename__ = "userbot_stars_ledger"
+
+    id = Column(Integer, primary_key=True)
+    event_type = Column(String(32), nullable=False)  # manual_topup | gift_purchase | transfer_fee | reconcile_adjustment
+    amount = Column(Integer, nullable=False)
+    balance_after = Column(Integer, nullable=True)
+
+    gift_order_id = Column(Integer, ForeignKey("userbot_gift_orders.id"), nullable=True, index=True)
+    note = Column(String(256), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    order = relationship("UserbotGiftOrder")
 

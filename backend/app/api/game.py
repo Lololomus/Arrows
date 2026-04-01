@@ -562,6 +562,9 @@ async def get_level(
     if level_num != user.current_level and not allow_locked:
         raise HTTPException(status_code=403, detail="Level not unlocked")
 
+    if level_num > settings.MAX_AVAILABLE_LEVEL:
+        raise HTTPException(status_code=404, detail="Level not found (End of content)")
+
     level_data = get_cached_level(level_num)
     if not level_data:
         raise HTTPException(status_code=404, detail="Level not found (End of content)")

@@ -310,7 +310,7 @@ function CompletedCard({ drop }: { drop: FragmentDrop }) {
         </div>
 
         <div className="flex-1">
-          <h3 className="font-bold text-base leading-tight text-emerald-400">Дроп получен</h3>
+          <h3 className="font-bold text-base leading-tight text-emerald-400">Подарок получен</h3>
           <p className="text-white/50 text-xs mt-0.5 line-through">{drop.subtitle}</p>
           <p className="text-white/40 text-xs mt-2">{drop.description}</p>
         </div>

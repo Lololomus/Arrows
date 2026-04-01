@@ -75,6 +75,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - userbot_session:/app/sessions
     networks:
       - arrow_network
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -131,6 +132,8 @@ volumes:
   postgres_data:
     driver: local
   redis_data:
+    driver: local
+  userbot_session:
     driver: local
 
 # ============================================

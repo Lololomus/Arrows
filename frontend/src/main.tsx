@@ -160,11 +160,26 @@ const initTelegramApp = () => {
   tg.ready();
 
   if (tg.requestFullscreen) {
+    const onFullscreenFailed = () => {
+      if (typeof tg.offEvent === 'function') {
+        tg.offEvent('fullscreenFailed', onFullscreenFailed);
+      }
+      console.warn(`[${APP_NAME}] Fullscreen failed async, falling back to expand()`);
+      tg.expand();
+    };
+
+    if (typeof tg.onEvent === 'function') {
+      tg.onEvent('fullscreenFailed', onFullscreenFailed);
+    }
+
     try {
       tg.requestFullscreen();
-      console.log(`[${APP_NAME}] Fullscreen mode enabled (native)`);
+      console.log(`[${APP_NAME}] Fullscreen mode requested`);
     } catch (error) {
-      console.warn(`[${APP_NAME}] requestFullscreen exists but unsupported:`, error);
+      if (typeof tg.offEvent === 'function') {
+        tg.offEvent('fullscreenFailed', onFullscreenFailed);
+      }
+      console.warn(`[${APP_NAME}] requestFullscreen threw:`, error);
       tg.expand();
     }
   } else {

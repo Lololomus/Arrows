@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     COINS_REWARD_HARD: int = 5
     COINS_REWARD_EXTREME: int = 25
     COINS_REWARD_IMPOSSIBLE: int = 50
+    MAX_AVAILABLE_LEVEL: int = 1499
     
     # Rewards
     BASE_COINS_PER_LEVEL: int = 10
@@ -131,6 +132,17 @@ class Settings(BaseSettings):
     FRAGMENT_SENDING_TIMEOUT: int = 300
     FRAGMENT_STARS_LOW_THRESHOLD: int = 100
 
+    # Telegram Userbot Gifts (MTProto)
+    USERBOT_ENABLED: bool = False
+    USERBOT_API_ID: int = 0
+    USERBOT_API_HASH: str = ""
+    USERBOT_SESSION_PATH: str = "/app/sessions/userbot.session"
+    USERBOT_PROCESSOR_INTERVAL: int = 30
+    USERBOT_MAX_ORDER_ATTEMPTS: int = 5
+    USERBOT_PROCESSING_TIMEOUT: int = 300
+    USERBOT_MAX_GIFTS_PER_MINUTE: int = 3
+    USERBOT_STARS_LOW_THRESHOLD: int = 50
+
     @model_validator(mode="after")
     def validate_ton_settings(self) -> Self:
         if self.TON_PAYMENTS_ENABLED and self.ENVIRONMENT == "production":
@@ -138,6 +150,11 @@ class Settings(BaseSettings):
                 raise ValueError("TON_API_KEY is required when TON_PAYMENTS_ENABLED=True in production")
             if not self.TON_WALLET_ADDRESS:
                 raise ValueError("TON_WALLET_ADDRESS is required when TON_PAYMENTS_ENABLED=True in production")
+        if self.USERBOT_ENABLED:
+            if self.USERBOT_API_ID <= 0:
+                raise ValueError("USERBOT_API_ID must be set when USERBOT_ENABLED=True")
+            if not self.USERBOT_API_HASH:
+                raise ValueError("USERBOT_API_HASH is required when USERBOT_ENABLED=True")
         return self
 
     @field_validator("DEV_AUTH_ALLOWLIST")
