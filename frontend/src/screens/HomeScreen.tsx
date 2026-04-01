@@ -6,6 +6,7 @@ import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { HeaderBar } from '../components/ui/HeaderBar';
 import { useWalletConnectionController } from '../hooks/useWalletConnectionController';
 import { SpinScreen } from './SpinScreen';
+import { HowToPlayModal } from '../components/HowToPlayModal';
 import { authApi, handleApiError, spinApi } from '../api/client';
 import { setAppLocale, type AppLocale } from '../i18n';
 
@@ -37,6 +38,7 @@ export function HomeScreen() {
   const { setScreen, user, spinAvailable, loginStreak, setSpinStatus, setDailyMode, locale, setLocaleManually, setUser } = useAppStore();
   const [showSpin, setShowSpin] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showHowToPlay, setShowHowToPlay] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [savingLocale, setSavingLocale] = useState<AppLocale | null>(null);
   const walletController = useWalletConnectionController();
@@ -233,6 +235,23 @@ export function HomeScreen() {
         </motion.button>
       </div>
 
+      <div className="absolute bottom-[110px] left-1/2 -translate-x-1/2 z-40 flex items-center">
+        <motion.button
+          onClick={() => setShowHowToPlay(true)}
+          className="flex items-center gap-2 px-4 py-3 rounded-2xl backdrop-blur-xl bg-[#16192d]/60 border border-white/10 text-white/60 text-sm font-medium opacity-70 hover:opacity-100 transition-opacity duration-300"
+          whileHover={{ scale: 1.03 }}
+          whileTap={{ scale: 0.95 }}
+          aria-label={t('game:howToPlay.title')}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          {t('game:howToPlay.title')}
+        </motion.button>
+      </div>
+
       <AnimatePresence>
         {showSettings && (
           <>
@@ -291,6 +310,8 @@ export function HomeScreen() {
           </>
         )}
       </AnimatePresence>
+
+      <HowToPlayModal open={showHowToPlay} onClose={() => setShowHowToPlay(false)} />
 
       <div className="absolute bottom-[110px] right-6 z-40">
         {spinAvailable && (

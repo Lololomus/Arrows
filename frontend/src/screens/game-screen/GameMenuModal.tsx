@@ -9,6 +9,7 @@ interface GameMenuModalProps {
   onConfirmMenu: () => void;
   onConfirmRetrySave?: () => void;
   onConfirmExitUnsaved?: () => void;
+  onHowToPlay?: () => void;
 }
 
 export function GameMenuModal({
@@ -18,6 +19,7 @@ export function GameMenuModal({
   onConfirmMenu,
   onConfirmRetrySave,
   onConfirmExitUnsaved,
+  onHowToPlay,
 }: GameMenuModalProps) {
   const isRestart = action === 'restart';
   const isUnsavedMenu = action === 'unsaved_menu';
@@ -52,7 +54,16 @@ export function GameMenuModal({
               </p>
             )}
 
-            <div className={`mt-6 ${isUnsavedMenu ? 'flex flex-col gap-3' : 'flex gap-3'}`}>
+            {onHowToPlay && !isUnsavedMenu && (
+              <button
+                onClick={onHowToPlay}
+                className="mt-4 w-full py-2.5 rounded-xl bg-white/5 text-white/60 text-sm font-medium hover:bg-white/10 transition-colors"
+              >
+                {translate('game:howToPlay.title')}
+              </button>
+            )}
+
+            <div className={`mt-4 ${isUnsavedMenu ? 'flex flex-col gap-3' : 'flex gap-3'}`}>
               <button onClick={onCancel} className="flex-1 py-3 bg-white/5 rounded-xl text-white">
                 {translate('common:cancel')}
               </button>

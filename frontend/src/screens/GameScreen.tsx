@@ -38,6 +38,7 @@ import { GameHUD } from './game-screen/GameHUD';
 import { getDifficultyTier, getLivesForDifficulty } from './game-screen/difficultyConfig';
 import { ErrorVignette } from './game-screen/ErrorVignette';
 import { GameMenuModal } from './game-screen/GameMenuModal';
+import { HowToPlayModal } from '../components/HowToPlayModal';
 import { HintEmptyModal } from './game-screen/HintEmptyModal';
 import { GameResultModal } from './game-screen/GameResultModal';
 import type { ReviveStatusResponse } from '../game/types';
@@ -405,6 +406,7 @@ export function GameScreen() {
 
   const [confirmAction, setConfirmAction] = useState<'restart' | 'menu' | 'unsaved_menu' | null>(null);
   const [showHintModal, setShowHintModal] = useState(false);
+  const [showHowToPlay, setShowHowToPlay] = useState(false);
   const [noMoreLevels, setNoMoreLevels] = useState(false);
   const [isAutoSolving, setIsAutoSolving] = useState(false);
   const [levelDifficulty, setLevelDifficulty] = useState<string | number>(1);
@@ -1947,7 +1949,10 @@ export function GameScreen() {
         onConfirmMenu={confirmMenu}
         onConfirmRetrySave={confirmRetryUnsavedMenu}
         onConfirmExitUnsaved={confirmExitUnsavedMenu}
+        onHowToPlay={() => { setConfirmAction(null); setShowHowToPlay(true); }}
       />
+
+      <HowToPlayModal open={showHowToPlay} onClose={() => setShowHowToPlay(false)} />
 
       <HintEmptyModal
         open={showHintModal}

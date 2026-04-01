@@ -4,7 +4,7 @@
  * v5: roll → (retry?) → collect flow. Приз начисляется только при нажатии "Забрать".
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, animate, useAnimation, AnimatePresence } from 'framer-motion';
 import { Info, RotateCcw } from 'lucide-react';
@@ -204,7 +204,7 @@ function SpinInfoModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
             drag="y"
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={0.2}
-            onDragEnd={(e, info) => {
+            onDragEnd={(_e, info) => {
               if (info.offset.y > 60 || info.velocity.y > 500) onClose();
             }}
             className="absolute bottom-0 left-0 right-0 z-[101] bg-[#14162a] rounded-t-[32px] border-t border-white/10 p-6 shadow-[0_-10px_50px_rgba(0,0,0,0.6)] flex flex-col"
@@ -630,7 +630,6 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
   const [isCollecting, setIsCollecting] = useState(false);
   const [wheelSize, setWheelSize] = useState(() => Math.min(320, Math.max(260, window.innerWidth - 40)));
   const [activeIndex, setActiveIndex] = useState(0);
-  const [isSlowMo, setIsSlowMo] = useState(false);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [timeNow, setTimeNow] = useState(() => Date.now());
@@ -649,7 +648,18 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
     const targetIdx = SECTORS.findIndex(s => s.prizeType === prizeType && s.prizeAmount === prizeAmount);
     const sector = SECTORS[targetIdx >= 0 ? targetIdx : 0];
     setRetryAvailable(spinRetryAvailable);
-    setResult({ prizeType, prizeAmount, streak: loginStreak, tier: 0, retryAvailable: spinRetryAvailable, label: sector.label, icon: sector.icon, color: sector.color, rarity: sector.rarity });
+    setResult({
+      prizeType,
+      prizeAmount,
+      streak: loginStreak,
+      tier: 0,
+      retryAvailable: spinRetryAvailable,
+      label: sector.label,
+      wheelLabel: sector.wheelLabel,
+      icon: sector.icon,
+      color: sector.color,
+      rarity: sector.rarity,
+    });
   }, [spinPendingPrize, spinRetryAvailable, loginStreak, result, spinning, isPreparing]);
 
   // Race condition fix: HomeScreen fetches getStatus() async; if SpinScreen mounted first,
@@ -790,7 +800,6 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
           const progress = (v - currentRotation) / (finalRotation - currentRotation);
           if (progress > 0.9) {
             triggerHaptic('heavy');
-            setIsSlowMo(true);
           } else if (progress > 0.6) {
             triggerHaptic('medium');
           } else {
@@ -826,7 +835,6 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
     setError(null);
     setIsPreparing(true);
     setSpinning(true);
-    setIsSlowMo(false);
     triggerHaptic('medium');
 
     try {
@@ -844,7 +852,14 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
         s => s.prizeType === res.prizeType && s.prizeAmount === res.prizeAmount
       );
       const sector = SECTORS[targetIdx >= 0 ? targetIdx : 0];
-      const extendedResult: ExtendedSpinResult = { ...res, label: sector.label, icon: sector.icon, color: sector.color, rarity: sector.rarity };
+      const extendedResult: ExtendedSpinResult = {
+        ...res,
+        label: sector.label,
+        wheelLabel: sector.wheelLabel,
+        icon: sector.icon,
+        color: sector.color,
+        rarity: sector.rarity,
+      };
 
       const nextAvailableAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
       setSpinStatus(
@@ -861,7 +876,6 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
         if (!isMountedRef.current) return;
         setResult(extendedResult);
         setSpinning(false);
-        setIsSlowMo(false);
       });
     } catch (err) {
       if (isMountedRef.current) {
@@ -902,7 +916,6 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
         }
         setResult(null);
         setSpinning(true);
-        setIsSlowMo(false);
         triggerHaptic('medium');
 
         // spinApi.retry() requires the server to know the ad was watched.
@@ -934,7 +947,14 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
 
         const targetIdx = SECTORS.findIndex(s => s.prizeType === res!.prizeType && s.prizeAmount === res!.prizeAmount);
         const sector = SECTORS[targetIdx >= 0 ? targetIdx : 0];
-        const extendedResult: ExtendedSpinResult = { ...res!, label: sector.label, icon: sector.icon, color: sector.color, rarity: sector.rarity };
+        const extendedResult: ExtendedSpinResult = {
+          ...res!,
+          label: sector.label,
+          wheelLabel: sector.wheelLabel,
+          icon: sector.icon,
+          color: sector.color,
+          rarity: sector.rarity,
+        };
 
         setSpinStatus(
           false,
@@ -950,7 +970,6 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
           if (!isMountedRef.current) return;
           setResult(extendedResult);
           setSpinning(false);
-          setIsSlowMo(false);
         });
         return;
       }
@@ -994,7 +1013,6 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
       // Fallback for 'granted' or 'SPIN_RETRY_ALREADY_GRANTED'.
       setResult(null);
       setSpinning(true);
-      setIsSlowMo(false);
       triggerHaptic('medium');
 
       const res = await spinApi.retry();
@@ -1005,7 +1023,14 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
         s => s.prizeType === res.prizeType && s.prizeAmount === res.prizeAmount
       );
       const sector = SECTORS[targetIdx >= 0 ? targetIdx : 0];
-      const extendedResult: ExtendedSpinResult = { ...res, label: sector.label, icon: sector.icon, color: sector.color, rarity: sector.rarity };
+      const extendedResult: ExtendedSpinResult = {
+        ...res,
+        label: sector.label,
+        wheelLabel: sector.wheelLabel,
+        icon: sector.icon,
+        color: sector.color,
+        rarity: sector.rarity,
+      };
 
       setSpinStatus(
         false,
@@ -1021,7 +1046,6 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
         if (!isMountedRef.current) return;
         setResult(extendedResult);
         setSpinning(false);
-        setIsSlowMo(false);
       });
     } catch (err) {
       if (isMountedRef.current) {

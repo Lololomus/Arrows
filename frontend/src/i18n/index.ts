@@ -211,6 +211,28 @@ const resources = {
         buyEnergy: 'Купить энергию',
         wait: 'Подождать',
       },
+      howToPlay: {
+        title: 'Как играть?',
+        gotIt: 'Понятно!',
+        slides: {
+          tap: {
+            title: 'Убирай стрелки',
+            body: 'Нажми на стрелку, чтобы убрать её с поля. Убирай все стрелки — и ты победил!',
+          },
+          blocked: {
+            title: 'Блокировка',
+            body: 'Если другая стрелка смотрит этой в хвост — её нельзя убрать. Сначала убери ту, что блокирует.',
+          },
+          hold: {
+            title: 'Зажми, чтобы увидеть путь',
+            body: 'Зажми стрелку — и увидишь, какие другие стрелки её блокируют. Это поможет выбрать правильный порядок.',
+          },
+          pinch: {
+            title: 'Навигация по полю',
+            body: 'Сведи/разведи два пальца для зума. Тяни одним пальцем (по пустому месту), чтобы перемещать поле.',
+          },
+        },
+      },
     },
     tasks: {
       tabs: {
@@ -723,6 +745,28 @@ const resources = {
         watchAd: 'Watch ad',
         buyEnergy: 'Buy energy',
         wait: 'Wait',
+      },
+      howToPlay: {
+        title: 'How to Play?',
+        gotIt: 'Got it!',
+        slides: {
+          tap: {
+            title: 'Remove arrows',
+            body: 'Tap an arrow to remove it from the field. Remove them all — and you win!',
+          },
+          blocked: {
+            title: 'Blocking',
+            body: 'If another arrow points at the tail of this one — it cannot be removed. First remove the one that is blocking it.',
+          },
+          hold: {
+            title: 'Hold to see the path',
+            body: 'Hold an arrow to highlight which other arrows are blocking it. This helps you figure out the right order.',
+          },
+          pinch: {
+            title: 'Navigate the field',
+            body: 'Pinch two fingers to zoom in or out. Drag with one finger on an empty spot to pan the field.',
+          },
+        },
       },
     },
     tasks: {
