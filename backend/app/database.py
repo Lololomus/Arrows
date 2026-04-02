@@ -63,14 +63,17 @@ redis_pool = None
 async def get_redis():
     """Dependency для получения Redis клиента."""
     global redis_pool
-    
+
+    if settings.ENVIRONMENT == "development":
+        return None
+
     if redis_pool is None:
         redis_pool = aioredis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",
             decode_responses=True,
         )
-    
+
     return redis_pool
 
 

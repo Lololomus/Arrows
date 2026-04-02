@@ -36,7 +36,7 @@ const titleLine = {
 
 export function HomeScreen() {
   const { t } = useTranslation();
-  const { setScreen, user, spinAvailable, loginStreak, setSpinStatus, setDailyMode, locale, setLocaleManually, setUser, spinStreakLostAt, spinStreakLostCount } = useAppStore();
+  const { setScreen, user, spinAvailable, loginStreak, setSpinStatus, setDailyMode, locale, setLocaleManually, setUser, spinStreakLostAt, spinStreakLostCount, staticBackground, setStaticBackground } = useAppStore();
   const [showSpin, setShowSpin] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState(false);
@@ -307,6 +307,19 @@ export function HomeScreen() {
                     )}
                   </button>
                 ))}
+              </div>
+
+              <div className="mt-3 pt-3 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setStaticBackground(!staticBackground)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium text-white/60 hover:bg-white/8 hover:text-white/90 transition-colors duration-150"
+                >
+                  <span>{t('game:menu.staticBg')}</span>
+                  <span className={`w-11 h-6 rounded-full transition-colors flex-shrink-0 relative ${staticBackground ? 'bg-blue-500' : 'bg-white/20'}`}>
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${staticBackground ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </span>
+                </button>
               </div>
             </motion.div>
           </>

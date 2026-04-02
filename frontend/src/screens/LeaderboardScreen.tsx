@@ -52,6 +52,9 @@ const RANK_STYLES: Record<number, { bg: string; border: string; rankClass: strin
   1: { bg: 'bg-[#3f3113]', border: 'border-[#ca8a04]/30', rankClass: 'text-yellow-400 drop-shadow-glow', icon: '🥇', particleColor: '255, 215, 0' },
   2: { bg: 'bg-[#2c303a]', border: 'border-[#94a3b8]/30', rankClass: 'text-gray-300', icon: '🥈', particleColor: '176, 196, 222' },
   3: { bg: 'bg-[#402314]', border: 'border-[#ea580c]/30', rankClass: 'text-orange-400', icon: '🥉', particleColor: '205, 127, 50' },
+  4: { bg: 'bg-[#2a2515]', border: 'border-yellow-500/40', rankClass: 'text-yellow-400/80', icon: '', particleColor: undefined },
+  5: { bg: 'bg-[#272418]', border: 'border-yellow-500/30', rankClass: 'text-yellow-400/70', icon: '', particleColor: undefined },
+  6: { bg: 'bg-[#252415]', border: 'border-yellow-500/25', rankClass: 'text-yellow-400/60', icon: '', particleColor: undefined },
 };
 
 const DEFAULT_RANK_STYLE = { bg: 'bg-white/5', border: 'border-white/5', rankClass: 'text-white/40', icon: '', particleColor: undefined };
@@ -95,17 +98,18 @@ function formatCompactCountdown(days: number, hours: number, minutes: number): s
 type PrizeTier = {
   label: string;
   badgeClass: string;
+  small?: boolean;
 };
 
 const PRIZE_BADGE_BASE_CLASS = 'inline-flex items-center justify-center min-w-[56px] px-3 py-1 rounded-full border text-[12px] font-black tracking-tight whitespace-nowrap shrink-0 leading-none';
 
 const PRIZE_TIERS_BY_RANK: Record<number, PrizeTier> = {
-  1: { label: '~$500', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
-  2: { label: '~$270', badgeClass: 'text-gray-200 border-gray-400/40 bg-black/20' },
-  3: { label: '~$230', badgeClass: 'text-orange-300 border-orange-500/40 bg-black/20' },
-  4: { label: '~$180', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
-  5: { label: '~$120', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
-  6: { label: '~$105', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
+  1: { label: 'Precious Peach', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20', small: true },
+  2: { label: 'Heroic Helmet',  badgeClass: 'text-gray-200 border-gray-400/40 bg-black/20',   small: true },
+  3: { label: 'Astral Shard',   badgeClass: 'text-orange-300 border-orange-500/40 bg-black/20', small: true },
+  4: { label: 'Loot Bag',       badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20', small: true },
+  5: { label: 'Perfume Bottle', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20', small: true },
+  6: { label: 'Ion Gem',        badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20', small: true },
   7: { label: '100 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
   8: { label: '90 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
   9: { label: '80 USDt', badgeClass: 'text-green-300 border-green-500/40 bg-black/20' },
@@ -152,49 +156,53 @@ const PRIZE_TIERS_BY_RANK: Record<number, PrizeTier> = {
   50: { label: '300 ⭐', badgeClass: 'text-yellow-300 border-yellow-500/40 bg-black/20' },
 };
 
-type SeasonPrizeRow = {
-  icon: string;
+type SeasonGiftRow = {
   rank: number;
-  rewardLabel: string;
+  medal: string;
+  giftName: string;
+  gradientClass: string;
   borderClass: string;
-  rewardClass: string;
+  nameClass: string;
 };
 
-const SEASON_TOP_PRIZE_ROWS: readonly SeasonPrizeRow[] = [
-  { icon: '🥇', rank: 1, rewardLabel: 'Precious Peach ~$500', borderClass: 'border-yellow-500/30', rewardClass: 'text-yellow-300' },
-  { icon: '🥈', rank: 2, rewardLabel: 'Heroic Helmet ~$270', borderClass: 'border-gray-400/30', rewardClass: 'text-gray-300' },
-  { icon: '🥉', rank: 3, rewardLabel: 'Astral Shard ~$230', borderClass: 'border-orange-500/30', rewardClass: 'text-orange-300' },
+const SEASON_GIFT_ROWS: readonly SeasonGiftRow[] = [
+  { rank: 1, medal: '🥇', giftName: 'Precious Peach',  gradientClass: 'from-yellow-500/25 via-yellow-900/15 to-transparent', borderClass: 'border-yellow-500/40', nameClass: 'text-yellow-300' },
+  { rank: 2, medal: '🥈', giftName: 'Heroic Helmet',   gradientClass: 'from-slate-400/20 via-slate-700/10 to-transparent',   borderClass: 'border-gray-400/35',    nameClass: 'text-gray-200'   },
+  { rank: 3, medal: '🥉', giftName: 'Astral Shard',    gradientClass: 'from-orange-500/25 via-orange-900/15 to-transparent', borderClass: 'border-orange-500/35',  nameClass: 'text-orange-300' },
+  { rank: 4, medal: '',   giftName: 'Loot Bag',         gradientClass: 'from-yellow-500/15 to-transparent',                  borderClass: 'border-yellow-500/20',  nameClass: 'text-yellow-200' },
+  { rank: 5, medal: '',   giftName: 'Perfume Bottle',   gradientClass: 'from-yellow-500/12 to-transparent',                  borderClass: 'border-yellow-500/15',  nameClass: 'text-yellow-200' },
+  { rank: 6, medal: '',   giftName: 'Ion Gem',          gradientClass: 'from-yellow-500/10 to-transparent',                  borderClass: 'border-yellow-500/12',  nameClass: 'text-yellow-200' },
 ];
 
 type SeasonPrizeGroup = {
   rankLabel: string;
   reward: string;
-  rewardClass: string;
-  borderClass: string;
 };
 
-const SEASON_PRIZE_GROUPS: readonly SeasonPrizeGroup[] = [
-  { rankLabel: '4', reward: 'Loot Bag ~$180', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
-  { rankLabel: '5', reward: 'Perfume Bottle ~$120', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
-  { rankLabel: '6', reward: 'Ion Gem ~$105', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
-  { rankLabel: '7', reward: '100 USDt', rewardClass: 'text-green-300', borderClass: 'border-green-500/20' },
-  { rankLabel: '8', reward: '90 USDt', rewardClass: 'text-green-300', borderClass: 'border-green-500/20' },
-  { rankLabel: '9', reward: '80 USDt', rewardClass: 'text-green-300', borderClass: 'border-green-500/20' },
-  { rankLabel: '10', reward: '70 USDt', rewardClass: 'text-green-300', borderClass: 'border-green-500/20' },
-  { rankLabel: '11–20', reward: '50 USDt', rewardClass: 'text-green-300', borderClass: 'border-green-500/20' },
-  { rankLabel: '21–24', reward: '2000 ⭐', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
-  { rankLabel: '25–30', reward: '1500 ⭐', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
-  { rankLabel: '31–39', reward: '1000 ⭐', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
-  { rankLabel: '40–45', reward: '500 ⭐', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
-  { rankLabel: '46–50', reward: '300 ⭐', rewardClass: 'text-yellow-300', borderClass: 'border-yellow-500/20' },
+const SEASON_USDT_GROUPS: readonly SeasonPrizeGroup[] = [
+  { rankLabel: '7',    reward: '100 USDt' },
+  { rankLabel: '8',    reward: '90 USDt'  },
+  { rankLabel: '9',    reward: '80 USDt'  },
+  { rankLabel: '10',   reward: '70 USDt'  },
+  { rankLabel: '11–20', reward: '50 USDt' },
+];
+
+const SEASON_STARS_GROUPS: readonly SeasonPrizeGroup[] = [
+  { rankLabel: '21–24', reward: '2000 ⭐' },
+  { rankLabel: '25–30', reward: '1500 ⭐' },
+  { rankLabel: '31–39', reward: '1000 ⭐' },
+  { rankLabel: '40–45', reward: '500 ⭐'  },
+  { rankLabel: '46–50', reward: '300 ⭐'  },
 ];
 
 const getPrizeTierByRank = (rank: number): PrizeTier | null => {
   return PRIZE_TIERS_BY_RANK[rank] ?? null;
 };
 
+const PRIZE_BADGE_SMALL_CLASS = 'inline-flex items-center justify-center px-2 py-1 rounded-full border text-[9px] font-black tracking-tight whitespace-nowrap shrink-0 leading-none';
+
 const PrizeBadge = memo(({ tier }: { tier: PrizeTier }) => (
-  <span className={`${PRIZE_BADGE_BASE_CLASS} ${tier.badgeClass}`}>
+  <span className={`${tier.small ? PRIZE_BADGE_SMALL_CLASS : PRIZE_BADGE_BASE_CLASS} ${tier.badgeClass}`}>
     <span>{tier.label}</span>
   </span>
 ));
@@ -298,7 +306,7 @@ function mapApiToPlayers(entries: { rank: number; userId: number; username: stri
   });
 }
 
-const DEV_LEADERBOARD_MIN_RANK = 20;
+const DEV_LEADERBOARD_MIN_RANK = 50;
 
 function ensureDevLeaderboardHasTopTen(players: Player[]): Player[] {
   if (!import.meta.env.DEV) return players;
@@ -447,28 +455,58 @@ const SeasonInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose: (
             {/* Скроллящийся контент */}
             <div className="overflow-y-auto overscroll-contain px-6 pb-6 flex-1 min-h-0">
               <div className="space-y-3">
-                {/* ТОП-3 */}
+
+                {/* ТОП 6 — карточки подарков */}
                 <div className="space-y-2">
-                  {SEASON_TOP_PRIZE_ROWS.map((row, index) => (
-                    <div key={row.rank} className={`flex items-center justify-between bg-black/20 rounded-xl p-2.5 border ${row.borderClass}`}>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xl drop-shadow-md">{row.icon}</span>
-                        <span className="text-white font-medium">{translate('leaderboard:season.placeLabel', { rank: row.rank ?? index + 1 })}</span>
+                  {SEASON_GIFT_ROWS.map((row) => (
+                    <div
+                      key={row.rank}
+                      className={`flex items-center gap-3 bg-gradient-to-r ${row.gradientClass} rounded-2xl border ${row.borderClass} ${row.rank <= 3 ? 'px-3 py-3' : 'px-3 py-2'}`}
+                    >
+                      <div className="w-8 shrink-0 flex items-center justify-center">
+                        {row.medal
+                          ? <span className={row.rank <= 3 ? 'text-2xl drop-shadow-md' : 'text-xl'}>{row.medal}</span>
+                          : <span className="text-white/40 font-black text-base">{row.rank}</span>
+                        }
                       </div>
-                      <span className={`${row.rewardClass} font-black text-base whitespace-nowrap`}>{row.rewardLabel}</span>
+                      <span className={row.rank <= 3 ? 'text-2xl' : 'text-xl'}>🎁</span>
+                      <span className={`font-black flex-1 ${row.rank <= 3 ? 'text-base' : 'text-sm'} ${row.nameClass}`}>
+                        {row.giftName}
+                      </span>
                     </div>
                   ))}
                 </div>
 
-                {/* 4–50 места — компактная таблица */}
-                <div className="bg-black/20 rounded-xl border border-white/10 overflow-hidden">
-                  {SEASON_PRIZE_GROUPS.map((group, i) => (
+                {/* Секция USDt */}
+                <div className="rounded-2xl border border-green-500/25 overflow-hidden">
+                  <div className="flex items-center gap-2 px-3 py-2.5 bg-green-500/10 border-b border-green-500/20">
+                    <span className="text-base">💵</span>
+                    <span className="text-green-400 font-black text-xs uppercase tracking-widest">USDt</span>
+                  </div>
+                  {SEASON_USDT_GROUPS.map((group, i) => (
                     <div
                       key={group.rankLabel}
                       className={`flex items-center justify-between px-3 py-2.5 ${i > 0 ? 'border-t border-white/5' : ''}`}
                     >
-                      <span className="text-white/60 text-sm font-semibold">#{group.rankLabel}</span>
-                      <span className={`${group.rewardClass} font-black text-sm`}>{group.reward}</span>
+                      <span className="text-white/55 text-sm font-semibold">#{group.rankLabel}</span>
+                      <span className="text-green-300 font-black text-sm">{group.reward}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Секция Stars */}
+                <div className="rounded-2xl border border-yellow-500/25 overflow-hidden">
+                  <div className="flex items-center gap-2 px-3 py-2.5 bg-yellow-500/10 border-b border-yellow-500/20">
+                    <span className="text-base">⭐</span>
+                    <span className="text-yellow-400 font-black text-xs uppercase tracking-widest">Stars</span>
+                  </div>
+                  {SEASON_STARS_GROUPS.map((group, i) => (
+                    <div
+                      key={group.rankLabel}
+                      className={`flex items-center justify-between px-3 py-2.5 ${i > 0 ? 'border-t border-white/5' : ''}`}
+                    >
+                      <span className="text-white/55 text-sm font-semibold">#{group.rankLabel}</span>
+                      <span className="text-yellow-300 font-black text-sm">{group.reward}</span>
                     </div>
                   ))}
                 </div>
@@ -478,6 +516,7 @@ const SeasonInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose: (
                     {translate('leaderboard:seasonRewardsSummary')}
                   </p>
                 </div>
+
               </div>
             </div>
           </motion.div>
@@ -584,7 +623,11 @@ const TopLeaderboardItem = memo(({ player, index, animateEntry }: { player: Play
         </div>
       )}
       <div className="flex items-center justify-center w-8 mr-2 relative z-20 shrink-0">
-        <span className="text-xl drop-shadow-md">{styles.icon}</span>
+        {styles.icon ? (
+          <span className="text-xl drop-shadow-md">{styles.icon}</span>
+        ) : (
+          <span className={`font-bold text-lg ${styles.rankClass}`}>{player.rank}</span>
+        )}
       </div>
       <div className="relative z-20 mr-3">
         <AsyncAvatar seed={player.avatarSeed} rank={player.rank} photoUrl={player.photoUrl || undefined} />
@@ -611,7 +654,7 @@ TopLeaderboardItem.displayName = 'TopLeaderboardItem';
 const RegularLeaderboardItem = memo(({ player, isCurrentUser }: { player: Player; isCurrentUser?: boolean }) => {
   const styles = DEFAULT_RANK_STYLE;
   const prizeTier = getPrizeTierByRank(player.rank);
-  const isMinorPrize = player.rank >= 4 && player.rank <= 10;
+  const isMinorPrize = player.rank >= 7 && player.rank <= 20;
   const minorPrizeClass = isMinorPrize && !isCurrentUser
     ? 'bg-yellow-500/6 border-yellow-500/20 shadow-[0_0_10px_rgba(250,204,21,0.08)]'
     : `${styles.bg} ${styles.border}`;
@@ -643,17 +686,19 @@ const RegularLeaderboardItem = memo(({ player, isCurrentUser }: { player: Player
 RegularLeaderboardItem.displayName = 'RegularLeaderboardItem';
 
 const SkeletonLeaderboardItem = memo(({ rank }: { rank: number }) => {
-  const isTop = rank <= 3;
+  const isTop = rank <= 6;
   const topStyles = RANK_STYLES[rank];
-  const cardClass = isTop
+  const cardClass = isTop && topStyles
     ? `${topStyles.bg} ${topStyles.border} shadow-lg`
     : `${DEFAULT_RANK_STYLE.bg} ${DEFAULT_RANK_STYLE.border}`;
 
   return (
     <div className={`flex items-center px-3 py-2 rounded-2xl border relative overflow-hidden mb-3 ${cardClass} h-[72px]`}>
       <div className="flex items-center justify-center w-8 mr-2 relative z-10 shrink-0">
-        {isTop ? (
-          <span className="text-xl opacity-35">{topStyles.icon}</span>
+        {isTop && topStyles ? (
+          topStyles.icon
+            ? <span className="text-xl opacity-35">{topStyles.icon}</span>
+            : <div className="h-4 w-5 rounded bg-yellow-500/15 animate-pulse" />
         ) : (
           <div className="h-5 w-5 rounded-md bg-white/10 animate-pulse" />
         )}
@@ -766,6 +811,21 @@ const CurrentUserFooter = memo(({ user, isDocked, pulseTrigger, myPosition, mySc
   );
 });
 CurrentUserFooter.displayName = 'CurrentUserFooter';
+
+// --- КОМПОНЕНТ: РАЗДЕЛИТЕЛЬ СЕКЦИЙ ---
+const SectionDivider = memo(({ type }: { type: 'usdt' | 'stars' }) => {
+  const isUsdt = type === 'usdt';
+  return (
+    <div className={`flex items-center gap-2 py-2 mb-2 mt-1`}>
+      <div className={`flex-1 h-[1px] ${isUsdt ? 'bg-green-500/15' : 'bg-yellow-500/15'}`} />
+      <span className={`text-[11px] font-black uppercase tracking-widest ${isUsdt ? 'text-green-400/60' : 'text-yellow-400/60'}`}>
+        {isUsdt ? '💵 USDt' : '⭐ Stars'}
+      </span>
+      <div className={`flex-1 h-[1px] ${isUsdt ? 'bg-green-500/15' : 'bg-yellow-500/15'}`} />
+    </div>
+  );
+});
+SectionDivider.displayName = 'SectionDivider';
 
 // --- ОСНОВНОЙ ЭКРАН ---
 export function LeaderboardScreen() {
@@ -1127,16 +1187,27 @@ export function LeaderboardScreen() {
               animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
               transition={shouldAnimateListEnter ? { duration: 0.28, ease: 'easeOut' } : { duration: 0 }}
             >
-              {leaderboard.slice(0, visibleCount).map((player, i) => {
+              {leaderboard.slice(0, visibleCount).flatMap((player, i) => {
                 const isMe = player.userId === user?.id;
-                if (player.rank <= 3) {
-                  return (
+                const elements: React.ReactNode[] = [];
+
+                if (player.rank === 7) {
+                  elements.push(<SectionDivider key={`section-usdt-${displayMode.id}`} type="usdt" />);
+                } else if (player.rank === 21) {
+                  elements.push(<SectionDivider key={`section-stars-${displayMode.id}`} type="stars" />);
+                }
+
+                if (player.rank <= 6) {
+                  elements.push(
                     <div key={`top-${displayMode.id}-${player.rank}`} className={isMe ? 'rounded-2xl ring-2 ring-blue-500/40 shadow-[0_0_12px_rgba(59,130,246,0.15)]' : ''}>
                       <TopLeaderboardItem player={player} index={i} animateEntry={true} />
                     </div>
                   );
+                } else {
+                  elements.push(<RegularLeaderboardItem key={`reg-${displayMode.id}-${player.rank}`} player={player} isCurrentUser={isMe} />);
                 }
-                return <RegularLeaderboardItem key={`reg-${displayMode.id}-${player.rank}`} player={player} isCurrentUser={isMe} />;
+
+                return elements;
               })}
 
               {visibleCount < leaderboard.length && (

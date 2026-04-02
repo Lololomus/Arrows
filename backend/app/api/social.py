@@ -277,14 +277,15 @@ async def get_referral_leaderboard(
     cache_key = f"lb:referral:top:{limit}"
 
     # Пробуем взять топ из кэша
-    cached = await redis.get(cache_key)
+    cached = await redis.get(cache_key) if redis is not None else None
     if cached:
         data = json.loads(cached)
         leaders_raw = data["leaders"]
         total_participants = data["total"]
     else:
         leaders_raw, total_participants = await _fetch_referral_leaderboard_top(db, limit)
-        await redis.set(cache_key, json.dumps({"leaders": leaders_raw, "total": total_participants}), ex=_LB_CACHE_TTL)
+        if redis is not None:
+            await redis.set(cache_key, json.dumps({"leaders": leaders_raw, "total": total_participants}), ex=_LB_CACHE_TTL)
 
     leaders = [ReferralLeaderboardEntry(**entry) for entry in leaders_raw]
 
@@ -304,12 +305,13 @@ async def get_referral_leaderboard(
         if not my_in_top:
             # Юзера нет в топ — считаем позицию (кэш per-user)
             pos_key = f"lb:referral:pos:{user.id}"
-            cached_pos = await redis.get(pos_key)
+            cached_pos = await redis.get(pos_key) if redis is not None else None
             if cached_pos:
                 my_position = int(cached_pos)
             else:
                 my_position = await _fetch_referral_position(db, user)
-                await redis.set(pos_key, str(my_position), ex=_LB_CACHE_TTL)
+                if redis is not None:
+                    await redis.set(pos_key, str(my_position), ex=_LB_CACHE_TTL)
 
     return ReferralLeaderboardResponse(
         leaders=leaders,
@@ -529,7 +531,7 @@ async def get_leaderboard(
     cache_key = f"lb:{board_type}:top:{limit}" if board_type != "daily" else f"lb:daily:{_utc_today().isoformat()}:top:{limit}"
 
     # Пробуем взять топ из кэша
-    cached = await redis.get(cache_key)
+    cached = await redis.get(cache_key) if redis is not None else None
     if cached:
         data = json.loads(cached)
         leaders_raw = data["leaders"]
@@ -541,7 +543,8 @@ async def get_leaderboard(
             leaders_raw, total_participants = await _fetch_daily_top(db, limit)
         else:
             leaders_raw, total_participants = await _fetch_board_top(db, board_type, limit)
-        await redis.set(cache_key, json.dumps({"leaders": leaders_raw, "total": total_participants}), ex=_LB_CACHE_TTL)
+        if redis is not None:
+            await redis.set(cache_key, json.dumps({"leaders": leaders_raw, "total": total_participants}), ex=_LB_CACHE_TTL)
 
     leaders = [LeaderboardEntry(**entry) for entry in leaders_raw]
 
@@ -570,7 +573,7 @@ async def get_leaderboard(
         if not my_in_top:
             # Юзера нет в топ — считаем позицию (кэш per-user)
             pos_key = f"lb:{board_type}:pos:{user.id}"
-            cached_pos = await redis.get(pos_key)
+            cached_pos = await redis.get(pos_key) if redis is not None else None
             if cached_pos:
                 pos_data = json.loads(cached_pos)
                 my_position = pos_data["pos"]
@@ -580,13 +583,15 @@ async def get_leaderboard(
                 if board_type == "global":
                     if my_score > 0:
                         my_position = await _fetch_global_position(db, user)
-                        await redis.set(pos_key, json.dumps({"pos": my_position, "score": my_score}), ex=_LB_CACHE_TTL)
+                        if redis is not None:
+                            await redis.set(pos_key, json.dumps({"pos": my_position, "score": my_score}), ex=_LB_CACHE_TTL)
                 else:
                     result = await _fetch_board_position(db, user, board_type)
                     if result[0] is not None:
                         my_position = result[0]
                         my_score = result[1]
-                        await redis.set(pos_key, json.dumps({"pos": my_position, "score": my_score}), ex=_LB_CACHE_TTL)
+                        if redis is not None:
+                            await redis.set(pos_key, json.dumps({"pos": my_position, "score": my_score}), ex=_LB_CACHE_TTL)
 
     return LeaderboardResponse(
         leaders=leaders,
