@@ -80,6 +80,33 @@ async def notify_spin_streak_reset(telegram_id: int, old_streak: int, locale: st
         return "failed"
 
 
+async def notify_new_season(telegram_id: int, locale: str | None = None) -> NotificationDelivery:
+    """Notification: new season has started with high rewards."""
+    locale = normalize_locale(locale)
+    text = bot_text("new_season", locale)
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text=bot_text("new_season_button", locale),
+                web_app=WebAppInfo(url=settings.WEBAPP_URL),
+            )
+        ]]
+    )
+    try:
+        await _get_bot().send_message(
+            chat_id=telegram_id,
+            text=text,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+        return "sent"
+    except (TelegramForbiddenError, TelegramBadRequest):
+        return "blocked"
+    except Exception as e:
+        logger.warning("Failed to send new season notification to %s: %s", telegram_id, e)
+        return "failed"
+
+
 async def notify_streak_warning(telegram_id: int, streak: int, tier: int, locale: str | None = None) -> NotificationDelivery:
     """Notification: streak will reset in ~6 hours."""
     locale = normalize_locale(locale)

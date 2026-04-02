@@ -148,6 +148,26 @@ BOT_TEXT: dict[str, dict[SupportedLocale, str]] = {
             "Don't lose <b>{tier_name}</b> — jump in and spin before it's too late."
         ),
     },
+    "new_season": {
+        "ru": (
+            "🏆 <b>Новый сезон начался!</b>\n\n"
+            "Стрелки летят снова — и теперь с увеличенными наградами!\n\n"
+            "🎁 <b>Высокие призы</b> за каждый пройденный уровень\n"
+            "🔥 Топовые места в таблице лидеров дают <b>особые бонусы</b>\n\n"
+            "Не упусти шанс взять максимум с самого старта!"
+        ),
+        "en": (
+            "🏆 <b>New Season has started!</b>\n\n"
+            "Arrows are flying again — now with bigger rewards!\n\n"
+            "🎁 <b>High prizes</b> for every level you clear\n"
+            "🔥 Top leaderboard spots earn <b>special bonuses</b>\n\n"
+            "Don't miss your chance to grab the most from day one!"
+        ),
+    },
+    "new_season_button": {
+        "ru": "🚀 Играть сейчас",
+        "en": "🚀 Play now",
+    },
 }
 
 
