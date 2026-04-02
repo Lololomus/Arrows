@@ -10,6 +10,8 @@ interface GameMenuModalProps {
   onConfirmRetrySave?: () => void;
   onConfirmExitUnsaved?: () => void;
   onHowToPlay?: () => void;
+  staticBackground?: boolean;
+  onToggleStaticBackground?: () => void;
 }
 
 export function GameMenuModal({
@@ -20,6 +22,8 @@ export function GameMenuModal({
   onConfirmRetrySave,
   onConfirmExitUnsaved,
   onHowToPlay,
+  staticBackground,
+  onToggleStaticBackground,
 }: GameMenuModalProps) {
   const isRestart = action === 'restart';
   const isUnsavedMenu = action === 'unsaved_menu';
@@ -60,6 +64,18 @@ export function GameMenuModal({
                 className="mt-4 w-full py-2.5 rounded-xl bg-white/5 text-white/60 text-sm font-medium hover:bg-white/10 transition-colors"
               >
                 {translate('game:howToPlay.title')}
+              </button>
+            )}
+
+            {onToggleStaticBackground && !isUnsavedMenu && (
+              <button
+                onClick={onToggleStaticBackground}
+                className="mt-2 w-full py-2.5 rounded-xl bg-white/5 text-sm font-medium hover:bg-white/10 transition-colors flex items-center justify-between px-4"
+              >
+                <span className="text-white/60">{translate('game:menu.staticBg')}</span>
+                <span className={`w-11 h-6 rounded-full transition-colors flex-shrink-0 relative ${staticBackground ? 'bg-blue-500' : 'bg-white/20'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${staticBackground ? 'translate-x-5' : 'translate-x-0'}`} />
+                </span>
               </button>
             )}
 

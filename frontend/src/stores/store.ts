@@ -62,19 +62,27 @@ interface AppState {
   loginStreak: number;
   spinRetryAvailable: boolean;
   spinPendingPrize: { prizeType: 'coins' | 'hints' | 'revive'; prizeAmount: number } | null;
+  spinStreakLostAt: string | null;
+  spinStreakLostCount: number;
   setSpinStatus: (
     available: boolean,
     streak: number,
     retryAvailable?: boolean,
     pendingPrize?: { prizeType: 'coins' | 'hints' | 'revive'; prizeAmount: number } | null,
     nextAvailableAt?: string | null,
+    streakLostAt?: string | null,
+    streakLostCount?: number,
   ) => void;
+  setStreakLost: (at: string | null, count: number) => void;
 
   isDailyMode: boolean;
   setDailyMode: (isDailyMode: boolean) => void;
 
   serverUnavailable: boolean;
   setServerUnavailable: (unavailable: boolean) => void;
+
+  staticBackground: boolean;
+  setStaticBackground: (value: boolean) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -146,19 +154,27 @@ export const useAppStore = create<AppState>()(
       loginStreak: 0,
       spinRetryAvailable: false,
       spinPendingPrize: null,
-      setSpinStatus: (available, streak, retryAvailable, pendingPrize, nextAvailableAt) => set({
+      spinStreakLostAt: null,
+      spinStreakLostCount: 0,
+      setSpinStatus: (available, streak, retryAvailable, pendingPrize, nextAvailableAt, streakLostAt, streakLostCount) => set((state) => ({
         spinAvailable: available,
         spinNextAvailableAt: nextAvailableAt ?? null,
         loginStreak: streak,
         spinRetryAvailable: retryAvailable ?? false,
         spinPendingPrize: pendingPrize ?? null,
-      }),
+        spinStreakLostAt: streakLostAt !== undefined ? streakLostAt : state.spinStreakLostAt,
+        spinStreakLostCount: streakLostCount !== undefined ? streakLostCount : state.spinStreakLostCount,
+      })),
+      setStreakLost: (at, count) => set({ spinStreakLostAt: at, spinStreakLostCount: count }),
 
       isDailyMode: false,
       setDailyMode: (isDailyMode) => set({ isDailyMode }),
 
       serverUnavailable: false,
       setServerUnavailable: (serverUnavailable) => set({ serverUnavailable }),
+
+      staticBackground: false,
+      setStaticBackground: (staticBackground) => set({ staticBackground }),
     }),
     {
       name: 'arrow-puzzle-app',
@@ -167,6 +183,7 @@ export const useAppStore = create<AppState>()(
         authExpiresAt: state.authExpiresAt,
         locale: state.locale,
         localeManuallySet: state.localeManuallySet,
+        staticBackground: state.staticBackground,
       }),
     }
   )

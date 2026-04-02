@@ -333,10 +333,11 @@ function GameDevPanel({
 
 export function GameScreen() {
   const user = useAppStore(s => s.user);
-  const setUser = useAppStore(s => s.setUser);
   const setScreen = useAppStore(s => s.setScreen);
   const isDailyMode = useAppStore(s => s.isDailyMode);
   const setDailyMode = useAppStore(s => s.setDailyMode);
+  const staticBackground = useAppStore(s => s.staticBackground);
+  const setStaticBackground = useAppStore(s => s.setStaticBackground);
   const isDailyModeRef = useRef(false);
   isDailyModeRef.current = isDailyMode;
   const dailyLevelNumRef = useRef<number | null>(null);
@@ -993,13 +994,13 @@ export function GameScreen() {
     const nextCoinsTotal = completion.totalCoins ?? ((user?.coins ?? 0) + completion.coinsEarned);
     setVictoryTotalCoins(nextCoinsTotal);
 
-    if (user) {
-      setUser({
-        ...user,
-        currentLevel: completion.currentLevel,
-        coins: nextCoinsTotal,
-      });
-    }
+    // Use updateUser (targeted merge) instead of setUser({ ...user }) to avoid
+    // overwriting fields like extraLives that may have been updated concurrently
+    // (e.g., by the reward reconciler or a TON payment confirmation).
+    useAppStore.getState().updateUser({
+      currentLevel: completion.currentLevel,
+      coins: nextCoinsTotal,
+    });
 
     setSaveState('saved');
     setSaveError(null);
@@ -1015,7 +1016,7 @@ export function GameScreen() {
     if (pendingAction === 'next') {
       proceedToNextLevelWithInterstitial(completion.currentLevel, completedLevel);
     }
-  }, [clearVictoryAction, proceedToNextLevelWithInterstitial, setScreen, setUser, user]);
+  }, [clearVictoryAction, proceedToNextLevelWithInterstitial, setScreen, user]);
 
   const startVictorySave = useCallback(async (completedLevel: number, force = false) => {
     if (status !== 'victory' || noMoreLevels) return;
@@ -1839,7 +1840,7 @@ export function GameScreen() {
   return (
     <div
       className="relative w-full h-full overflow-hidden font-sans select-none touch-none"
-      style={{ backgroundImage: `url(${gameBgImage})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: '#1e3a52' }}
+      style={staticBackground ? { backgroundColor: '#0f172a' } : { backgroundImage: `url(${gameBgImage})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: '#1e3a52' }}
     >
       <GameHUD
         currentLevel={displayLevel}
@@ -1950,6 +1951,8 @@ export function GameScreen() {
         onConfirmRetrySave={confirmRetryUnsavedMenu}
         onConfirmExitUnsaved={confirmExitUnsavedMenu}
         onHowToPlay={() => { setConfirmAction(null); setShowHowToPlay(true); }}
+        staticBackground={staticBackground}
+        onToggleStaticBackground={() => setStaticBackground(!staticBackground)}
       />
 
       <HowToPlayModal open={showHowToPlay} onClose={() => setShowHowToPlay(false)} />

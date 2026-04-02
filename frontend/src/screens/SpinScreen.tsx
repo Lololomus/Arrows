@@ -12,6 +12,8 @@ import { useAppStore } from '../stores/store';
 import { spinApi, type SpinRollResponse, ApiError } from '../api/client';
 import { ADSGRAM_BLOCK_IDS } from '../config/constants';
 import { exists, formatNumber, formatTimeUntil, getAppLocale, translate } from '../i18n';
+import { getErrorCodeMessage } from '../i18n/content';
+import { IceOverlay } from '../components/spin/IceOverlay';
 import { runRewardedFlow, getRewardedFlowMessage } from '../services/rewardedAds';
 import { clearPendingRewardIntent, rememberPendingRewardIntent } from '../services/rewardReconciler';
 
@@ -303,13 +305,15 @@ function SpinWheel({
   size,
   pointerControls,
   activeIndex,
-  isSpinning
+  isSpinning,
+  isFrozen,
 }: {
   rotation: number;
   size: number;
   pointerControls: any;
   activeIndex: number;
   isSpinning: boolean;
+  isFrozen: boolean;
 }) {
   const cx = size / 2;
   const cy = size / 2;
@@ -400,8 +404,22 @@ function SpinWheel({
       </svg>
 
       {/* Язычок рулетки */}
+      <AnimatePresence>
+        {isFrozen && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.02 }}
+            transition={{ duration: 0.6, ease: 'easeOut' }}
+            className="absolute inset-[14px] pointer-events-none"
+          >
+            <IceOverlay />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <motion.div
-        className="absolute top-0 left-1/2 z-20 drop-shadow-[0_4px_8px_rgba(0,0,0,0.6)]"
+        className="absolute top-0 left-1/2 z-40 drop-shadow-[0_4px_8px_rgba(0,0,0,0.6)]"
         style={{ x: '-50%', y: -16, transformOrigin: '12px 10px' }}
         animate={pointerControls}
       >
@@ -603,6 +621,118 @@ function PrizeResult({
 }
 
 // ============================================
+// STREAK RESTORE CARD
+// ============================================
+
+function StreakRestoreCard({
+  lostCount,
+  expiresAt,
+  timeNow,
+  isRestoring,
+  onRestore,
+}: {
+  lostCount: number;
+  expiresAt: string | null;
+  timeNow: number;
+  isRestoring: boolean;
+  onRestore: () => void;
+}) {
+  const timeLeft = formatTimeLeft(expiresAt, timeNow);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 8, scale: 0.97 }}
+      transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+      className="w-full relative overflow-hidden rounded-3xl"
+    >
+      {/* Background */}
+      <div className="absolute inset-0 bg-gradient-to-br from-[#071829] via-[#0d2236] to-[#06131e]" />
+      <div className="absolute inset-0 bg-gradient-to-t from-cyan-900/20 via-transparent to-blue-900/10" />
+
+      {/* Decorative ice crystals */}
+      <div className="absolute -top-6 -right-6 text-[90px] opacity-[0.07] select-none pointer-events-none rotate-12">❄️</div>
+      <div className="absolute -bottom-4 -left-4 text-[50px] opacity-[0.07] select-none pointer-events-none -rotate-12">❄️</div>
+
+      {/* Subtle grid pattern */}
+      <div
+        className="absolute inset-0 opacity-[0.04] pointer-events-none"
+        style={{
+          backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 24px,rgba(255,255,255,1) 24px,rgba(255,255,255,1) 25px),repeating-linear-gradient(90deg,transparent,transparent 24px,rgba(255,255,255,1) 24px,rgba(255,255,255,1) 25px)',
+        }}
+      />
+
+      <div className="relative z-10 p-4 border border-cyan-500/20 rounded-3xl">
+        {/* Header row */}
+        <div className="flex items-center gap-3 mb-3">
+          <motion.div
+            animate={{ rotate: [0, -8, 8, -4, 4, 0] }}
+            transition={{ repeat: Infinity, duration: 4, ease: 'easeInOut' }}
+            className="w-11 h-11 rounded-2xl bg-cyan-500/15 border border-cyan-400/25 flex items-center justify-center text-xl shrink-0 shadow-[0_0_16px_rgba(34,211,238,0.15)]"
+          >
+            ❄️
+          </motion.div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-white font-black text-[15px] leading-tight">
+              {translate('game:spin.streakFrozenTitle')}
+            </h3>
+            <p className="text-cyan-300/70 text-xs mt-0.5 truncate">
+              {translate(`game:spin.streakFrozenDays_${lostCount === 1 ? 'one' : 'other'}`, { count: lostCount })}
+            </p>
+          </div>
+          {/* Lost streak badge */}
+          <div className="shrink-0 flex flex-col items-center bg-red-500/10 border border-red-500/20 rounded-xl px-2.5 py-1.5">
+            <span className="text-red-400 font-black text-[13px] leading-none">−{lostCount}</span>
+            <span className="text-red-400/60 text-[9px] uppercase tracking-wide font-bold mt-0.5">дней</span>
+          </div>
+        </div>
+
+        {/* Expiry countdown — FOMO */}
+        {timeLeft && (
+          <div className="flex items-center gap-2 mb-3 bg-orange-500/8 border border-orange-500/15 rounded-xl px-3 py-2">
+            <span className="text-base leading-none shrink-0">⏳</span>
+            <p className="text-white/60 text-xs font-medium">
+              {translate('game:spin.streakFrozenExpires', { time: '' }).replace('{{time}}', '')
+                .trim()}{' '}
+              <span className="text-orange-400 font-black">{timeLeft}</span>
+            </p>
+          </div>
+        )}
+
+        {/* Restore button */}
+        <button
+          onClick={onRestore}
+          disabled={isRestoring}
+          className={`relative w-full py-3.5 rounded-2xl text-white font-black text-[14px] overflow-hidden transition-all
+            ${isRestoring
+              ? 'bg-slate-800 text-slate-400 scale-[0.98]'
+              : 'bg-gradient-to-r from-cyan-500 to-blue-500 shadow-[0_0_22px_rgba(6,182,212,0.35)] active:scale-[0.97]'
+            }`}
+        >
+          {isRestoring
+            ? translate('game:spin.streakRestoring')
+            : translate('game:spin.streakRestore')}
+          {!isRestoring && (
+            <motion.div
+              className="absolute inset-0 w-1/2 h-full bg-gradient-to-r from-transparent via-white/25 to-transparent skew-x-12"
+              initial={{ x: '-200%' }}
+              animate={{ x: '300%' }}
+              transition={{ repeat: Infinity, duration: 2.8, ease: 'linear' }}
+            />
+          )}
+        </button>
+
+        {/* FOMO fine print */}
+        <p className="text-white/25 text-[10px] text-center mt-2 leading-tight">
+          {translate('game:spin.streakFrozenFomo')}
+        </p>
+      </div>
+    </motion.div>
+  );
+}
+
+// ============================================
 // MAIN COMPONENT
 // ============================================
 
@@ -615,6 +745,8 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
     spinRetryAvailable,
     spinAvailable,
     spinNextAvailableAt,
+    spinStreakLostAt,
+    spinStreakLostCount,
   } = useAppStore();
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const SHOW_DEV_TOOLS = import.meta.env.DEV;
@@ -633,6 +765,16 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [timeNow, setTimeNow] = useState(() => Date.now());
+  const [isRestoringStreak, setIsRestoringStreak] = useState(false);
+
+  const isStreakFrozen = spinStreakLostAt !== null
+    && spinStreakLostCount >= 7
+    && timeNow < Date.parse(spinStreakLostAt) + 48 * 60 * 60 * 1000;
+  const isSpinDisabled = spinning || isPreparing || isStreakFrozen || !spinAvailable;
+
+  const streakRestoreExpiresAt = spinStreakLostAt
+    ? new Date(Date.parse(spinStreakLostAt) + 48 * 60 * 60 * 1000).toISOString()
+    : null;
 
   const pointerControls = useAnimation();
   const screenControls = useAnimation();
@@ -682,7 +824,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
       try {
         const s = await spinApi.getStatus();
         if (cancelled) return;
-        setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt);
+        setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt, s.streakLostAt, s.streakLostCount);
         if (!result) {
           setRetryAvailable(s.retryAvailable);
         }
@@ -831,7 +973,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
   };
 
   const handleSpin = async () => {
-    if (spinning || result || isPreparing) return;
+    if (spinning || result || isPreparing || isStreakFrozen || !spinAvailable) return;
     setError(null);
     setIsPreparing(true);
     setSpinning(true);
@@ -1091,6 +1233,32 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
       }
     }
   };
+  const handleRestoreStreak = async () => {
+    if (isRestoringStreak) return;
+    setError(null);
+    setIsRestoringStreak(true);
+    try {
+      const res = await spinApi.restoreStreak();
+      updateUser({ coins: res.coins });
+      setSpinStatus(true, res.streak, false, null, null, null, 0);
+
+      try {
+        const s = await spinApi.getStatus();
+        setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt, s.streakLostAt, s.streakLostCount);
+      } catch {
+        // Restore already succeeded; keep optimistic local state.
+      }
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(getErrorCodeMessage(err.code, '') || err.message || translate('errors:generic.server'));
+      } else {
+        setError(translate('errors:generic.server'));
+      }
+    } finally {
+      setIsRestoringStreak(false);
+    }
+  };
+
   const spinCooldownLabel = !spinAvailable
     ? formatTimeLeft(spinNextAvailableAt, timeNow)
     : null;
@@ -1115,9 +1283,9 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
       <div className="w-full pt-8 z-10 relative" />
 
       {/* Основной контент */}
-      <div className="w-full flex-1 flex flex-col items-center justify-center gap-8 shrink-0 z-10 px-5">
-        {!result && (
-          <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="w-full">
+      <div className="w-full flex-1 min-h-0 flex flex-col items-center justify-center gap-8 z-10 px-5">
+        {!result && !isStreakFrozen && (
+          <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="w-full flex flex-col gap-4">
             <SleekStreakTimeline streak={loginStreak} onInfoClick={() => setIsInfoOpen(true)} />
           </motion.div>
         )}
@@ -1141,15 +1309,36 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
               pointerControls={pointerControls}
               activeIndex={activeIndex}
               isSpinning={spinning}
+              isFrozen={isStreakFrozen}
             />
           )}
         </div>
       </div>
 
       {/* Нижний блок действий */}
-      <div className="w-full flex flex-col gap-3 mt-auto pt-6 px-5 pb-8 z-10">
+      <div
+        className="w-full mt-auto flex shrink-0 flex-col gap-3 px-5 pt-4 z-10"
+        style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom, 0px))' }}
+      >
         {error && (
           <p className="text-center text-red-400 text-sm font-medium">{error}</p>
+        )}
+        {!result && isStreakFrozen && (
+          <StreakRestoreCard
+            lostCount={spinStreakLostCount}
+            expiresAt={streakRestoreExpiresAt}
+            timeNow={timeNow}
+            isRestoring={isRestoringStreak}
+            onRestore={handleRestoreStreak}
+          />
+        )}
+        {SHOW_DEV_TOOLS && !result && isStreakFrozen && (
+          <button
+            onClick={onClose}
+            className="w-full rounded-2xl border border-white/10 bg-white/5 py-3 text-sm font-semibold text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            {translate('common:backToMenu')}
+          </button>
         )}
         {SHOW_DEV_TOOLS && (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-3 flex flex-col gap-2">
@@ -1169,7 +1358,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
                 try {
                   await spinApi.devReset();
                   const s = await spinApi.getStatus();
-                  setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt);
+                  setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt, s.streakLostAt, s.streakLostCount);
                   setRetryAvailable(s.retryAvailable);
                 } catch {
                   setError('Dev reset failed');
@@ -1186,7 +1375,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
                   try {
                     await spinApi.devSetStreak(5);
                     const s = await spinApi.getStatus();
-                    setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt);
+                    setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt, s.streakLostAt, s.streakLostCount);
                     setRetryAvailable(s.retryAvailable);
                     setResult(null);
                   } catch {
@@ -1203,7 +1392,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
                   try {
                     await spinApi.devSetStreak(13);
                     const s = await spinApi.getStatus();
-                    setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt);
+                    setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt, s.streakLostAt, s.streakLostCount);
                     setRetryAvailable(s.retryAvailable);
                     setResult(null);
                   } catch {
@@ -1215,15 +1404,43 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
                 Tier3 на следующем
               </button>
             </div>
+
+            {/* Frozen streak simulation */}
+            <div className="h-px bg-white/10 mx-1" />
+            <button
+              onClick={async () => {
+                setError(null);
+                try {
+                  if (isStreakFrozen) {
+                    await spinApi.devSetStreak(Math.max(spinStreakLostCount, 10));
+                  } else {
+                    await spinApi.devSetFrozenStreak(10);
+                  }
+                  const s = await spinApi.getStatus();
+                  setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt, s.streakLostAt, s.streakLostCount);
+                  setRetryAvailable(s.retryAvailable);
+                  setResult(null);
+                } catch {
+                  setError('Dev set streak failed');
+                }
+              }}
+              className={`w-full py-2.5 rounded-xl font-semibold text-xs active:scale-95 transition-all ${
+                isStreakFrozen
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/30'
+                  : 'bg-white/10 text-white/80 hover:bg-white/15'
+              }`}
+            >
+              {isStreakFrozen ? '❄️ Сбросить заморозку' : '❄️ Симул. замороженный стрик (10д)'}
+            </button>
           </div>
         )}
         {!result && (
           <>
             <button
               onClick={handleSpin}
-              disabled={spinning || !spinAvailable}
+              disabled={isSpinDisabled}
               className={`relative w-full py-4 rounded-2xl text-white font-black text-[17px] transition-all overflow-hidden shadow-lg
-                ${(spinning || !spinAvailable) ? 'bg-slate-800 text-slate-500 scale-95'
+                ${isSpinDisabled ? 'bg-slate-800 text-slate-500 scale-95'
                            : 'bg-gradient-to-r from-purple-600 to-pink-600 shadow-[0_8px_30px_rgba(236,72,153,0.4)] active:scale-95'}`}
             >
               {isPreparing
@@ -1233,7 +1450,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
                   : spinAvailable
                     ? translate('game:spin.title').toUpperCase()
                     : translate('game:spin.unavailable').toUpperCase()}
-              {spinAvailable && !spinning && (
+              {!isSpinDisabled && (
                 <motion.div
                   className="absolute inset-0 w-1/2 h-full bg-gradient-to-r from-transparent via-white/30 to-transparent skew-x-12"
                   initial={{ x: '-200%' }} animate={{ x: '300%' }} transition={{ repeat: Infinity, duration: 2.5, ease: "linear" }}

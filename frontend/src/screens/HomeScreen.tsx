@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../stores/store';
+import { IceOverlay } from '../components/spin/IceOverlay';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { HeaderBar } from '../components/ui/HeaderBar';
 import { useWalletConnectionController } from '../hooks/useWalletConnectionController';
@@ -35,7 +36,7 @@ const titleLine = {
 
 export function HomeScreen() {
   const { t } = useTranslation();
-  const { setScreen, user, spinAvailable, loginStreak, setSpinStatus, setDailyMode, locale, setLocaleManually, setUser } = useAppStore();
+  const { setScreen, user, spinAvailable, loginStreak, setSpinStatus, setDailyMode, locale, setLocaleManually, setUser, spinStreakLostAt, spinStreakLostCount } = useAppStore();
   const [showSpin, setShowSpin] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState(false);
@@ -44,6 +45,9 @@ export function HomeScreen() {
   const walletController = useWalletConnectionController();
   const displayTitleFont = { fontFamily: '"Bungee Inline", cursive' } as const;
   const coinBalance = user?.coins ?? 0;
+  const isStreakFrozen = spinStreakLostAt !== null
+    && spinStreakLostCount >= 7
+    && Date.now() < Date.parse(spinStreakLostAt) + 48 * 60 * 60 * 1000;
   const displayedLevel = (user as (typeof user & { current_level?: number }) | null)?.currentLevel
     ?? (user as (typeof user & { current_level?: number }) | null)?.current_level
     ?? 1;
@@ -81,7 +85,7 @@ export function HomeScreen() {
       try {
         const s = await spinApi.getStatus();
         if (cancelled) return;
-        setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt);
+        setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt, s.streakLostAt, s.streakLostCount);
       } catch {
         // not critical
       }
@@ -160,10 +164,8 @@ export function HomeScreen() {
           <motion.button
             type="button"
             aria-label={t('game:home.arcade')}
-            initial={false}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ duration: 0 }}
             className="relative w-full group cursor-pointer text-left"
+            whileTap={{ scale: 0.97 }}
             onClick={handlePlayArcade}
           >
             <div className="absolute inset-0 bg-purple-500 rounded-3xl blur-xl opacity-40 group-hover:opacity-60 transition-opacity animate-pulse" />
@@ -171,7 +173,7 @@ export function HomeScreen() {
             <motion.div
               animate={{ y: [0, -6, 0] }}
               transition={{ repeat: Infinity, duration: 4, ease: 'easeInOut' }}
-              className="relative bg-[#16192d]/60 backdrop-blur-xl border border-white/10 border-t-white/20 p-8 rounded-3xl text-center shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden hover:scale-[1.02] transition-transform duration-300"
+              className="relative bg-[#16192d]/60 backdrop-blur-xl border border-white/10 border-t-white/20 p-8 rounded-3xl text-center shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden"
             >
               <AdaptiveParticles
                 variant="accent"
@@ -314,58 +316,103 @@ export function HomeScreen() {
       <HowToPlayModal open={showHowToPlay} onClose={() => setShowHowToPlay(false)} />
 
       <div className="absolute bottom-[110px] right-6 z-40">
-        {spinAvailable && (
+        {/* Ping glow: cyan when frozen, pink when spin available */}
+        {isStreakFrozen && (
+          <div className="absolute inset-0 rounded-full bg-cyan-400 opacity-30 animate-ping" style={{ animationDuration: '2.5s' }} />
+        )}
+        {!isStreakFrozen && spinAvailable && (
           <div className="absolute inset-0 rounded-full bg-pink-500 opacity-40 animate-ping" style={{ animationDuration: '2s' }} />
         )}
 
         <motion.button
           onClick={() => setShowSpin(true)}
           className={`relative flex items-center justify-center w-[76px] h-[76px] rounded-full backdrop-blur-xl transition-all duration-500 ${
-            spinAvailable
-              ? 'shadow-[0_0_25px_rgba(236,72,153,0.5)]'
-              : 'shadow-none opacity-70'
+            isStreakFrozen
+              ? 'shadow-[0_0_28px_rgba(34,211,238,0.55)]'
+              : spinAvailable
+                ? 'shadow-[0_0_25px_rgba(236,72,153,0.5)]'
+                : 'shadow-none opacity-70'
           }`}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           aria-label={t('game:spin.title')}
         >
+          {/* Border ring */}
           <div className={`absolute inset-0 rounded-full border-[3px] z-20 pointer-events-none transition-colors duration-500 ${
-            spinAvailable ? 'border-pink-500/80' : 'border-white/10'
+            isStreakFrozen ? 'border-cyan-400/80' : spinAvailable ? 'border-pink-500/80' : 'border-white/10'
           }`} />
 
+          {/* Wheel gradient — icy when frozen */}
           <motion.div
-            className={`absolute inset-1 rounded-full overflow-hidden ${!spinAvailable && 'grayscale opacity-60'}`}
+            className={`absolute inset-1 rounded-full overflow-hidden ${!spinAvailable && !isStreakFrozen && 'grayscale opacity-60'}`}
             style={{
               background: 'conic-gradient(#0f766e 0 45deg, #047857 45deg 90deg, #1d4ed8 90deg 135deg, #2563eb 135deg 180deg, #7e22ce 180deg 225deg, #9333ea 225deg 270deg, #b45309 270deg 315deg, #be123c 315deg 360deg)',
             }}
-            animate={spinAvailable ? { rotate: 360 } : { rotate: 0 }}
+            animate={spinAvailable && !isStreakFrozen ? { rotate: 360 } : { rotate: 0 }}
             transition={{ repeat: Infinity, duration: 12, ease: 'linear' }}
           >
             <div className="absolute inset-0 rounded-full border border-white/20 mix-blend-overlay" />
           </motion.div>
 
-          <div className={`absolute m-auto w-[18px] h-[18px] rounded-full z-20 ${
-            spinAvailable ? 'bg-[#0a0c1a] border-2 border-[#d8b4fe]' : 'bg-gray-600 border-2 border-gray-400'
-          }`} />
+          <AnimatePresence>
+            {isStreakFrozen && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-1 pointer-events-none"
+              >
+                <IceOverlay isSmall />
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-          <div className={`absolute -top-[6px] left-1/2 -translate-x-1/2 z-30 drop-shadow-md ${!spinAvailable && 'grayscale opacity-60'}`}>
+          {/* Center hub */}
+          {!isStreakFrozen && (
+            <div className={`absolute m-auto w-[18px] h-[18px] rounded-full z-20 ${
+              spinAvailable ? 'bg-[#0a0c1a] border-2 border-[#d8b4fe]' : 'bg-gray-600 border-2 border-gray-400'
+            }`} />
+          )}
+
+          {/* Pointer */}
+          <div className={`absolute -top-[6px] left-1/2 -translate-x-1/2 z-30 drop-shadow-md ${!spinAvailable && !isStreakFrozen && 'grayscale opacity-60'}`}>
             <svg width="16" height="22" viewBox="0 0 24 34" fill="none">
-              <path d="M12 34L2 14C2 8.477 6.477 4 12 4C17.523 4 22 8.477 22 14L12 34Z" fill="url(#miniPointerGrad)" stroke="#ffffff" strokeWidth="2.5" strokeLinejoin="round" />
+              <path d="M12 34L2 14C2 8.477 6.477 4 12 4C17.523 4 22 8.477 22 14L12 34Z"
+                fill={isStreakFrozen ? 'url(#miniPointerIce)' : 'url(#miniPointerGrad)'}
+                stroke="#ffffff" strokeWidth="2.5" strokeLinejoin="round"
+              />
               <circle cx="12" cy="10" r="3.5" fill="#1e1b4b" />
               <defs>
                 <linearGradient id="miniPointerGrad" x1="12" y1="4" x2="12" y2="34" gradientUnits="userSpaceOnUse">
                   <stop stopColor="#fbcfe8" />
                   <stop offset="1" stopColor="#ec4899" />
                 </linearGradient>
+                <linearGradient id="miniPointerIce" x1="12" y1="4" x2="12" y2="34" gradientUnits="userSpaceOnUse">
+                  <stop stopColor="#bae6fd" />
+                  <stop offset="1" stopColor="#0ea5e9" />
+                </linearGradient>
               </defs>
             </svg>
           </div>
 
           <AnimatePresence>
-            {spinAvailable && (
+            {isStreakFrozen && (
               <motion.div
+                key="frozen-badge"
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
+                exit={{ scale: 0 }}
+                className="absolute -top-1 -right-1 flex h-[24px] min-w-[24px] items-center justify-center rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 px-1.5 text-[13px] shadow-md border-2 border-[#0a0c1a] z-40"
+              >
+                ❄️
+              </motion.div>
+            )}
+            {!isStreakFrozen && spinAvailable && (
+              <motion.div
+                key="streak-badge"
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                exit={{ scale: 0 }}
                 className="absolute -top-1 -right-1 flex h-[24px] min-w-[24px] items-center justify-center rounded-full bg-gradient-to-br from-orange-500 to-red-500 px-1.5 text-[12px] font-black text-white shadow-md border-2 border-[#0a0c1a] z-40"
               >
                 {loginStreak > 0 ? `\u{1F525}${loginStreak}` : '!'}

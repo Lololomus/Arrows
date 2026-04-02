@@ -26,6 +26,9 @@ router = APIRouter(prefix="/spin", tags=["spin"])
 
 SPIN_COOLDOWN = timedelta(hours=24)
 SPIN_STREAK_WINDOW = timedelta(hours=48)
+STREAK_RESTORE_WINDOW = timedelta(hours=48)
+STREAK_RESTORE_COST_COINS = 500
+STREAK_RESTORE_MIN_STREAK = 7
 
 
 def _spin_today() -> date:
@@ -61,6 +64,25 @@ def _to_iso_utc(dt: datetime | None) -> str | None:
     if dt is None:
         return None
     return dt.replace(tzinfo=timezone.utc).isoformat()
+
+
+def _get_streak_restore_info(user: User, now: datetime) -> tuple[datetime | None, int]:
+    last_spin_at = _fallback_last_spin_at(user)
+    lost_count = int(user.login_streak or 0)
+    if last_spin_at is None or lost_count <= 0:
+        return None, 0
+
+    lost_at = last_spin_at + SPIN_STREAK_WINDOW
+    restore_expires_at = lost_at + STREAK_RESTORE_WINDOW
+    if now < lost_at or now >= restore_expires_at:
+        return None, 0
+
+    return lost_at, lost_count
+
+
+def _is_streak_restore_blocking(user: User, now: datetime) -> bool:
+    _lost_at, lost_count = _get_streak_restore_info(user, now)
+    return lost_count >= STREAK_RESTORE_MIN_STREAK
 
 
 async def _auto_collect_pending(locked_user: User, db: AsyncSession) -> None:
@@ -147,6 +169,8 @@ class SpinStatusResponse(BaseModel):
     next_tier_in_days: int
     retry_available: bool
     pending_prize: Optional[SpinPendingPrize]
+    streak_lost_at: Optional[str] = None
+    streak_lost_count: int = 0
 
 
 class SpinRollResponse(BaseModel):
@@ -160,6 +184,12 @@ class SpinRollResponse(BaseModel):
 class SpinCollectResponse(BaseModel):
     prize_type: str
     prize_amount: int
+
+
+class SpinRestoreResponse(BaseModel):
+    success: bool
+    streak: int
+    coins: int
 
 
 class SpinDevSetStreakRequest(BaseModel):
@@ -214,6 +244,7 @@ async def get_spin_status(
     available = (
         user.pending_spin_prize_type is None
         and (next_available_at is None or now >= next_available_at)
+        and not _is_streak_restore_blocking(user, now)
     )
 
     retry_available = (
@@ -229,6 +260,7 @@ async def get_spin_status(
             prize_amount=user.pending_spin_prize_amount or 0,
         )
 
+    streak_lost_at, streak_lost_count = _get_streak_restore_info(user, now)
     streak = effective_streak
     return SpinStatusResponse(
         available=available,
@@ -238,6 +270,8 @@ async def get_spin_status(
         next_tier_in_days=_days_to_next_tier(streak),
         retry_available=retry_available,
         pending_prize=pending_prize,
+        streak_lost_at=_to_iso_utc(streak_lost_at),
+        streak_lost_count=streak_lost_count,
     )
 
 
@@ -271,6 +305,9 @@ async def roll_spin(
 
     if last_spin_at is not None and now < last_spin_at + SPIN_COOLDOWN:
         raise api_error(409, "SPIN_ON_COOLDOWN", "Spin is on cooldown")
+
+    if _is_streak_restore_blocking(locked_user, now):
+        raise api_error(409, "STREAK_RESTORE_REQUIRED", "Restore the frozen streak before spinning")
 
     if last_spin_at is not None and now - last_spin_at < SPIN_STREAK_WINDOW:
         new_streak = (locked_user.login_streak or 0) + 1
@@ -395,6 +432,71 @@ async def collect_spin(
     )
 
 
+@router.post("/restore-streak", response_model=SpinRestoreResponse)
+async def restore_streak(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(User).where(User.id == user.id).with_for_update()
+    )
+    locked_user = result.scalar_one_or_none()
+    if locked_user is None:
+        raise api_error(404, "USER_NOT_FOUND", "User not found")
+
+    now = _spin_now()
+    today = _spin_today()
+    last_spin_at = _fallback_last_spin_at(locked_user)
+
+    if (
+        locked_user.pending_spin_prize_type is not None
+        and last_spin_at is not None
+        and now >= last_spin_at + SPIN_COOLDOWN
+    ):
+        await _auto_collect_pending(locked_user, db)
+
+    streak_lost_at, streak_lost_count = _get_streak_restore_info(locked_user, now)
+    if streak_lost_at is None:
+        raise api_error(409, "STREAK_RESTORE_NOT_AVAILABLE", "Streak restore is not available")
+
+    if streak_lost_count < STREAK_RESTORE_MIN_STREAK:
+        raise api_error(
+            409,
+            "STREAK_RESTORE_NOT_ELIGIBLE",
+            "Only streaks of 7 days or more can be restored",
+        )
+
+    if (locked_user.coins or 0) < STREAK_RESTORE_COST_COINS:
+        raise api_error(409, "NOT_ENOUGH_COINS", "Not enough coins")
+
+    restored_anchor = now - SPIN_COOLDOWN
+    locked_user.coins = (locked_user.coins or 0) - STREAK_RESTORE_COST_COINS
+    locked_user.last_spin_at = restored_anchor
+    locked_user.last_spin_date = today - timedelta(days=1)
+    locked_user.spin_ready_notified_for_spin_at = restored_anchor
+    locked_user.streak_warning_notified_for_spin_at = None
+    locked_user.streak_reset_notified_for_spin_at = None
+
+    tx = Transaction(
+        user_id=locked_user.id,
+        type="purchase",
+        currency="coins",
+        amount=-STREAK_RESTORE_COST_COINS,
+        item_type="spin",
+        item_id="streak_restore",
+        status="completed",
+    )
+    db.add(tx)
+
+    await db.commit()
+
+    return SpinRestoreResponse(
+        success=True,
+        streak=streak_lost_count,
+        coins=locked_user.coins or 0,
+    )
+
+
 @router.post("/dev/reset")
 async def dev_reset_spin(
     user: User = Depends(get_current_user),
@@ -456,6 +558,39 @@ async def dev_set_spin_streak(
     else:
         locked_user.last_spin_at = None
         locked_user.last_spin_date = None
+
+    await db.commit()
+    return {"success": True, "streak": target}
+
+
+@router.post("/dev/set-frozen-streak")
+async def dev_set_frozen_spin_streak(
+    payload: SpinDevSetStreakRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ensure_dev()
+    target = max(STREAK_RESTORE_MIN_STREAK, int(payload.streak))
+    now = _spin_now()
+    frozen_anchor = now - SPIN_STREAK_WINDOW - timedelta(hours=1)
+
+    result = await db.execute(
+        select(User).where(User.id == user.id).with_for_update()
+    )
+    locked_user = result.scalar_one_or_none()
+    if locked_user is None:
+        raise api_error(404, "USER_NOT_FOUND", "User not found")
+
+    locked_user.pending_spin_prize_type = None
+    locked_user.pending_spin_prize_amount = None
+    locked_user.spin_retry_used_date = None
+    locked_user.spin_retry_used_at = None
+    locked_user.login_streak = target
+    locked_user.last_spin_at = frozen_anchor
+    locked_user.last_spin_date = frozen_anchor.date()
+    locked_user.spin_ready_notified_for_spin_at = frozen_anchor
+    locked_user.streak_warning_notified_for_spin_at = frozen_anchor
+    locked_user.streak_reset_notified_for_spin_at = frozen_anchor
 
     await db.commit()
     return {"success": True, "streak": target}

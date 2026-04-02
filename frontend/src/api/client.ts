@@ -1133,6 +1133,8 @@ export interface SpinStatusResponse {
   nextTierInDays: number;
   retryAvailable: boolean;
   pendingPrize: { prizeType: 'coins' | 'hints' | 'revive'; prizeAmount: number } | null;
+  streakLostAt: string | null;
+  streakLostCount: number;
 }
 
 export interface SpinRollResponse {
@@ -1165,6 +1167,8 @@ export const spinApi = {
             prizeAmount: Number(rawPending.prize_amount ?? rawPending.prizeAmount ?? 0),
           }
         : null,
+      streakLostAt: ((raw.streak_lost_at ?? raw.streakLostAt) as string | null | undefined) ?? null,
+      streakLostCount: Number(raw.streak_lost_count ?? raw.streakLostCount ?? 0),
     };
   },
 
@@ -1198,6 +1202,15 @@ export const spinApi = {
     };
   },
 
+  restoreStreak: async (): Promise<{ success: boolean; streak: number; coins: number }> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.spin.restoreStreak, { method: 'POST' });
+    return {
+      success: Boolean(raw.success),
+      streak: Number(raw.streak ?? 0),
+      coins: Number(raw.coins ?? 0),
+    };
+  },
+
   devReset: async (): Promise<{ success: boolean }> => {
     const raw = await request<Record<string, unknown>>(API_ENDPOINTS.spin.devReset, { method: 'POST' });
     return { success: Boolean(raw.success) };
@@ -1205,6 +1218,14 @@ export const spinApi = {
 
   devSetStreak: async (streak: number): Promise<{ success: boolean; streak: number }> => {
     const raw = await request<Record<string, unknown>>(API_ENDPOINTS.spin.devSetStreak, {
+      method: 'POST',
+      body: JSON.stringify({ streak }),
+    });
+    return { success: Boolean(raw.success), streak: Number(raw.streak ?? streak) };
+  },
+
+  devSetFrozenStreak: async (streak: number): Promise<{ success: boolean; streak: number }> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.spin.devSetFrozenStreak, {
       method: 'POST',
       body: JSON.stringify({ streak }),
     });

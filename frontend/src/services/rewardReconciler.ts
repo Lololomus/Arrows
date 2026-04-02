@@ -84,6 +84,13 @@ async function syncGrantedReward(status: RewardIntentStatusResponse): Promise<vo
     }
   }
 
+  // reward_revive does not modify any User fields on the server — only records
+  // an AdRewardClaim. Calling getMe() here would replace the entire user object
+  // and could overwrite extraLives or other in-flight updates.
+  if (status.placement === 'reward_revive') {
+    return;
+  }
+
   try {
     const me = await authApi.getMe();
     setUser(me);

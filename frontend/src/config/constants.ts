@@ -276,8 +276,10 @@ export const API_ENDPOINTS = {
     roll: '/spin/roll',
     retry: '/spin/retry',
     collect: '/spin/collect',
+    restoreStreak: '/spin/restore-streak',
     devReset: '/spin/dev/reset',
     devSetStreak: '/spin/dev/set-streak',
+    devSetFrozenStreak: '/spin/dev/set-frozen-streak',
   },
   fragments: {
     drops: '/fragments/drops',
