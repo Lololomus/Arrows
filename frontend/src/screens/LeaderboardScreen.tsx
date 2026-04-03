@@ -160,18 +160,19 @@ type SeasonGiftRow = {
   rank: number;
   medal: string;
   giftName: string;
+  prizeValue: string;
   gradientClass: string;
   borderClass: string;
   nameClass: string;
 };
 
 const SEASON_GIFT_ROWS: readonly SeasonGiftRow[] = [
-  { rank: 1, medal: '🥇', giftName: 'Precious Peach',  gradientClass: 'from-yellow-500/25 via-yellow-900/15 to-transparent', borderClass: 'border-yellow-500/40', nameClass: 'text-yellow-300' },
-  { rank: 2, medal: '🥈', giftName: 'Heroic Helmet',   gradientClass: 'from-slate-400/20 via-slate-700/10 to-transparent',   borderClass: 'border-gray-400/35',    nameClass: 'text-gray-200'   },
-  { rank: 3, medal: '🥉', giftName: 'Astral Shard',    gradientClass: 'from-orange-500/25 via-orange-900/15 to-transparent', borderClass: 'border-orange-500/35',  nameClass: 'text-orange-300' },
-  { rank: 4, medal: '',   giftName: 'Loot Bag',         gradientClass: 'from-yellow-500/15 to-transparent',                  borderClass: 'border-yellow-500/20',  nameClass: 'text-yellow-200' },
-  { rank: 5, medal: '',   giftName: 'Perfume Bottle',   gradientClass: 'from-yellow-500/10 to-transparent',                  borderClass: 'border-yellow-500/15',  nameClass: 'text-yellow-200' },
-  { rank: 6, medal: '',   giftName: 'Ion Gem',          gradientClass: 'from-yellow-500/10 to-transparent',                  borderClass: 'border-yellow-500/10',  nameClass: 'text-yellow-200' },
+  { rank: 1, medal: '🥇', giftName: 'Precious Peach',  prizeValue: '~$500', gradientClass: 'from-yellow-500/25 via-yellow-900/15 to-transparent', borderClass: 'border-yellow-500/40', nameClass: 'text-yellow-300' },
+  { rank: 2, medal: '🥈', giftName: 'Heroic Helmet',   prizeValue: '~$270', gradientClass: 'from-slate-400/20 via-slate-700/10 to-transparent',   borderClass: 'border-gray-400/35',    nameClass: 'text-gray-200'   },
+  { rank: 3, medal: '🥉', giftName: 'Astral Shard',    prizeValue: '~$230', gradientClass: 'from-orange-500/25 via-orange-900/15 to-transparent', borderClass: 'border-orange-500/35',  nameClass: 'text-orange-300' },
+  { rank: 4, medal: '',   giftName: 'Loot Bag',         prizeValue: '~$180', gradientClass: 'from-yellow-500/15 to-transparent',                  borderClass: 'border-yellow-500/20',  nameClass: 'text-yellow-200' },
+  { rank: 5, medal: '',   giftName: 'Perfume Bottle',   prizeValue: '~$120', gradientClass: 'from-yellow-500/10 to-transparent',                  borderClass: 'border-yellow-500/15',  nameClass: 'text-yellow-200' },
+  { rank: 6, medal: '',   giftName: 'Ion Gem',          prizeValue: '~$105', gradientClass: 'from-yellow-500/10 to-transparent',                  borderClass: 'border-yellow-500/10',  nameClass: 'text-yellow-200' },
 ];
 
 type SeasonPrizeGroup = {
@@ -473,6 +474,7 @@ const SeasonInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose: (
                       <span className={`font-black flex-1 ${row.rank <= 3 ? 'text-base' : 'text-sm'} ${row.nameClass}`}>
                         {row.giftName}
                       </span>
+                      <span className="text-white/40 text-xs font-semibold shrink-0">{row.prizeValue}</span>
                     </div>
                   ))}
                 </div>

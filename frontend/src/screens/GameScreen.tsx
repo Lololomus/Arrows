@@ -18,7 +18,7 @@ import { useMotionValue, motion } from 'framer-motion';
 import { useAppStore, useGameStore } from '../stores/store';
 import { useRewardStore } from '../stores/rewardStore';
 import { CanvasBoard } from '../components/CanvasBoard';
-import { ApiError, adsApi, gameApi, handleApiError, sendAuthorizedKeepalive, type CompleteAndNextResponse } from '../api/client';
+import { ApiError, adsApi, authApi, gameApi, handleApiError, sendAuthorizedKeepalive, type CompleteAndNextResponse } from '../api/client';
 import { isValidInterstitialBlockId, isValidRewardedBlockId, showInterstitialAd, showRewardedAd } from '../services/adsgram';
 import { getRewardedFlowMessage } from '../services/rewardedAds';
 import { clearPendingRewardIntent, rememberPendingRewardIntent } from '../services/rewardReconciler';
@@ -810,6 +810,17 @@ export function GameScreen() {
         return;
       }
       if (error?.status === 404) { setNoMoreLevels(true); setStatus('victory'); }
+      else if (error?.status === 403 && error?.code === 'LEVEL_NOT_UNLOCKED') {
+        try {
+          const freshUser = await authApi.getMe();
+          useAppStore.getState().setUser(freshUser);
+          const correctLevel = freshUser.currentLevel ?? 1;
+          hasInitialLevelSyncRef.current = false;
+          setCurrentLevel(correctLevel);
+        } catch {
+          alert(handleApiError(error)); setScreen('home');
+        }
+      }
       else { alert(handleApiError(error)); setScreen('home'); }
     }
   }, [cancelAutoSolve, initLevel, setStatus, setScreen, setDailyMode]);
