@@ -226,10 +226,8 @@ mkdir -p "$LEVELS_HOST_DIR"
 if [[ ! -w "$LEVELS_HOST_DIR" ]]; then
   die "Levels directory is not writable: $LEVELS_HOST_DIR"
 fi
-if [[ -z "$(ls -A "$LEVELS_HOST_DIR" 2>/dev/null)" ]]; then
-  cp -a backend/app/levels/. "$LEVELS_HOST_DIR/"
-  echo "==> Seeded host levels directory from repository"
-fi
+cp -af backend/app/levels/. "$LEVELS_HOST_DIR/"
+echo "==> Synced host levels directory from repository"
 chown -R 1000:1000 "$LEVELS_HOST_DIR" 2>/dev/null || warn "Could not chown $LEVELS_HOST_DIR to uid 1000"
 
 echo "==> Building and starting containers (mode: $MODE)"

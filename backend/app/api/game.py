@@ -563,9 +563,6 @@ async def get_level(
     if level_num != user.current_level and not allow_locked:
         raise api_error(403, "LEVEL_NOT_UNLOCKED", "Level not unlocked")
 
-    if level_num > settings.MAX_AVAILABLE_LEVEL:
-        raise api_error(404, "LEVEL_NOT_FOUND", "Level not found")
-
     level_data = get_cached_level(level_num)
     if not level_data:
         raise api_error(404, "LEVEL_NOT_FOUND", "Level not found")

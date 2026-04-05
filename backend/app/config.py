@@ -90,8 +90,6 @@ class Settings(BaseSettings):
     COINS_REWARD_HARD: int = 5
     COINS_REWARD_EXTREME: int = 25
     COINS_REWARD_IMPOSSIBLE: int = 50
-    MAX_AVAILABLE_LEVEL: int = 1499
-    
     # Rewards
     BASE_COINS_PER_LEVEL: int = 10
     REFERRAL_REWARD_INVITER: int = 50     # inviter получает, когда invitee достигнет уровня подтверждения
