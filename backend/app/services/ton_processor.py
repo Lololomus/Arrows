@@ -22,6 +22,7 @@ from sqlalchemy import select
 from ..config import settings
 from ..database import AsyncSessionLocal
 from ..models import User, Transaction
+from .case_logic import determine_rarity, grant_case_rewards
 
 logger = logging.getLogger(__name__)
 
@@ -212,8 +213,11 @@ async def _grant_and_complete(tx_id: int, user_id: int, item_id: str, tx_hash: s
                 logger.error("ton_processor: user %d not found for tx %d", user_id, tx_id)
                 return
 
-            # Apply item
-            if item_id == "extra_life":
+            # Apply item / reward
+            if tx.item_type == "cases" and tx.item_id == "standard":
+                rarity = determine_rarity(user.case_pity_counter)
+                await grant_case_rewards(user, rarity, "ton", db, transaction_id=tx.id)
+            elif item_id == "extra_life":
                 if user.extra_lives < 2:
                     user.extra_lives += 1
                 else:
@@ -225,7 +229,4 @@ async def _grant_and_complete(tx_id: int, user_id: int, item_id: str, tx_hash: s
             tx.status = "completed"
             tx.ton_tx_hash = tx_hash
 
-    logger.info(
-        "ton_processor: tx %d completed — user %d extra_lives=%s",
-        tx_id, user_id, user.extra_lives,
-    )
+    logger.info("ton_processor: tx %d completed for user %d item=%s", tx_id, user_id, item_id)

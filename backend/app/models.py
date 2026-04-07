@@ -67,6 +67,10 @@ class User(Base):
     wallet_address = Column(String(128), nullable=True, unique=True, index=True)
     wallet_connected_at = Column(DateTime, nullable=True)
 
+    # Кейсы
+    stars_balance = Column(Integer, nullable=False, server_default="0")
+    case_pity_counter = Column(Integer, nullable=False, server_default="0")
+
     # Ежедневная рулетка
     login_streak = Column(Integer, default=0)
     last_spin_date = Column(Date, nullable=True)
@@ -96,6 +100,7 @@ class User(Base):
     transactions = relationship("Transaction", back_populates="user")
     referrals_sent = relationship("Referral", foreign_keys="Referral.inviter_id", back_populates="inviter")
     referral_received = relationship("Referral", foreign_keys="Referral.invitee_id", back_populates="invitee", uselist=False)
+    stars_withdrawals = relationship("StarsWithdrawal", back_populates="user")
     
     def to_dict(self):
         return {
@@ -119,6 +124,8 @@ class User(Base):
             "referrals_count": self.referrals_count,
             "referrals_pending": self.referrals_pending,
             "wallet_address": self.wallet_address,
+            "stars_balance": self.stars_balance,
+            "case_pity_counter": self.case_pity_counter,
         }
 
 
@@ -212,6 +219,34 @@ class Transaction(Base):
     
     # Relationship
     user = relationship("User", back_populates="transactions")
+
+
+# ============================================
+# STARS WITHDRAWAL
+# ============================================
+
+class StarsWithdrawal(Base):
+    """Заявка пользователя на вывод накопленных Stars."""
+
+    __tablename__ = "stars_withdrawals"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Снапшот данных пользователя на момент заявки
+    telegram_id = Column(BigInteger, nullable=False)
+    username = Column(String(64), nullable=True)
+
+    amount = Column(Integer, nullable=False)
+
+    # pending → completed | rejected
+    status = Column(String(16), nullable=False, server_default="pending", index=True)
+    admin_note = Column(String(256), nullable=True)
+
+    created_at = Column(DateTime, server_default=func.now())
+    completed_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="stars_withdrawals")
 
 
 # ============================================
@@ -533,4 +568,29 @@ class UserbotStarsLedger(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     order = relationship("UserbotGiftOrder")
+
+
+# ============================================
+# CASE OPENINGS
+# ============================================
+
+class CaseOpening(Base):
+    """Запись об открытии кейса."""
+
+    __tablename__ = "case_openings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    transaction_id = Column(Integer, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    rarity = Column(String(16), nullable=False)           # 'common' | 'rare' | 'epic' | 'epic_stars'
+    hints_given = Column(Integer, nullable=False)
+    revives_given = Column(Integer, nullable=False)
+    coins_given = Column(Integer, nullable=False)
+    stars_given = Column(Integer, nullable=False)
+    payment_currency = Column(String(8), nullable=False)  # 'stars' | 'ton'
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    user = relationship("User")
 

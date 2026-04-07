@@ -4,8 +4,11 @@ Arrow Puzzle - Shop API
 Магазин: скины, темы, бусты, покупки.
 """
 
+import json
 import logging
 from typing import List, Optional
+
+import aiohttp
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -14,13 +17,24 @@ from sqlalchemy.exc import IntegrityError
 logger = logging.getLogger(__name__)
 
 from ..config import settings
-from ..database import get_db
-from ..models import User, Inventory, Transaction
+from ..database import get_db, get_redis
+from ..models import User, Inventory, Transaction, StarsWithdrawal
 from ..schemas import (
     ShopItem, ShopCatalog, PurchaseRequest, PurchaseResponse,
-    TonPaymentInfo, TransactionStatusResponse
+    TonPaymentInfo, TransactionStatusResponse,
+    CaseInfo, CaseOpenResult, CaseStarsBalance,
+    WithdrawStarsRequest, WithdrawalResponse, WithdrawalListResponse,
 )
 from ..services.ton_verify import verify_ton_transaction
+from ..services.case_logic import (
+    CASE_PRICE_STARS,
+    CASE_PRICE_TON,
+    PITY_THRESHOLD,
+    determine_rarity,
+    get_case_result_for_transaction,
+    get_recent_case_result,
+    grant_case_rewards,
+)
 from .error_utils import api_error
 from .auth import get_current_user
 
@@ -46,6 +60,10 @@ ARROW_SKINS = [
 
 BETA_VISIBLE_BOOST_IDS = {"hints_1", "revive_1"}
 TON_VISIBLE_UPGRADE_IDS = {"extra_life"}
+BULK_DISCOUNT_TIERS = (
+    {"min_quantity": 3, "percent": 5},
+    {"min_quantity": 5, "percent": 10},
+)
 
 # Темы оформления
 THEMES = [
@@ -60,8 +78,20 @@ THEMES = [
 
 # Бусты
 BOOSTS = [
-    {"id": "hints_1", "name": "+1 подсказка", "price_coins": 25, "preview": "💡"},
-    {"id": "revive_1", "name": "+1 возрождение", "price_coins": 50, "preview": "❤️"},
+    {
+        "id": "hints_1",
+        "name": "+1 подсказка",
+        "price_coins": 50,
+        "discount_tiers": BULK_DISCOUNT_TIERS,
+        "preview": "💡",
+    },
+    {
+        "id": "revive_1",
+        "name": "+1 возрождение",
+        "price_coins": 100,
+        "discount_tiers": BULK_DISCOUNT_TIERS,
+        "preview": "❤️",
+    },
     {"id": "life_1", "name": "+1 жизнь", "price_coins": 100, "preview": "❤️"},
     {"id": "energy_5", "name": "+5 энергии", "price_stars": 20, "preview": "⚡"},
     {"id": "energy_full", "name": "Полная энергия", "price_stars": 40, "preview": "⚡"},
@@ -95,6 +125,33 @@ def get_item_by_id(item_type: str, item_id: str) -> Optional[dict]:
     return None
 
 
+def get_discount_percent(item: dict, quantity: int) -> int:
+    tiers = item.get("discount_tiers") or []
+    discount_percent = 0
+
+    for tier in tiers:
+        min_quantity = int(tier.get("min_quantity", 0))
+        percent = int(tier.get("percent", 0))
+        if quantity >= min_quantity and percent > discount_percent:
+            discount_percent = percent
+
+    return discount_percent
+
+
+def calculate_coin_total_price(item: dict, quantity: int) -> int:
+    unit_price = item.get("price_coins")
+    if unit_price is None:
+        raise ValueError("Item does not have a coin price")
+
+    subtotal = int(unit_price) * quantity
+    discount_percent = get_discount_percent(item, quantity)
+    if discount_percent <= 0:
+        return subtotal
+
+    # Keep prices integer-only and match the frontend rounding behavior.
+    return subtotal * (100 - discount_percent) // 100
+
+
 # ============================================
 # ENDPOINTS
 # ============================================
@@ -123,6 +180,7 @@ async def get_catalog(
             price_coins=item.get("price_coins"),
             price_stars=item.get("price_stars"),
             price_ton=item.get("price_ton"),
+            discount_tiers=list(item.get("discount_tiers") or []),
             preview=item.get("preview"),
             owned=(item_type, item["id"]) in owned_items
         )
@@ -182,7 +240,7 @@ async def purchase_item(
     
     # Проверяем баланс
     quantity = request.quantity if request.item_type == "boosts" else 1
-    total_price = price * quantity
+    total_price = calculate_coin_total_price(item, quantity)
 
     if user.coins < total_price:
         return PurchaseResponse(success=False, error="NOT_ENOUGH_COINS")
@@ -437,6 +495,369 @@ async def confirm_ton_transaction(
     if tx.item_id == "extra_life":
         resp["extra_lives"] = user.extra_lives
     return resp
+
+
+# ============================================
+# CASE ENDPOINTS
+# ============================================
+
+@router.get("/cases/info", response_model=CaseInfo)
+async def get_case_info(
+    user: User = Depends(get_current_user),
+):
+    """Информация о кейсе и текущий счётчик пити."""
+    return CaseInfo(
+        id="standard",
+        name="Стандартный Кейс",
+        price_stars=CASE_PRICE_STARS,
+        price_ton=CASE_PRICE_TON,
+        pity_counter=user.case_pity_counter,
+        pity_threshold=PITY_THRESHOLD,
+    )
+
+
+@router.post("/cases/invoice/stars")
+async def create_case_stars_invoice(
+    user: User = Depends(get_current_user),
+):
+    """Создать ссылку на Telegram Stars invoice для покупки кейса."""
+    import httpx
+
+    bot_token = settings.BOT_TOKEN or settings.TELEGRAM_BOT_TOKEN
+    if not bot_token:
+        raise api_error(503, "BOT_NOT_CONFIGURED", "Bot token is not configured")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            f"https://api.telegram.org/bot{bot_token}/createInvoiceLink",
+            json={
+                "title": "Стандартный Кейс",
+                "description": "Открой кейс и получи случайную награду",
+                "payload": "case:standard",
+                "currency": "XTR",
+                "prices": [{"label": "Стандартный Кейс", "amount": CASE_PRICE_STARS}],
+            },
+        )
+
+    data = resp.json()
+    if not data.get("ok"):
+        raise api_error(502, "INVOICE_CREATION_FAILED", str(data.get("description", "Unknown error")))
+
+    return {"invoice_url": data["result"]}
+
+
+@router.post("/cases/open/dev")
+async def open_case_dev(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """DEV ONLY — открыть кейс без оплаты. Не работает в продакшне."""
+    if settings.ENVIRONMENT != "development":
+        raise api_error(403, "DEV_ONLY", "This endpoint is only available in development")
+
+    user_result = await db.execute(
+        select(User).where(User.id == user.id).with_for_update()
+    )
+    user = user_result.scalar_one()
+
+    rarity = determine_rarity(user.case_pity_counter)
+    case_result = await grant_case_rewards(user, rarity, "dev", db)
+    await db.commit()
+
+    return {"status": "completed", "case_result": case_result}
+
+
+@router.post("/cases/open/ton", response_model=TonPaymentInfo)
+async def open_case_ton(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Инициировать TON-платёж для открытия кейса."""
+    if not ton_payments_enabled():
+        raise api_error(403, "TON_PAYMENTS_DISABLED", "TON payments are currently disabled")
+
+    # Reuse existing pending case transaction
+    pending = await db.execute(
+        select(Transaction)
+        .where(
+            Transaction.user_id == user.id,
+            Transaction.item_type == "cases",
+            Transaction.item_id == "standard",
+            Transaction.status == "pending",
+        )
+        .order_by(Transaction.created_at.desc())
+        .limit(1)
+    )
+    existing_tx = pending.scalar_one_or_none()
+    if existing_tx:
+        comment = f"arrow_{user.id}_{existing_tx.id}"
+        return TonPaymentInfo(
+            transaction_id=existing_tx.id,
+            address=settings.TON_WALLET_ADDRESS,
+            amount=CASE_PRICE_TON,
+            amount_nano=str(int(CASE_PRICE_TON * 1_000_000_000)),
+            comment=comment,
+        )
+
+    tx = Transaction(
+        user_id=user.id,
+        type="purchase",
+        currency="ton",
+        amount=CASE_PRICE_TON,
+        item_type="cases",
+        item_id="standard",
+        status="pending",
+    )
+    db.add(tx)
+    await db.commit()
+    await db.refresh(tx)
+
+    comment = f"arrow_{user.id}_{tx.id}"
+    return TonPaymentInfo(
+        transaction_id=tx.id,
+        address=settings.TON_WALLET_ADDRESS,
+        amount=CASE_PRICE_TON,
+        amount_nano=str(int(CASE_PRICE_TON * 1_000_000_000)),
+        comment=comment,
+    )
+
+
+@router.post("/cases/ton/{tx_id}/confirm")
+async def confirm_case_ton(
+    tx_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Проверить TON-транзакцию и открыть кейс при успехе."""
+    # Read without lock first — avoid holding row lock during external HTTP call
+    result = await db.execute(
+        select(Transaction)
+        .where(Transaction.id == tx_id, Transaction.user_id == user.id)
+    )
+    tx = result.scalar_one_or_none()
+    if not tx:
+        raise api_error(404, "TRANSACTION_NOT_FOUND", "Transaction not found")
+
+    # Idempotent: already completed
+    if tx.status == "completed":
+        case_result = await get_case_result_for_transaction(tx.id, user=user, db=db)
+        return {"transaction_id": tx.id, "status": "completed", "verified": True, "case_result": case_result}
+
+    if tx.status != "pending":
+        raise api_error(409, "TRANSACTION_NOT_PENDING", "Transaction is not pending")
+
+    comment = f"arrow_{user.id}_{tx.id}"
+    amount_nano = int(float(tx.amount) * 1_000_000_000)
+
+    match = await verify_ton_transaction(
+        expected_address=settings.TON_WALLET_ADDRESS,
+        expected_amount_nano=amount_nano,
+        expected_comment=comment,
+    )
+
+    if not match:
+        return {"transaction_id": tx.id, "status": "pending", "verified": False}
+
+    # Re-acquire TX with lock after external call and re-check status
+    result = await db.execute(
+        select(Transaction)
+        .where(Transaction.id == tx_id, Transaction.user_id == user.id)
+        .with_for_update()
+    )
+    tx = result.scalar_one_or_none()
+    if not tx or tx.status == "completed":
+        case_result = await get_case_result_for_transaction(tx_id, user=user, db=db)
+        return {"transaction_id": tx_id, "status": "completed", "verified": True, "case_result": case_result}
+    if tx.status != "pending":
+        raise api_error(409, "TRANSACTION_NOT_PENDING", "Transaction is not pending")
+
+    # Lock user row and grant rewards
+    user_result = await db.execute(
+        select(User).where(User.id == user.id).with_for_update()
+    )
+    user = user_result.scalar_one()
+
+    rarity = determine_rarity(user.case_pity_counter)
+    case_result = await grant_case_rewards(user, rarity, "ton", db, transaction_id=tx.id)
+
+    tx.status = "completed"
+    tx.ton_tx_hash = match["tx_hash"]
+    await db.commit()
+
+    return {
+        "transaction_id": tx.id,
+        "status": "completed",
+        "verified": True,
+        "case_result": case_result,
+    }
+
+
+@router.get("/cases/result")
+async def poll_case_result(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Опрос результата открытия кейса через Stars.
+    Webhook записывает результат в Redis; фронтенд читает здесь.
+    Возвращает {status: 'pending'} пока webhook ещё не обработан.
+    """
+    redis = await get_redis()
+    if redis is not None:
+        raw = await redis.get(f"case_result:{user.id}")
+        if raw:
+            result = json.loads(raw)
+            await redis.delete(f"case_result:{user.id}")
+            # Remember the opening_id so DB fallback won't re-serve it
+            opening_id = result.get("opening_id")
+            if opening_id is not None:
+                await redis.setex(
+                    f"case_consumed:{user.id}", 900, str(opening_id),
+                )
+            return {"status": "ready", "case_result": result}
+
+    fallback_result = await get_recent_case_result(
+        user=user, payment_currency="stars", db=db,
+    )
+    if fallback_result is None:
+        return {"status": "pending"}
+
+    # Guard against returning a previously consumed result
+    if redis is not None:
+        consumed_raw = await redis.get(f"case_consumed:{user.id}")
+        if consumed_raw and str(fallback_result.get("opening_id")) == consumed_raw.decode():
+            return {"status": "pending"}
+
+    return {"status": "ready", "case_result": fallback_result}
+
+
+@router.get("/stars/balance", response_model=CaseStarsBalance)
+async def get_stars_balance(
+    user: User = Depends(get_current_user),
+):
+    """Баланс накопленных Stars пользователя."""
+    return CaseStarsBalance(stars_balance=user.stars_balance)
+
+
+@router.post("/stars/withdraw", response_model=WithdrawalResponse)
+async def withdraw_stars(
+    body: WithdrawStarsRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Создать заявку на вывод Stars."""
+    if body.amount < settings.STARS_WITHDRAWAL_MIN:
+        raise api_error(
+            422, "WITHDRAWAL_TOO_SMALL",
+            f"Минимальная сумма вывода — {settings.STARS_WITHDRAWAL_MIN} Stars",
+        )
+    locked_user = (
+        await db.execute(
+            select(User)
+            .where(User.id == user.id)
+            .with_for_update()
+        )
+    ).scalar_one()
+    if locked_user.stars_balance < body.amount:
+        raise api_error(409, "INSUFFICIENT_STARS", "Недостаточно Stars для вывода")
+
+    locked_user.stars_balance -= body.amount
+
+    withdrawal = StarsWithdrawal(
+        user_id=locked_user.id,
+        telegram_id=locked_user.telegram_id,
+        username=locked_user.username,
+        amount=body.amount,
+        status="pending",
+    )
+    db.add(withdrawal)
+    await db.flush()
+
+
+    # Уведомление администратору через бота (не блокирует ответ)
+    try:
+        await _notify_admin_withdrawal(withdrawal, locked_user)
+    except Exception as exc:
+        logger.exception("Failed to notify admin about withdrawal %s", withdrawal.id)
+        await db.rollback()
+        raise api_error(
+            503,
+            "WITHDRAWALS_UNAVAILABLE",
+            "Вывод Stars временно недоступен. Попробуйте позже.",
+        ) from exc
+
+    await db.commit()
+    await db.refresh(withdrawal)
+
+    return WithdrawalResponse(
+        id=withdrawal.id,
+        amount=withdrawal.amount,
+        status=withdrawal.status,
+        created_at=withdrawal.created_at,
+    )
+
+
+async def _notify_admin_withdrawal(withdrawal: StarsWithdrawal, user: User) -> None:
+    """Отправить уведомление о заявке на вывод администратору через бота."""
+    chat_id = settings.ADMIN_ALERT_CHAT_ID
+    if not chat_id:
+        raise RuntimeError("ADMIN_ALERT_CHAT_ID is not configured")
+    if not settings.TELEGRAM_BOT_TOKEN:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is not configured")
+
+    username_part = f"@{user.username}" if user.username else f"tg_id: {user.telegram_id}"
+    text = (
+        f"⭐ <b>Заявка на вывод Stars</b> #{withdrawal.id}\n"
+        f"Пользователь: {username_part}\n"
+        f"Сумма: <b>{withdrawal.amount} Stars</b>\n\n"
+        f"Переведи с Support-аккаунта и подтверди:"
+    )
+    keyboard = {
+        "inline_keyboard": [[
+            {"text": "✅ Отправлено", "callback_data": f"withdrawal_confirm:{withdrawal.id}"},
+            {"text": "❌ Отклонить", "callback_data": f"withdrawal_reject:{withdrawal.id}"},
+        ]]
+    }
+
+    url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "reply_markup": keyboard,
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload) as response:
+            response.raise_for_status()
+            data = await response.json()
+    if not data.get("ok"):
+        raise RuntimeError(f"Telegram sendMessage failed: {data!r}")
+
+
+@router.get("/stars/withdrawals", response_model=WithdrawalListResponse)
+async def get_withdrawals(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """История заявок на вывод Stars пользователя."""
+    result = await db.execute(
+        select(StarsWithdrawal)
+        .where(StarsWithdrawal.user_id == user.id)
+        .order_by(StarsWithdrawal.created_at.desc())
+        .limit(20)
+    )
+    withdrawals = result.scalars().all()
+    return WithdrawalListResponse(
+        withdrawals=[
+            WithdrawalResponse(
+                id=w.id,
+                amount=w.amount,
+                status=w.status,
+                created_at=w.created_at,
+            )
+            for w in withdrawals
+        ]
+    )
 
 
 @router.post("/equip/{item_type}/{item_id}")

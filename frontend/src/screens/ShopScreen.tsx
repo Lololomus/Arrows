@@ -3,14 +3,16 @@ import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useTonConnectUI } from '@tonconnect/ui-react';
 import { Coins, Diamond, Heart, Lightbulb, Minus, Plus, RefreshCcw, ShoppingBag } from 'lucide-react';
-import { handleApiError, shopApi } from '../api/client';
+import { caseApi, handleApiError, shopApi } from '../api/client';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { HeaderBar } from '../components/ui/HeaderBar';
-import type { ShopItem } from '../game/types';
+import type { CaseInfo, CaseOpenResult, ShopDiscountTier, ShopItem } from '../game/types';
 import { getErrorCodeMessage } from '../i18n/content';
 import { formatNumber, translate } from '../i18n';
 import { useWalletConnectionController } from '../hooks/useWalletConnectionController';
 import { useAppStore } from '../stores/store';
+import { CaseOpenModal } from './game-screen/CaseOpenModal';
+import { WithdrawalModal } from './game-screen/WithdrawalModal';
 
 function buildCommentPayload(comment: string): string {
   const encoder = new TextEncoder();
@@ -86,18 +88,21 @@ function clearPendingTxId(): void {
 
 const BOOST_UI: Record<BoostId, {
   priceFallback: number;
+  discountTiersFallback: ShopDiscountTier[];
   iconWrapClass: string;
   iconClass: string;
   buttonClass: string;
 }> = {
   hints_1: {
-    priceFallback: 25,
+    priceFallback: 50,
+    discountTiersFallback: [{ minQuantity: 3, percent: 5 }, { minQuantity: 5, percent: 10 }],
     iconWrapClass: 'border-cyan-500/20 bg-cyan-500/10',
     iconClass: 'text-cyan-400',
     buttonClass: 'bg-cyan-500 hover:bg-cyan-400',
   },
   revive_1: {
-    priceFallback: 50,
+    priceFallback: 100,
+    discountTiersFallback: [{ minQuantity: 3, percent: 5 }, { minQuantity: 5, percent: 10 }],
     iconWrapClass: 'border-rose-500/20 bg-rose-500/10',
     iconClass: 'text-rose-400',
     buttonClass: 'bg-rose-500 hover:bg-rose-400',
@@ -112,6 +117,31 @@ function normalizeBoosts(items: ShopItem[]): Array<ShopItem & { id: BoostId }> {
   return items.filter((item): item is ShopItem & { id: BoostId } =>
     BOOST_IDS.includes(item.id as BoostId),
   );
+}
+
+function getBoostDiscountTiers(item: ShopItem & { id: BoostId }): ShopDiscountTier[] {
+  return item.discountTiers?.length
+    ? item.discountTiers
+    : BOOST_UI[item.id].discountTiersFallback;
+}
+
+function getBoostDiscountPercent(item: ShopItem & { id: BoostId }, quantity: number): number {
+  return getBoostDiscountTiers(item).reduce((currentDiscount, tier) => (
+    quantity >= tier.minQuantity && tier.percent > currentDiscount
+      ? tier.percent
+      : currentDiscount
+  ), 0);
+}
+
+function calculateBoostTotalPrice(item: ShopItem & { id: BoostId }, quantity: number): number {
+  const unitPrice = item.priceCoins ?? BOOST_UI[item.id].priceFallback;
+  const subtotal = unitPrice * quantity;
+  const discountPercent = getBoostDiscountPercent(item, quantity);
+  if (discountPercent <= 0) {
+    return subtotal;
+  }
+
+  return Math.floor(subtotal * (100 - discountPercent) / 100);
 }
 
 function isWalletRejection(message: string): boolean {
@@ -141,7 +171,10 @@ function BoostCard({
   const { t } = useTranslation();
   const config = BOOST_UI[boostId];
   const unitPrice = item.priceCoins ?? config.priceFallback;
-  const totalPrice = unitPrice * quantity;
+  const discountTiers = getBoostDiscountTiers(item);
+  const baseTotalPrice = unitPrice * quantity;
+  const discountPercent = getBoostDiscountPercent(item, quantity);
+  const totalPrice = calculateBoostTotalPrice(item, quantity);
   const insufficientCoins = totalPrice > coinBalance;
   const Icon = boostId === 'hints_1' ? Lightbulb : Heart;
 
@@ -159,6 +192,25 @@ function BoostCard({
           <h2 className="text-xl font-bold text-[#f7f8fb]">{item.name}</h2>
           <p className="mt-1 text-sm leading-relaxed text-[#a7abb8]">{item.description}</p>
         </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold text-[#8d93a3]">
+        <span className="rounded-full border border-white/8 bg-white/[0.04] px-2.5 py-1">
+          {t('shop:pricing.perUnit', { price: formatNumber(unitPrice) })}
+        </span>
+        {discountTiers.map((tier) => (
+          <span
+            key={`${boostId}-${tier.minQuantity}-${tier.percent}`}
+            className="rounded-full border border-amber-400/20 bg-amber-500/10 px-2.5 py-1 text-amber-100"
+          >
+            {t('shop:pricing.discountTier', { quantity: formatNumber(tier.minQuantity), percent: tier.percent })}
+          </span>
+        ))}
+        {discountPercent > 0 && (
+          <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1 text-emerald-200">
+            {t('shop:pricing.discountApplied', { percent: discountPercent })}
+          </span>
+        )}
       </div>
 
       <div className="mt-6 flex items-center gap-4">
@@ -198,6 +250,9 @@ function BoostCard({
               <div className="mx-1 h-4 w-px bg-black/20" />
               <div className="flex items-center gap-1.5">
                 <Coins size={16} className="text-amber-300 drop-shadow-sm" />
+                {discountPercent > 0 && (
+                  <span className="text-xs text-white/70 line-through">{formatNumber(baseTotalPrice)}</span>
+                )}
                 <span>{formatNumber(totalPrice)}</span>
               </div>
             </>
@@ -225,6 +280,12 @@ export function ShopScreen() {
   const [tonStatus, setTonStatus] = useState<string | null>(null);
   const [quantities, setQuantities] = useState<QuantityState>({ hints_1: 1, revive_1: 1 });
 
+  // Case system
+  const [caseInfo, setCaseInfo] = useState<CaseInfo | null>(null);
+  const [caseModalOpen, setCaseModalOpen] = useState(false);
+  const [caseCurrency, setCaseCurrency] = useState<'stars' | 'ton'>('stars');
+  const [withdrawalOpen, setWithdrawalOpen] = useState(false);
+
   const coinBalance = user?.coins ?? 0;
   const hintBalance = user?.hintBalance ?? 0;
   const reviveBalance = user?.reviveBalance ?? 0;
@@ -234,10 +295,22 @@ export function ShopScreen() {
     setError(null);
 
     try {
-      const catalog = await shopApi.getCatalog();
-      setItems(normalizeBoosts(catalog.boosts));
-      setTonItems([...catalog.arrowSkins, ...catalog.themes].filter((item) => item.priceTon != null));
-      setUpgrades(catalog.upgrades ?? []);
+      const [catalog, info] = await Promise.allSettled([
+        shopApi.getCatalog(),
+        caseApi.getInfo(),
+      ]);
+
+      if (catalog.status === 'fulfilled') {
+        setItems(normalizeBoosts(catalog.value.boosts));
+        setTonItems([...catalog.value.arrowSkins, ...catalog.value.themes].filter((item) => item.priceTon != null));
+        setUpgrades(catalog.value.upgrades ?? []);
+      } else {
+        throw catalog.reason;
+      }
+
+      if (info.status === 'fulfilled') {
+        setCaseInfo(info.value);
+      }
     } catch (catalogError) {
       setError(handleApiError(catalogError));
       setItems([]);
@@ -262,8 +335,7 @@ export function ShopScreen() {
   }, []);
 
   const handlePurchase = useCallback(async (item: ShopItem & { id: BoostId }, quantity: number) => {
-    const unitPrice = item.priceCoins ?? BOOST_UI[item.id].priceFallback;
-    if (purchasingId || unitPrice * quantity > coinBalance) return;
+    if (purchasingId || calculateBoostTotalPrice(item, quantity) > coinBalance) return;
 
     setPurchasingId(item.id);
     setPurchaseError(null);
@@ -472,6 +544,91 @@ export function ShopScreen() {
               </div>
             )}
 
+            {/* ── Case section ── */}
+            {caseInfo && (
+              <section className="mb-5">
+                <div className="pl-1 mb-3 text-sm font-bold uppercase tracking-[0.18em] text-[#677086]">
+                  {t('shop:cases.sectionTitle')}
+                </div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-[24px] border border-amber-500/20 bg-gradient-to-br from-[#1a1612]/90 to-[#0f0d0a]/90 p-5 backdrop-blur-md shadow-[0_8px_24px_rgba(0,0,0,0.3)]"
+                >
+                  <div className="flex items-start gap-4">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-amber-500/25 bg-amber-500/10 text-3xl">
+                      🎁
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h2 className="text-lg font-bold text-[#f7f8fb]">{t('shop:cases.name')}</h2>
+                      <p className="mt-0.5 text-sm text-[#a7abb8]">{t('shop:cases.description')}</p>
+                      {(user?.starsBalance ?? 0) > 0 && (
+                        <div className="mt-1 flex items-center gap-2">
+                          <p className="text-xs text-yellow-400/80">
+                            ⭐ {t('shop:cases.starsBalance', { count: user?.starsBalance ?? 0 })}
+                          </p>
+                          {(user?.starsBalance ?? 0) >= 50 && (
+                            <button
+                              onClick={() => setWithdrawalOpen(true)}
+                              className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold transition-opacity hover:opacity-80 active:opacity-60"
+                              style={{
+                                background: 'linear-gradient(135deg,rgba(251,191,36,0.22),rgba(245,158,11,0.14))',
+                                border: '1px solid rgba(251,191,36,0.35)',
+                                color: 'rgba(251,191,36,0.95)',
+                              }}
+                            >
+                              ↑ {t('shop:cases.withdrawLink')}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Pity progress */}
+                  <div className="mt-4">
+                    <div className="flex justify-between text-xs text-gray-500 mb-1.5">
+                      <span>
+                        {caseInfo.pityCounter >= caseInfo.pityThreshold - 1
+                          ? t('shop:cases.pityMaxLabel')
+                          : t('shop:cases.pityLabel', { count: caseInfo.pityThreshold - caseInfo.pityCounter })}
+                      </span>
+                      <span className="text-gray-600">{caseInfo.pityCounter}/{caseInfo.pityThreshold}</span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-white/8 overflow-hidden">
+                      <motion.div
+                        className="h-full rounded-full bg-gradient-to-r from-amber-500 to-yellow-400"
+                        initial={{ width: 0 }}
+                        animate={{ width: `${Math.min(100, (caseInfo.pityCounter / caseInfo.pityThreshold) * 100)}%` }}
+                        transition={{ duration: 0.7, ease: 'easeOut', delay: 0.2 }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Payment buttons */}
+                  <div className="mt-4 flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => { setCaseCurrency('stars'); setCaseModalOpen(true); }}
+                      className="flex-1 py-3 rounded-2xl font-bold text-sm text-white transition-all active:scale-95"
+                      style={{ background: 'linear-gradient(135deg, #7C3AED, #4F46E5)' }}
+                    >
+                      ✨ {caseInfo.priceStars} ⭐
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setCaseCurrency('ton'); setCaseModalOpen(true); }}
+                      className="flex-1 py-3 rounded-2xl font-bold text-sm text-white transition-all active:scale-95"
+                      style={{ background: 'linear-gradient(135deg, #0EA5E9, #2563EB)' }}
+                    >
+                      💎 {caseInfo.priceTon} TON
+                    </button>
+                  </div>
+                </motion.div>
+              </section>
+            )}
+
             <section className="space-y-4">
               <div className="pl-1 text-sm font-bold uppercase tracking-[0.18em] text-[#677086]">{t('shop:consumables')}</div>
 
@@ -606,6 +763,42 @@ export function ShopScreen() {
           </div>
         )}
       </div>
+
+      {/* Case opening modal */}
+      {caseInfo && (
+        <CaseOpenModal
+          isOpen={caseModalOpen}
+          currency={caseCurrency}
+          caseInfo={caseInfo}
+          onClose={() => setCaseModalOpen(false)}
+          onOpenMore={(cur) => {
+            setCaseCurrency(cur);
+            setCaseModalOpen(false);
+            // Brief delay so the old modal fully exits before re-opening
+            setTimeout(() => setCaseModalOpen(true), 300);
+          }}
+          onRewardGranted={(result: CaseOpenResult) => {
+            updateUser({
+              hintBalance: result.hintBalance,
+              reviveBalance: result.reviveBalance,
+              coins: result.coins,
+              starsBalance: result.starsBalance,
+              casePityCounter: result.casePityCounter,
+            });
+            // Refresh pity counter on the case card
+            setCaseInfo((prev) => prev
+              ? { ...prev, pityCounter: result.casePityCounter }
+              : prev
+            );
+          }}
+        />
+      )}
+
+      {/* Stars withdrawal modal */}
+      <WithdrawalModal
+        isOpen={withdrawalOpen}
+        onClose={() => setWithdrawalOpen(false)}
+      />
     </div>
   );
 }

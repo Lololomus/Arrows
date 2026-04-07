@@ -29,6 +29,7 @@ from ..schemas import (
     RewardIntentCreateRequest,
     RewardIntentCreateResponse,
     RewardIntentStatusResponse,
+    TaskReviveStatus,
 )
 from ..services.ad_rewards import (
     FAILURE_DAILY_LIMIT_REACHED,
@@ -42,6 +43,7 @@ from ..services.ad_rewards import (
     PLACEMENT_REVIVE,
     REWARDED_PLACEMENTS,
     cancel_pending_intent,
+    count_task_revive_used_today,
     create_reward_intent,
     ensure_eligible,
     expire_stale_pending_intents,
@@ -51,6 +53,7 @@ from ..services.ad_rewards import (
     grant_intent,
     list_active_pending_intents,
     mark_expired,
+    next_reset_iso,
     serialize_create_intent,
     serialize_intent,
     today_msk,
@@ -74,6 +77,7 @@ async def get_ads_status(
         "resets_at": None,
     }
     resets_at = daily_status["resets_at"]
+    task_revive_used = await count_task_revive_used_today(db, user.id)
     return AdsStatusResponse(
         eligible=eligible,
         current_level=user.current_level,
@@ -84,6 +88,11 @@ async def get_ads_status(
         ),
         hint_ad_available=eligible and user.hint_balance == 0,
         hint_ad_reward=settings.AD_HINT_REWARD,
+        task_revive=TaskReviveStatus(
+            used=task_revive_used,
+            limit=1,
+            resets_at=next_reset_iso() if task_revive_used > 0 else "",
+        ),
     )
 
 

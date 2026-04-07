@@ -133,6 +133,9 @@ class Settings(BaseSettings):
     FRAGMENT_SENDING_TIMEOUT: int = 300
     FRAGMENT_STARS_LOW_THRESHOLD: int = 100
 
+    # Stars Withdrawal
+    STARS_WITHDRAWAL_MIN: int = 50
+
     # Telegram Userbot Gifts (MTProto)
     USERBOT_ENABLED: bool = False
     USERBOT_API_ID: int = 0

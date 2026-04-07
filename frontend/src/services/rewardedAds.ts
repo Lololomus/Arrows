@@ -210,6 +210,9 @@ function getPlacementFallbackMessage(placement: RewardPlacement): string {
   if (placement === 'reward_spin_retry') {
     return getErrorCodeMessage('SPIN_RETRY_NOT_AVAILABLE', translate('errors:generic.server'));
   }
+  if (placement === 'reward_task') {
+    return translate('errors:generic.server');
+  }
   return translate('errors:generic.server');
 }
 

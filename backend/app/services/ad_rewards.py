@@ -24,11 +24,13 @@ PLACEMENT_DAILY_COINS = "reward_daily_coins"
 PLACEMENT_HINT = "reward_hint"
 PLACEMENT_REVIVE = "reward_revive"
 PLACEMENT_SPIN_RETRY = "reward_spin_retry"
+PLACEMENT_TASK = "reward_task"
 REWARDED_PLACEMENTS = {
     PLACEMENT_DAILY_COINS,
     PLACEMENT_HINT,
     PLACEMENT_REVIVE,
     PLACEMENT_SPIN_RETRY,
+    PLACEMENT_TASK,
 }
 
 INTENT_STATUS_PENDING = "pending"
@@ -78,7 +80,7 @@ def ensure_eligible(user: User) -> None:
 
 
 def ensure_eligible_for_placement(user: User, placement: str) -> None:
-    if placement == PLACEMENT_SPIN_RETRY:
+    if placement in {PLACEMENT_SPIN_RETRY, PLACEMENT_TASK}:
         return
     ensure_eligible(user)
 
@@ -176,6 +178,17 @@ async def count_spin_retry_used_today(db: AsyncSession, user_id: int) -> int:
         select(func.count(AdRewardClaim.id)).where(
             AdRewardClaim.user_id == user_id,
             AdRewardClaim.placement == PLACEMENT_SPIN_RETRY,
+            AdRewardClaim.claim_day_msk == today_msk(),
+        )
+    )
+    return int(result.scalar_one())
+
+
+async def count_task_revive_used_today(db: AsyncSession, user_id: int) -> int:
+    result = await db.execute(
+        select(func.count(AdRewardClaim.id)).where(
+            AdRewardClaim.user_id == user_id,
+            AdRewardClaim.placement == PLACEMENT_TASK,
             AdRewardClaim.claim_day_msk == today_msk(),
         )
     )
@@ -337,6 +350,10 @@ async def create_reward_intent(
             raise HTTPException(status_code=409, detail={"error": FAILURE_SPIN_RETRY_NOT_AVAILABLE})
         if _is_spin_retry_used_for_current_spin(locked_user, last_spin_at):
             raise HTTPException(status_code=409, detail={"error": FAILURE_SPIN_RETRY_ALREADY_GRANTED})
+    elif placement == PLACEMENT_TASK:
+        used = await count_task_revive_used_today(db, locked_user.id)
+        if used >= 1:
+            raise HTTPException(status_code=409, detail={"error": FAILURE_DAILY_LIMIT_REACHED})
     else:
         raise HTTPException(status_code=400, detail={"error": "UNKNOWN_PLACEMENT"})
 
@@ -510,6 +527,53 @@ async def _grant_revive(
     return intent
 
 
+async def _grant_task_revive(
+    db: AsyncSession,
+    user: User,
+    intent: AdRewardIntent,
+    *,
+    ad_reference: str | None,
+) -> AdRewardIntent:
+    now = utcnow()
+    used = await count_task_revive_used_today(db, user.id)
+    if used >= 1:
+        return await reject_intent(db, intent, FAILURE_DAILY_LIMIT_REACHED)
+
+    result = await db.execute(
+        update(User)
+        .where(User.id == user.id)
+        .values(revive_balance=User.revive_balance + 1)
+        .returning(User.revive_balance)
+    )
+    row = result.first()
+    new_balance = int(row[0]) if row else (user.revive_balance + 1)
+    user.revive_balance = new_balance
+
+    claim = AdRewardClaim(
+        user_id=user.id,
+        placement=PLACEMENT_TASK,
+        ad_reference=ad_reference,
+        reward_amount=1,
+        claim_day_msk=today_msk(),
+        created_at=now,
+    )
+    db.add(claim)
+
+    resets_at = next_reset_datetime()
+    intent.status = INTENT_STATUS_GRANTED
+    intent.failure_code = None
+    intent.fulfilled_at = now
+    intent.revive_granted = True
+    intent.used_today = 1
+    intent.limit_today = 1
+    intent.resets_at = resets_at
+    intent.claim_day_msk = today_msk()
+
+    await db.commit()
+    await db.refresh(intent)
+    return intent
+
+
 async def _grant_spin_retry(
     db: AsyncSession,
     user: User,
@@ -570,6 +634,8 @@ async def grant_intent(
         return await _grant_revive(db, user, intent, ad_reference=ad_reference)
     if intent.placement == PLACEMENT_SPIN_RETRY:
         return await _grant_spin_retry(db, user, intent, ad_reference=ad_reference)
+    if intent.placement == PLACEMENT_TASK:
+        return await _grant_task_revive(db, user, intent, ad_reference=ad_reference)
     return await reject_intent(db, intent, "UNKNOWN_PLACEMENT")
 
 

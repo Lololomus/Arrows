@@ -74,6 +74,8 @@ def serialize_user(user: User) -> dict:
         "referrals_count": user.referrals_count,
         "referrals_pending": user.referrals_pending,
         "wallet_address": user.wallet_address,
+        "stars_balance": user.stars_balance,
+        "case_pity_counter": user.case_pity_counter,
     }
 
 

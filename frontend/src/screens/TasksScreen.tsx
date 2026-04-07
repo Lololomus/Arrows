@@ -20,7 +20,7 @@ import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import type { TaskDto } from '../game/types';
 import { ADS_ENABLED, ADS_FIRST_ELIGIBLE_LEVEL, ADSGRAM_BLOCK_IDS } from '../config/constants';
 import { formatNumber, formatTimeUntil, translate } from '../i18n';
-import { isValidRewardedBlockId } from '../services/adsgram';
+import { isValidRewardedBlockId, isValidTaskBlockId } from '../services/adsgram';
 import { clearPendingRewardIntent, rememberPendingRewardIntent } from '../services/rewardReconciler';
 import { getRewardedFlowMessage, runRewardedFlow } from '../services/rewardedAds';
 import { useAppStore } from '../stores/store';
@@ -114,9 +114,10 @@ interface DailyAdTaskCardProps {
   animDelay?: number;
   onReward: (amount: number, el: HTMLElement) => void;
   onEligible?: (v: boolean) => void;
+  devPreview?: boolean;
 }
 
-function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: DailyAdTaskCardProps) {
+function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible, devPreview = false }: DailyAdTaskCardProps) {
   const { updateUser, setUser } = useAppStore();
   const trackedIntent  = useRewardStore((s) => s.activeIntents.reward_daily_coins ?? null);
   const resolvedIntent = useRewardStore((s) => s.lastResolved.reward_daily_coins ?? null);
@@ -165,10 +166,11 @@ function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: 
 
   // Сообщаем родителю об eligible статусе
   useEffect(() => {
+    if (devPreview) { onEligible?.(true); return; }
     if (statusLoaded && eligible && currentLevel >= ADS_FIRST_ELIGIBLE_LEVEL) {
       onEligible?.(true);
     }
-  }, [statusLoaded, eligible, currentLevel, onEligible]);
+  }, [devPreview, statusLoaded, eligible, currentLevel, onEligible]);
 
   useEffect(() => {
     if (!trackedIntent) return;
@@ -256,14 +258,16 @@ function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: 
     finally { setLoading(false); }
   }, [limit, loadStatus, loading, onReward, pendingId, syncCoins, updateUser, used]);
 
-  if (!ADS_ENABLED || !isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardDailyCoins)) return null;
-  if (!statusLoaded || !eligible || currentLevel < ADS_FIRST_ELIGIBLE_LEVEL) return null;
+  if (!devPreview && (!ADS_ENABLED || !isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardDailyCoins))) return null;
+  if (!devPreview && (!statusLoaded || !eligible || currentLevel < ADS_FIRST_ELIGIBLE_LEVEL)) return null;
 
-  const remaining    = Math.max(0, limit - used);
-  const limitReached = used >= limit;
+  const displayUsed  = devPreview && !statusLoaded ? 0 : used;
+  const displayLimit = devPreview && !statusLoaded ? 5 : limit;
+  const remaining    = Math.max(0, displayLimit - displayUsed);
+  const limitReached = displayUsed >= displayLimit;
   const waiting      = pendingId !== null;
   const isDisabled   = loading || waiting || limitReached;
-  const resetHint = used > 0 && resetsAt
+  const resetHint = displayUsed > 0 && resetsAt
     ? ` | ${translate('tasks:dailyCoins.resetOnly', { time: formatResetTime(resetsAt, now) }).replace(/^.*? /, '')}`
     : '';
 
@@ -272,7 +276,7 @@ function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: 
     : waiting ? (infoMsg ?? translate('tasks:dailyCoins.checking'))
     : (error ?? translate('tasks:dailyCoins.available', {
       remaining: formatNumber(remaining),
-      limit: formatNumber(limit),
+      limit: formatNumber(displayLimit),
       reset: resetHint,
     }));
 
@@ -307,6 +311,187 @@ function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible }: 
           </div>
           <p className={`text-[11px] leading-tight line-clamp-1 ${waiting ? 'text-amber-300' : 'text-white/50'}`}>
             {subtitle}
+          </p>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── AdsGramTaskCard ─────────────────────────────────────────────────────────
+
+function AdsGramTaskCard({ animDelay = 0 }: { animDelay?: number }) {
+  const { setUser } = useAppStore();
+
+  const [statusLoaded, setStatusLoaded] = useState(false);
+  const [taskUsed,     setTaskUsed]     = useState(false);
+  const [resetsAt,     setResetsAt]     = useState('');
+  const [elementReady, setElementReady] = useState(false);
+  const [notFound,     setNotFound]     = useState(false);
+  const [error,        setError]        = useState<string | null>(null);
+  const [tooLongSession, setTooLongSession] = useState(false);
+  const [now,          setNow]          = useState(() => Date.now());
+
+  const taskRef    = useRef<HTMLDivElement | null>(null);
+  const grantingRef = useRef(false);
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const s = await adsApi.getStatus();
+      setTaskUsed(s.taskRevive.used >= s.taskRevive.limit);
+      setResetsAt(s.taskRevive.resetsAt);
+      setStatusLoaded(true);
+    } catch { setStatusLoaded(false); }
+  }, []);
+
+  useEffect(() => { void loadStatus(); }, [loadStatus]);
+
+  useEffect(() => {
+    const onVis = () => { if (document.visibilityState === 'visible') void loadStatus(); };
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', onVis);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', onVis);
+    };
+  }, [loadStatus]);
+
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  // Wait for the <adsgram-task> custom element to be registered.
+  useEffect(() => {
+    if (typeof customElements === 'undefined') return;
+    if (customElements.get('adsgram-task') !== undefined) {
+      setElementReady(true);
+      return;
+    }
+    customElements.whenDefined('adsgram-task')
+      .then(() => setElementReady(true))
+      .catch(() => { /* element never registered — card stays hidden */ });
+  }, []);
+
+  // Attach DOM event listeners to the web component.
+  // Depends on elementReady + statusLoaded + taskUsed so the effect re-runs
+  // whenever the element appears or disappears from the DOM.
+  useEffect(() => {
+    const el = taskRef.current;
+    if (!el || !elementReady || !statusLoaded || taskUsed) return;
+
+    const onReward = async () => {
+      if (grantingRef.current) return;
+      grantingRef.current = true;
+      setError(null);
+      try {
+        const intent = await adsApi.createRewardIntent({ placement: 'reward_task' });
+        const status = await adsApi.clientCompleteRewardIntent(intent.intentId);
+        if (status.status === 'granted') {
+          setTaskUsed(true);
+          if (status.resetsAt) setResetsAt(status.resetsAt);
+          try { setUser(await authApi.getMe()); } catch { void 0; }
+        } else {
+          setError(translate('tasks:adsgramTask.error'));
+        }
+      } catch {
+        setError(translate('tasks:adsgramTask.error'));
+      } finally {
+        grantingRef.current = false;
+      }
+    };
+
+    const onBannerNotFound  = () => setNotFound(true);
+    const onError           = () => setError(translate('tasks:adsgramTask.error'));
+    const onTooLongSession  = () => setTooLongSession(true);
+
+    el.addEventListener('reward',            onReward);
+    el.addEventListener('onBannerNotFound',  onBannerNotFound);
+    el.addEventListener('onError',           onError);
+    el.addEventListener('onTooLongSession',  onTooLongSession);
+
+    return () => {
+      el.removeEventListener('reward',            onReward);
+      el.removeEventListener('onBannerNotFound',  onBannerNotFound);
+      el.removeEventListener('onError',           onError);
+      el.removeEventListener('onTooLongSession',  onTooLongSession);
+    };
+  }, [elementReady, statusLoaded, taskUsed, setUser]);
+
+  const isDev = import.meta.env.DEV;
+
+  if (notFound || (!statusLoaded && !isDev)) return null;
+
+  const blockId = ADSGRAM_BLOCK_IDS.task || (isDev ? 'task-0' : '');
+  const resetHint = resetsAt ? formatResetTime(resetsAt, now) : translate('common:later');
+
+  // ── Done state ──────────────────────────────────────────────────────────────
+  if (taskUsed) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, x: -20 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.25, delay: animDelay, ease: [0.25, 0.1, 0.25, 1] as const }}
+        className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4"
+      >
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-500/20 text-red-400">
+            <span className="text-[22px] leading-none">❤️</span>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="mb-1 flex items-center gap-2">
+              <h3 className="min-w-0 flex-1 truncate text-[14px] font-bold text-white">
+                {translate('tasks:adsgramTask.title')}
+              </h3>
+              <DoneBadge label={translate('common:done')} />
+            </div>
+            <p className="text-[11px] leading-tight text-white/50 line-clamp-1">
+              {translate('tasks:adsgramTask.resetOnly', { time: resetHint })}
+            </p>
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
+
+  // ── Active state — render web component ─────────────────────────────────────
+  if (!elementReady && !isDev) return null;
+
+  const buttonCls = 'shrink-0 flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-red-500 to-pink-500 px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white shadow-[0_4px_15px_rgba(239,68,68,0.3)]';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.25, delay: animDelay, ease: [0.25, 0.1, 0.25, 1] as const }}
+      className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4"
+    >
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-500/20 text-red-400">
+          <span className="text-[22px] leading-none">❤️</span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex items-center gap-2">
+            <h3 className="min-w-0 flex-1 truncate text-[14px] font-bold text-white">
+              {translate('tasks:adsgramTask.title')}
+            </h3>
+            {/* The <adsgram-task> web component renders its own button flow via slots */}
+            <adsgram-task
+              ref={taskRef}
+              data-block-id={blockId}
+              {...(isDev ? { 'data-debug': 'true' } : {})}
+              data-debug-console="false"
+            >
+              <div slot="button"  className={buttonCls}>{translate('tasks:adsgramTask.buttonSlot')}</div>
+              <div slot="claim"   className={buttonCls}>{translate('tasks:adsgramTask.claimSlot')}</div>
+              <span slot="reward" className="text-[11px] font-bold text-red-300">{translate('tasks:adsgramTask.rewardSlot')}</span>
+              <div slot="done"    className="shrink-0 flex items-center gap-1 rounded-xl border border-green-500/25 bg-green-500/10 px-2.5 py-1.5 text-[10px] font-bold text-green-400"><CheckCircle2 size={11} />{translate('common:done')}</div>
+            </adsgram-task>
+          </div>
+          <p className="text-[11px] leading-tight text-white/50 line-clamp-1">
+            {tooLongSession
+              ? translate('tasks:adsgramTask.tooLongSession')
+              : (error ?? translate('tasks:adsgramTask.description'))}
           </p>
         </div>
       </div>
@@ -821,13 +1006,15 @@ export function TasksScreen() {
     const dailyActive    = dailyTasks.filter((t) => t.status !== 'completed');
     const dailyCompleted = dailyTasks.filter((t) => t.status === 'completed');
     const completed = [...dailyCompleted, ...nonDailyTasks.filter((t) => t.status === 'completed')];
-    const showAds   = ADS_ENABLED && isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardDailyCoins);
+    const DEV_ADS_PREVIEW  = import.meta.env.DEV;
+    const showAds          = DEV_ADS_PREVIEW || (ADS_ENABLED && isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardDailyCoins));
+    const showAdsGramTask  = DEV_ADS_PREVIEW || (ADS_ENABLED && isValidTaskBlockId(ADSGRAM_BLOCK_IDS.task));
 
     const nodes: React.ReactNode[] = [];
     let i = 0;
 
     // 1. Daily section
-    const hasDailySection = dailyActive.length > 0 || adEligible;
+    const hasDailySection = dailyActive.length > 0 || adEligible || showAdsGramTask;
 
     // 2. Divider → ежедневные
     if (hasDailySection) {
@@ -852,9 +1039,17 @@ export function TasksScreen() {
           onReward={runRewardAnimation}
           onEligible={setAdEligible}
           animDelay={adEligible ? i * STAGGER : 0}
+          devPreview={DEV_ADS_PREVIEW}
         />
       );
       if (adEligible) i++;
+    }
+
+    // 4b. AdsGram task (daily revive, visible from level 1)
+    if (showAdsGramTask) {
+      nodes.push(
+        <AdsGramTaskCard key="adsgram-task" animDelay={i++ * STAGGER} />
+      );
     }
 
     // 5. Divider → активные (если что-то есть выше)

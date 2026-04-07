@@ -28,6 +28,7 @@ import type {
   EnergyResponse,
   HintResponse,
   ShopCatalog,
+  ShopDiscountTier,
   ShopItem,
   PurchaseCoinsResponse,
   LeaderboardResponse,
@@ -49,6 +50,10 @@ import type {
   RewardIntentCreateResponse,
   RewardIntentStatusResponse,
   ReviveStatusResponse,
+  CaseInfo,
+  CaseOpenResult,
+  CaseRarity,
+  WithdrawalRequest,
 } from '../game/types';
 
 // === NEW: Тип ответа от complete-and-next ===
@@ -250,6 +255,10 @@ interface RawShopItem {
   price_coins?: number | null;
   price_stars?: number | null;
   price_ton?: number | null;
+  discount_tiers?: Array<{
+    min_quantity?: number | null;
+    percent?: number | null;
+  }>;
   preview?: string | null;
   owned?: boolean;
   max_purchases?: number;
@@ -264,6 +273,13 @@ interface RawShopCatalog {
 }
 
 function normalizeShopItem(raw: RawShopItem, itemType: ShopItem['itemType']): ShopItem {
+  const discountTiers: ShopDiscountTier[] = (raw.discount_tiers ?? [])
+    .filter((tier) => tier.min_quantity != null && tier.percent != null)
+    .map((tier) => ({
+      minQuantity: Number(tier.min_quantity),
+      percent: Number(tier.percent),
+    }));
+
   return {
     id: raw.id,
     name: getShopItemName(raw.id, raw.name),
@@ -272,6 +288,7 @@ function normalizeShopItem(raw: RawShopItem, itemType: ShopItem['itemType']): Sh
     priceCoins: raw.price_coins ?? null,
     priceStars: raw.price_stars ?? null,
     priceTon: raw.price_ton ?? null,
+    discountTiers: discountTiers.length > 0 ? discountTiers : undefined,
     preview: raw.preview ?? undefined,
     owned: raw.owned ?? false,
     maxPurchases: raw.max_purchases ?? undefined,
@@ -708,6 +725,7 @@ export const adsApi = {
   getStatus: async (): Promise<AdsStatusResponse> => {
     const raw = await request<Record<string, unknown>>(API_ENDPOINTS.ads.status);
     const dc = raw.daily_coins as Record<string, unknown> | undefined;
+    const tr = raw.task_revive as Record<string, unknown> | undefined;
     return {
       eligible: raw.eligible as boolean,
       currentLevel: (raw.current_level ?? raw.currentLevel) as number,
@@ -718,6 +736,11 @@ export const adsApi = {
       },
       hintAdAvailable: (raw.hint_ad_available ?? raw.hintAdAvailable ?? false) as boolean,
       hintAdReward: Number(raw.hint_ad_reward ?? raw.hintAdReward ?? 3),
+      taskRevive: {
+        used: Number(tr?.used ?? 0),
+        limit: Number(tr?.limit ?? 1),
+        resetsAt: (tr?.resets_at ?? tr?.resetsAt ?? '') as string,
+      },
     };
   },
 
@@ -1036,6 +1059,157 @@ export const shopApi = {
       API_ENDPOINTS.shop.transactionConfirm(txId),
       { method: 'POST' }
     ),
+};
+
+// ============================================
+// CASE API
+// ============================================
+
+interface RawCaseInfo {
+  id: string;
+  name: string;
+  price_stars: number;
+  price_ton: number;
+  pity_counter: number;
+  pity_threshold: number;
+}
+
+interface RawCaseRewardItem {
+  type: string;
+  amount: number;
+}
+
+interface RawCaseOpenResult {
+  rarity: string;
+  rewards: RawCaseRewardItem[];
+  hint_balance: number;
+  revive_balance: number;
+  coins: number;
+  stars_balance: number;
+  case_pity_counter: number;
+}
+
+function normalizeCaseInfo(raw: RawCaseInfo): CaseInfo {
+  return {
+    id: raw.id,
+    name: raw.name,
+    priceStars: raw.price_stars,
+    priceTon: raw.price_ton,
+    pityCounter: raw.pity_counter,
+    pityThreshold: raw.pity_threshold,
+  };
+}
+
+function normalizeCaseOpenResult(raw: RawCaseOpenResult): CaseOpenResult {
+  return {
+    rarity: raw.rarity as CaseRarity,
+    rewards: raw.rewards as CaseOpenResult['rewards'],
+    hintBalance: raw.hint_balance,
+    reviveBalance: raw.revive_balance,
+    coins: raw.coins,
+    starsBalance: raw.stars_balance,
+    casePityCounter: raw.case_pity_counter,
+  };
+}
+
+export const caseApi = {
+  getInfo: async (): Promise<CaseInfo> =>
+    normalizeCaseInfo(await request<RawCaseInfo>(API_ENDPOINTS.cases.info)),
+
+  createStarsInvoice: async (): Promise<{ invoiceUrl: string }> => {
+    const raw = await request<{ invoice_url: string }>(
+      API_ENDPOINTS.cases.invoiceStars,
+      { method: 'POST' },
+    );
+    return { invoiceUrl: raw.invoice_url };
+  },
+
+  openTon: async (): Promise<{
+    transactionId: number;
+    address: string;
+    amount: number;
+    amountNano: string;
+    comment: string;
+  }> => {
+    const raw = await request<{
+      transaction_id: number;
+      address: string;
+      amount: number;
+      amount_nano: string;
+      comment: string;
+    }>(API_ENDPOINTS.cases.openTon, { method: 'POST' });
+    return {
+      transactionId: raw.transaction_id,
+      address: raw.address,
+      amount: raw.amount,
+      amountNano: raw.amount_nano,
+      comment: raw.comment,
+    };
+  },
+
+  confirmTon: async (txId: number): Promise<{
+    transactionId: number;
+    status: string;
+    verified: boolean;
+    caseResult?: CaseOpenResult;
+  }> => {
+    const raw = await request<{
+      transaction_id: number;
+      status: string;
+      verified: boolean;
+      case_result?: RawCaseOpenResult;
+    }>(API_ENDPOINTS.cases.confirmTon(txId), { method: 'POST' });
+    return {
+      transactionId: raw.transaction_id,
+      status: raw.status,
+      verified: raw.verified,
+      caseResult: raw.case_result ? normalizeCaseOpenResult(raw.case_result) : undefined,
+    };
+  },
+
+  /** Poll for Stars payment result. Returns null while webhook hasn't fired yet. */
+  pollResult: async (): Promise<CaseOpenResult | null> => {
+    const raw = await request<{
+      status: 'pending' | 'ready';
+      case_result?: RawCaseOpenResult;
+    }>(API_ENDPOINTS.cases.result);
+    if (raw.status !== 'ready' || !raw.case_result) return null;
+    return normalizeCaseOpenResult(raw.case_result);
+  },
+
+  getStarsBalance: async (): Promise<number> => {
+    const raw = await request<{ stars_balance: number }>(API_ENDPOINTS.cases.starsBalance);
+    return raw.stars_balance;
+  },
+
+  /** DEV ONLY — открыть кейс без оплаты */
+  openDev: async (): Promise<CaseOpenResult> => {
+    const raw = await request<{ status: string; case_result: RawCaseOpenResult }>(
+      '/shop/cases/open/dev',
+      { method: 'POST' },
+    );
+    return normalizeCaseOpenResult(raw.case_result);
+  },
+
+  withdrawStars: async (amount: number): Promise<WithdrawalRequest> => {
+    const raw = await request<{ id: number; amount: number; status: string; created_at: string }>(
+      API_ENDPOINTS.cases.withdraw,
+      { method: 'POST', body: JSON.stringify({ amount }) },
+    );
+    return { id: raw.id, amount: raw.amount, status: raw.status as WithdrawalRequest['status'], createdAt: raw.created_at };
+  },
+
+  getWithdrawals: async (): Promise<WithdrawalRequest[]> => {
+    const raw = await request<{ withdrawals: Array<{ id: number; amount: number; status: string; created_at: string }> }>(
+      API_ENDPOINTS.cases.withdrawals,
+    );
+    return raw.withdrawals.map(w => ({
+      id: w.id,
+      amount: w.amount,
+      status: w.status as WithdrawalRequest['status'],
+      createdAt: w.created_at,
+    }));
+  },
 };
 
 // ============================================

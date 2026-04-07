@@ -79,6 +79,7 @@ const KEYBOARD_PAN_SPEED_VIEWPORT_RATIO = 1.35;
 const ENABLE_INTRO_CAMERA_PUSH_IN = false;
 // Server progression must stay enabled in all envs, because backend is authoritative.
 const ENABLE_SERVER_PROGRESS_PERSIST = true;
+const TUTORIAL_SHOWN_KEY = 'arrows_tutorial_shown';
 const ENABLE_GAME_DEVTOOLS = import.meta.env.DEV;
 const DEV_LEVEL_PRESETS = [35, 36, 37, 38] as const;
 
@@ -404,6 +405,7 @@ export function GameScreen() {
   const nextLevelExistsRef = useRef(true);
   const pendingVictoryActionRef = useRef<PendingVictoryAction>(null);
   const prefetchedNextLevelRef = useRef<CompleteAndNextResponse['nextLevel']>(null);
+  const tutorialShownThisSessionRef = useRef(false);
 
   const [confirmAction, setConfirmAction] = useState<'restart' | 'menu' | 'unsaved_menu' | null>(null);
   const [showHintModal, setShowHintModal] = useState(false);
@@ -828,6 +830,15 @@ export function GameScreen() {
   useEffect(() => {
     loadLevel(currentLevel);
   }, [currentLevel, loadLevel]);
+
+  useEffect(() => {
+    if (status !== 'playing') return;
+    if (tutorialShownThisSessionRef.current) return;
+    if (localStorage.getItem(TUTORIAL_SHOWN_KEY)) return;
+    tutorialShownThisSessionRef.current = true;
+    localStorage.setItem(TUTORIAL_SHOWN_KEY, '1');
+    setShowHowToPlay(true);
+  }, [status]);
 
   useEffect(() => {
     if (!ENABLE_SERVER_PROGRESS_PERSIST) return;

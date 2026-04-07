@@ -168,6 +168,10 @@ export interface User {
 
   // TON Wallet
   walletAddress?: string | null;
+
+  // Кейсы
+  starsBalance?: number;
+  casePityCounter?: number;
 }
 
 /** Статистика пользователя */
@@ -189,6 +193,11 @@ export interface UserStats {
 export type ItemType = 'arrow_skin' | 'theme' | 'boost';
 export type Currency = 'coins' | 'stars' | 'ton';
 
+export interface ShopDiscountTier {
+  minQuantity: number;
+  percent: number;
+}
+
 /** Товар в магазине */
 export interface ShopItem {
   id: string;
@@ -200,6 +209,7 @@ export interface ShopItem {
   priceCoins: number | null;
   priceStars: number | null;
   priceTon: number | null;
+  discountTiers?: ShopDiscountTier[];
 
   // Метаданные
   preview?: string;
@@ -439,6 +449,7 @@ export interface AdsStatusResponse {
   dailyCoins: DailyCoinsStatus;
   hintAdAvailable: boolean;
   hintAdReward: number;
+  taskRevive: DailyCoinsStatus;
 }
 
 export interface ClaimDailyCoinsResponse {
@@ -461,7 +472,7 @@ export interface ClaimReviveResponse {
   sessionId: string;
 }
 
-export type RewardPlacement = 'reward_daily_coins' | 'reward_hint' | 'reward_revive' | 'reward_spin_retry';
+export type RewardPlacement = 'reward_daily_coins' | 'reward_hint' | 'reward_revive' | 'reward_spin_retry' | 'reward_task';
 export type RewardIntentStatus = 'pending' | 'granted' | 'rejected' | 'expired';
 
 export interface RewardIntentCreateRequest {
@@ -540,4 +551,41 @@ export interface FragmentDrop {
 export interface DagLayer {
   layer: number;
   arrows: Arrow[];
+}
+
+// ============================================
+// CASES
+// ============================================
+
+export type CaseRarity = 'common' | 'rare' | 'epic' | 'epic_stars';
+
+export interface CaseRewardItem {
+  type: 'hints' | 'revives' | 'coins' | 'stars';
+  amount: number;
+}
+
+export interface CaseInfo {
+  id: string;
+  name: string;
+  priceStars: number;
+  priceTon: number;
+  pityCounter: number;
+  pityThreshold: number;
+}
+
+export interface CaseOpenResult {
+  rarity: CaseRarity;
+  rewards: CaseRewardItem[];
+  hintBalance: number;
+  reviveBalance: number;
+  coins: number;
+  starsBalance: number;
+  casePityCounter: number;
+}
+
+export interface WithdrawalRequest {
+  id: number;
+  amount: number;
+  status: 'pending' | 'completed' | 'rejected';
+  createdAt: string;
 }

@@ -64,6 +64,7 @@ const AD_TIMEOUT_MS = 45_000;
 const INTERSTITIAL_PREFIX = 'int-';
 const REWARDED_BLOCK_ID_PATTERN = /^\d+$/;
 const INTERSTITIAL_BLOCK_ID_PATTERN = /^int-\d+$/;
+const TASK_BLOCK_ID_PATTERN = /^task-\d+$/;
 
 function normalizeBlockId(rawBlockId: string): string {
   return rawBlockId.trim();
@@ -77,6 +78,11 @@ export function isValidInterstitialBlockId(rawBlockId: string): boolean {
 export function isValidRewardedBlockId(rawBlockId: string): boolean {
   const blockId = normalizeBlockId(rawBlockId);
   return REWARDED_BLOCK_ID_PATTERN.test(blockId);
+}
+
+export function isValidTaskBlockId(rawBlockId: string): boolean {
+  const blockId = normalizeBlockId(rawBlockId);
+  return TASK_BLOCK_ID_PATTERN.test(blockId);
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

@@ -35,6 +35,10 @@ export interface RawUserResponse {
   referrals_pending?: number;
   wallet_address?: string | null;
   walletAddress?: string | null;
+  stars_balance?: number;
+  starsBalance?: number;
+  case_pity_counter?: number;
+  casePityCounter?: number;
 }
 
 export interface RawAuthResponse {
@@ -67,6 +71,8 @@ export function normalizeUserResponse(raw: RawUserResponse): User {
     referrals_count: raw.referrals_count ?? 0,
     referrals_pending: raw.referrals_pending ?? 0,
     walletAddress: raw.walletAddress ?? raw.wallet_address ?? null,
+    starsBalance: raw.starsBalance ?? raw.stars_balance ?? 0,
+    casePityCounter: raw.casePityCounter ?? raw.case_pity_counter ?? 0,
   };
 }
 

@@ -248,6 +248,16 @@ export const API_ENDPOINTS = {
     transactionStatus: (txId: number) => `/shop/transaction/${txId}/status`,
     transactionConfirm: (txId: number) => `/shop/transaction/${txId}/confirm`,
   },
+  cases: {
+    info: '/shop/cases/info',
+    invoiceStars: '/shop/cases/invoice/stars',
+    openTon: '/shop/cases/open/ton',
+    confirmTon: (txId: number) => `/shop/cases/ton/${txId}/confirm`,
+    result: '/shop/cases/result',
+    starsBalance: '/shop/stars/balance',
+    withdraw: '/shop/stars/withdraw',
+    withdrawals: '/shop/stars/withdrawals',
+  },
   wallet: {
     proofPayload: '/wallet/proof-payload',
     connect: '/wallet/connect',
@@ -302,5 +312,6 @@ export const ADSGRAM_BLOCK_IDS = {
   rewardSpinRetry: import.meta.env.VITE_ADSGRAM_REWARD_SPIN_RETRY_BLOCK_ID || '',
   interstitialProgress: import.meta.env.VITE_ADSGRAM_INTERSTITIAL_PROGRESS_BLOCK_ID || '',
   interstitialHard: import.meta.env.VITE_ADSGRAM_INTERSTITIAL_HARD_BLOCK_ID || '',
+  task: import.meta.env.VITE_ADSGRAM_TASK_BLOCK_ID || '',
 } as const;
 

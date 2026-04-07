@@ -19,8 +19,8 @@ from sqlalchemy import select
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from app.config import settings
-from app.database import AsyncSessionLocal, close_redis
-from app.models import User
+from app.database import AsyncSessionLocal, close_redis, get_redis
+from app.models import Transaction, User, StarsWithdrawal
 from app.services.ad_rewards import utcnow
 from app.services.admin_stars_topup import (
     ADMIN_TOPUP_PACKS,
@@ -31,6 +31,11 @@ from app.services.admin_stars_topup import (
     parse_admin_topup_payload,
     record_admin_stars_topup,
     validate_admin_topup_checkout,
+)
+from app.services.case_logic import (
+    CASE_RESULT_REDIS_TTL_SECONDS,
+    create_stars_case_purchase,
+    serialize_case_result,
 )
 from app.services.bot_notifications import notify_spin_ready, notify_spin_streak_reset, notify_streak_warning
 from app.services.i18n import bot_text, normalize_locale
@@ -259,6 +264,85 @@ async def process_admin_topup(callback: types.CallbackQuery):
     await callback.answer()
 
 
+@dp.callback_query(lambda c: c.data and c.data.startswith("withdrawal_confirm:"))
+async def process_withdrawal_confirm(callback: types.CallbackQuery):
+    """Подтвердить вывод Stars — Stars уже отправлены вручную."""
+    if not is_admin_telegram_id(callback.from_user.id):
+        await callback.answer("Access denied.", show_alert=True)
+        return
+
+    try:
+        withdrawal_id = int(callback.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer("Invalid data.", show_alert=True)
+        return
+
+    async with AsyncSessionLocal() as db:
+        withdrawal = (
+            await db.execute(
+                select(StarsWithdrawal)
+                .where(StarsWithdrawal.id == withdrawal_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if withdrawal is None:
+            await callback.answer("Заявка не найдена.", show_alert=True)
+            return
+        if withdrawal.status != "pending":
+            await callback.answer(f"Статус уже: {withdrawal.status}", show_alert=True)
+            return
+        withdrawal.status = "completed"
+        withdrawal.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        await db.commit()
+
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.reply(f"✅ Вывод #{withdrawal_id} подтверждён — {withdrawal.amount} Stars отправлены.")
+    await callback.answer("Подтверждено")
+
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("withdrawal_reject:"))
+async def process_withdrawal_reject(callback: types.CallbackQuery):
+    """Отклонить вывод Stars — Stars возвращаются пользователю."""
+    if not is_admin_telegram_id(callback.from_user.id):
+        await callback.answer("Access denied.", show_alert=True)
+        return
+
+    try:
+        withdrawal_id = int(callback.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer("Invalid data.", show_alert=True)
+        return
+
+    async with AsyncSessionLocal() as db:
+        withdrawal = (
+            await db.execute(
+                select(StarsWithdrawal)
+                .where(StarsWithdrawal.id == withdrawal_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if withdrawal is None:
+            await callback.answer("Заявка не найдена.", show_alert=True)
+            return
+        if withdrawal.status != "pending":
+            await callback.answer(f"Статус уже: {withdrawal.status}", show_alert=True)
+            return
+        withdrawal.status = "rejected"
+        withdrawal.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        user = await db.get(User, withdrawal.user_id)
+        if user:
+            user.stars_balance += withdrawal.amount
+        await db.commit()
+
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.reply(
+            f"❌ Вывод #{withdrawal_id} отклонён — {withdrawal.amount} Stars возвращены пользователю."
+        )
+    await callback.answer("Отклонено")
+
+
 @dp.pre_checkout_query()
 async def process_pre_checkout_query(pre_checkout_query: types.PreCheckoutQuery):
     """Allow checkout only for the configured admin on admin top-up invoices."""
@@ -275,40 +359,91 @@ async def process_pre_checkout_query(pre_checkout_query: types.PreCheckoutQuery)
 
 @dp.message(F.successful_payment)
 async def process_successful_payment(message: types.Message):
-    """Persist successful admin Stars top-ups into the internal ledger."""
+    """Handle successful Telegram Stars payments."""
     payment = message.successful_payment
     if payment is None:
         return
 
     amount = parse_admin_topup_payload(payment.invoice_payload)
-    if amount is None:
+    if amount is not None:
+        if not is_admin_telegram_id(message.from_user.id if message.from_user else None):
+            logger.warning(
+                "Ignoring admin Stars top-up payment from non-admin user_id=%s",
+                message.from_user.id if message.from_user else None,
+            )
+            return
+
+        async with AsyncSessionLocal() as db:
+            processed, new_balance = await record_admin_stars_topup(
+                db,
+                telegram_user_id=message.from_user.id,
+                username=message.from_user.username,
+                first_name=message.from_user.first_name,
+                amount=amount,
+                charge_id=payment.telegram_payment_charge_id or payment.provider_payment_charge_id or "",
+            )
+
+        if processed:
+            await message.answer(
+                f"Bot Stars balance topped up by {amount}. Current ledger balance: {new_balance}."
+            )
+        else:
+            await message.answer(
+                f"This payment was already processed. Current ledger balance: {new_balance}."
+            )
         return
 
-    if not is_admin_telegram_id(message.from_user.id if message.from_user else None):
-        logger.warning(
-            "Ignoring admin Stars top-up payment from non-admin user_id=%s",
-            message.from_user.id if message.from_user else None,
-        )
+    if payment.invoice_payload != "case:standard":
         return
+
+    telegram_user = message.from_user
+    if telegram_user is None:
+        logger.warning("Ignoring case payment without from_user payload")
+        return
+
+    charge_id = payment.telegram_payment_charge_id or payment.provider_payment_charge_id or ""
 
     async with AsyncSessionLocal() as db:
-        processed, new_balance = await record_admin_stars_topup(
-            db,
-            telegram_user_id=message.from_user.id,
-            username=message.from_user.username,
-            first_name=message.from_user.first_name,
-            amount=amount,
-            charge_id=payment.telegram_payment_charge_id or payment.provider_payment_charge_id or "",
+        result = await db.execute(
+            select(User)
+            .where(User.telegram_id == telegram_user.id)
+            .with_for_update()
         )
+        user = result.scalar_one_or_none()
+        if user is None:
+            logger.warning("Ignoring case payment for missing user telegram_id=%s", telegram_user.id)
+            return
 
-    if processed:
-        await message.answer(
-            f"Bot Stars balance topped up by {amount}. Current ledger balance: {new_balance}."
+        if charge_id:
+            existing = await db.execute(
+                select(Transaction.id).where(
+                    Transaction.currency == "stars",
+                    Transaction.ton_tx_hash == charge_id,
+                    Transaction.status == "completed",
+                )
+            )
+            if existing.scalar_one_or_none() is not None:
+                return
+
+        case_result = await create_stars_case_purchase(
+            user=user,
+            total_amount=payment.total_amount,
+            charge_id=charge_id,
+            db=db,
         )
-    else:
-        await message.answer(
-            f"This payment was already processed. Current ledger balance: {new_balance}."
-        )
+        await db.commit()
+
+    try:
+        redis = await get_redis()
+        if redis is not None:
+            await redis.setex(
+                f"case_result:{user.id}",
+                CASE_RESULT_REDIS_TTL_SECONDS,
+                serialize_case_result(case_result),
+            )
+    except Exception:
+        logger.exception("Failed to cache case result for user_id=%s", user.id)
+
 
 
 def _fallback_last_spin_at(user: User) -> datetime | None:

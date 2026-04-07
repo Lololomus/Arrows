@@ -63,6 +63,8 @@ class UserResponse(BaseModel):
     referrals_count: int = 0
     referrals_pending: int = 0
     wallet_address: Optional[str] = None
+    stars_balance: int = 0
+    case_pity_counter: int = 0
 
     class Config:
         from_attributes = True
@@ -170,6 +172,11 @@ class HintResponse(BaseModel):
 # SHOP
 # ============================================
 
+class ShopDiscountTier(BaseModel):
+    min_quantity: int
+    percent: int
+
+
 class ShopItem(BaseModel):
     """Товар в магазине."""
     id: str
@@ -177,6 +184,7 @@ class ShopItem(BaseModel):
     price_coins: Optional[int] = None
     price_stars: Optional[int] = None
     price_ton: Optional[float] = None
+    discount_tiers: List[ShopDiscountTier] = []
     preview: Optional[str] = None
     owned: bool = False
     max_purchases: Optional[int] = None
@@ -245,6 +253,60 @@ class WalletStatusResponse(BaseModel):
 class WalletDisconnectResponse(BaseModel):
     """Результат отключения кошелька."""
     success: bool
+
+
+# ============================================
+# CASES
+# ============================================
+
+class CaseInfo(BaseModel):
+    """Информация о кейсе."""
+    id: str
+    name: str
+    price_stars: int
+    price_ton: float
+    pity_counter: int
+    pity_threshold: int
+
+
+class CaseRewardItem(BaseModel):
+    """Позиция награды из кейса."""
+    type: str   # 'hints' | 'revives' | 'coins' | 'stars'
+    amount: int
+
+
+class CaseOpenResult(BaseModel):
+    """Результат открытия кейса."""
+    rarity: str                     # 'common' | 'rare' | 'epic' | 'epic_stars'
+    rewards: List[CaseRewardItem]
+    hint_balance: int
+    revive_balance: int
+    coins: int
+    stars_balance: int
+    case_pity_counter: int
+
+
+class CaseStarsBalance(BaseModel):
+    """Баланс накопленных Stars пользователя."""
+    stars_balance: int
+
+
+class WithdrawStarsRequest(BaseModel):
+    amount: int
+
+
+class WithdrawalResponse(BaseModel):
+    id: int
+    amount: int
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class WithdrawalListResponse(BaseModel):
+    withdrawals: List[WithdrawalResponse]
 
 
 # ============================================
@@ -453,6 +515,12 @@ class DailyCoinsStatus(BaseModel):
     limit: int
     resets_at: str
 
+class TaskReviveStatus(BaseModel):
+    """Статус ежедневного воскрешения за задание AdsGram."""
+    used: int
+    limit: int
+    resets_at: str
+
 class AdsStatusResponse(BaseModel):
     """Статус рекламы для пользователя."""
     eligible: bool
@@ -460,6 +528,7 @@ class AdsStatusResponse(BaseModel):
     daily_coins: DailyCoinsStatus
     hint_ad_available: bool
     hint_ad_reward: int
+    task_revive: TaskReviveStatus
 
 class ClaimDailyCoinsRequest(BaseModel):
     """Запрос награды за рекламу — дневные монеты."""
@@ -496,7 +565,7 @@ class ClaimReviveResponse(BaseModel):
     session_id: str
 
 
-RewardPlacement = Literal["reward_daily_coins", "reward_hint", "reward_revive", "reward_spin_retry"]
+RewardPlacement = Literal["reward_daily_coins", "reward_hint", "reward_revive", "reward_spin_retry", "reward_task"]
 RewardIntentStatus = Literal["pending", "granted", "rejected", "expired"]
 
 

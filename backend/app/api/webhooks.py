@@ -4,6 +4,9 @@ Arrow Puzzle - Webhooks API
 Telegram Payments, TON, AdsGram and Telegram bot updates.
 """
 
+import logging
+
+import httpx
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -11,15 +14,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.shop import apply_boost, get_item_by_id
 from ..config import settings
-from ..database import get_db
+from ..database import get_db, get_redis
 from ..middleware.security import validate_adsgram_signature
 from ..models import Inventory, Transaction, User
+from ..services.admin_stars_topup import validate_admin_topup_checkout
+from ..services.case_logic import (
+    CASE_RESULT_REDIS_TTL_SECONDS,
+    create_stars_case_purchase,
+    determine_rarity,
+    grant_case_rewards,
+    serialize_case_result,
+)
 from ..services.ad_rewards import (
     FAILURE_INVALID_SIGNATURE,
     PLACEMENT_DAILY_COINS,
     PLACEMENT_HINT,
     PLACEMENT_REVIVE,
     PLACEMENT_SPIN_RETRY,
+    PLACEMENT_TASK,
     extract_callback_value,
     find_pending_intent_for_callback,
     grant_intent,
@@ -29,6 +41,7 @@ from ..services.referrals import extract_referral_code_from_start_text, store_pe
 
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/telegram/payment")
@@ -40,6 +53,27 @@ async def handle_telegram_payment(
     body = await request.json()
 
     if "pre_checkout_query" in body:
+        bot_token = settings.BOT_TOKEN or settings.TELEGRAM_BOT_TOKEN
+        if bot_token:
+            query = body["pre_checkout_query"]
+            ok, error_message = validate_admin_topup_checkout(
+                query.get("from", {}).get("id"),
+                query.get("invoice_payload"),
+            )
+            payload = {
+                "pre_checkout_query_id": query["id"],
+                "ok": ok,
+            }
+            if error_message:
+                payload["error_message"] = error_message
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.post(
+                        f"https://api.telegram.org/bot{bot_token}/answerPreCheckoutQuery",
+                        json=payload,
+                    )
+            except Exception:
+                logger.exception("telegram/payment: failed to answer pre_checkout_query")
         return {"ok": True}
 
     if "message" in body and "successful_payment" in body["message"]:
@@ -70,31 +104,54 @@ async def handle_telegram_payment(
             if existing.scalar_one_or_none():
                 return {"ok": True}
 
-        item = get_item_by_id(item_type, item_id)
-        if item:
-            if item_type == "boosts":
-                await apply_boost(user, item_id, db)
-            else:
-                try:
-                    async with db.begin_nested():
-                        db.add(Inventory(user_id=user.id, item_type=item_type, item_id=item_id))
-                        await db.flush()
-                except IntegrityError:
-                    pass
-
-            db.add(
-                Transaction(
-                    user_id=user.id,
-                    type="purchase",
-                    currency="stars",
-                    amount=payment["total_amount"],
-                    item_type=item_type,
-                    item_id=item_id,
-                    status="completed",
-                    ton_tx_hash=charge_id,
-                )
+        if item_type == "case" and item_id == "standard":
+            # Case opening via Stars
+            case_result = await create_stars_case_purchase(
+                user=user,
+                total_amount=payment["total_amount"],
+                charge_id=charge_id,
+                db=db,
             )
             await db.commit()
+
+            # Store result in Redis so the frontend poll can pick it up
+            try:
+                redis = await get_redis()
+                if redis is not None:
+                    await redis.setex(
+                        f"case_result:{user.id}",
+                        CASE_RESULT_REDIS_TTL_SECONDS,
+                        serialize_case_result(case_result),
+                    )
+            except Exception:
+                pass  # Non-critical: user can retry polling
+
+        else:
+            item = get_item_by_id(item_type, item_id)
+            if item:
+                if item_type == "boosts":
+                    await apply_boost(user, item_id, db)
+                else:
+                    try:
+                        async with db.begin_nested():
+                            db.add(Inventory(user_id=user.id, item_type=item_type, item_id=item_id))
+                            await db.flush()
+                    except IntegrityError:
+                        pass
+
+                db.add(
+                    Transaction(
+                        user_id=user.id,
+                        type="purchase",
+                        currency="stars",
+                        amount=payment["total_amount"],
+                        item_type=item_type,
+                        item_id=item_id,
+                        status="completed",
+                        ton_tx_hash=charge_id,
+                    )
+                )
+                await db.commit()
 
         return {"ok": True}
 
@@ -162,8 +219,21 @@ async def handle_ton_payment(
     if not user:
         return {"ok": False, "error": "User not found"}
 
-    item = get_item_by_id(tx.item_type, tx.item_id)
-    if item:
+    if tx.item_type == "cases" and tx.item_id == "standard":
+        user_result = await db.execute(
+            select(User).where(User.id == user_id).with_for_update()
+        )
+        user = user_result.scalar_one_or_none()
+        if not user:
+            return {"ok": False, "error": "User not found"}
+
+        rarity = determine_rarity(user.case_pity_counter)
+        await grant_case_rewards(user, rarity, "ton", db, transaction_id=tx.id)
+    else:
+        item = get_item_by_id(tx.item_type, tx.item_id)
+        if not item:
+            return {"ok": False, "error": "Item not found"}
+
         if tx.item_type == "boosts":
             await apply_boost(user, tx.item_id, db)
         else:
@@ -288,6 +358,14 @@ async def handle_adsgram_reward_spin_retry(
     db: AsyncSession = Depends(get_db),
 ):
     return await _handle_adsgram_reward_callback(request, PLACEMENT_SPIN_RETRY, db)
+
+
+@router.api_route("/adsgram/reward/task", methods=["GET", "POST"])
+async def handle_adsgram_reward_task(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _handle_adsgram_reward_callback(request, PLACEMENT_TASK, db)
 
 
 @router.api_route("/adsgram/reward", methods=["GET", "POST"])

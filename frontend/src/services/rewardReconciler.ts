@@ -48,6 +48,8 @@ function getRewardToastMessage(status: RewardIntentStatusResponse): string | nul
         return translate('game:rewardToast.reviveGranted');
       case 'reward_spin_retry':
         return translate('game:rewardToast.spinRetryGranted');
+      case 'reward_task':
+        return translate('game:rewardToast.taskReviveGranted');
       default:
         return translate('game:rewardToast.granted');
     }
@@ -88,6 +90,17 @@ async function syncGrantedReward(status: RewardIntentStatusResponse): Promise<vo
   // an AdRewardClaim. Calling getMe() here would replace the entire user object
   // and could overwrite extraLives or other in-flight updates.
   if (status.placement === 'reward_revive') {
+    return;
+  }
+
+  // reward_task increments revive_balance — refresh the user to pick it up.
+  if (status.placement === 'reward_task') {
+    try {
+      const me = await authApi.getMe();
+      setUser(me);
+    } catch {
+      void 0;
+    }
     return;
   }
 
