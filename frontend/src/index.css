@@ -316,6 +316,12 @@ adsgram-task a {
   text-decoration: none !important;
 }
 
+/* Remove internal margins from AdsGram injected content so it aligns with left edge */
+adsgram-task > *:not([slot]) {
+  margin: 0 !important;
+  padding-left: 0 !important;
+}
+
 /* ============================================
    GAME FIELD
    ============================================ */

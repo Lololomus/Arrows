@@ -465,7 +465,7 @@ function AdsGramTaskCard({ animDelay = 0 }: { animDelay?: number }) {
   // ── Active state — render web component ─────────────────────────────────────
   if (!elementReady && !isDev) return null;
 
-  const buttonCls = 'shrink-0 whitespace-nowrap flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-red-500 to-pink-500 px-3 py-2 text-[11px] font-bold uppercase tracking-normal text-white shadow-[0_4px_15px_rgba(239,68,68,0.3)]';
+  const buttonCls = 'shrink-0 whitespace-nowrap flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-red-500 to-pink-500 px-3 py-2 text-[12px] font-bold text-white shadow-[0_4px_15px_rgba(239,68,68,0.3)]';
 
   return (
     <motion.div
@@ -474,6 +474,7 @@ function AdsGramTaskCard({ animDelay = 0 }: { animDelay?: number }) {
       transition={{ duration: 0.25, delay: animDelay, ease: [0.25, 0.1, 0.25, 1] as const }}
       className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4"
     >
+      {/* Top row: icon + title + reward */}
       <div className="flex items-start gap-3">
         {iconEl}
         <div className="min-w-0 flex-1">
@@ -481,7 +482,6 @@ function AdsGramTaskCard({ animDelay = 0 }: { animDelay?: number }) {
             <h3 className="min-w-0 flex-1 truncate text-[14px] font-bold text-white">
               {translate('tasks:adsgramTask.title')}
             </h3>
-            {/* reward label — same style as other tasks */}
             <div className="shrink-0 flex flex-col items-end">
               <span className="text-[15px] font-bold leading-none text-amber-400">{rewardLabel}</span>
               <span className="text-[9px] font-bold uppercase tracking-widest text-amber-400/60">
@@ -494,23 +494,32 @@ function AdsGramTaskCard({ animDelay = 0 }: { animDelay?: number }) {
               ? translate('tasks:adsgramTask.tooLongSession')
               : (error ?? translate('tasks:adsgramTask.description'))}
           </p>
-          {/* adsgram-task wraps its injected task content + our slotted buttons */}
-          <adsgram-task
-            ref={taskRef}
-            data-block-id={blockId}
-            {...(isDev ? { 'data-debug': 'true' } : {})}
-            data-debug-console="false"
-            style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px', minHeight: '36px' }}
-          >
-            <div slot="button" className={buttonCls}>{translate('tasks:adsgramTask.buttonSlot')}</div>
-            <div slot="claim"  className={buttonCls}>{translate('tasks:adsgramTask.claimSlot')}</div>
-            <span slot="reward" style={{ display: 'none' }} />
-            <div slot="done" className="inline-flex items-center gap-1 rounded-xl border border-green-500/25 bg-green-500/10 px-2.5 py-1.5 text-[10px] font-bold text-green-400">
-              <CheckCircle2 size={11} />{translate('common:done')}
-            </div>
-          </adsgram-task>
         </div>
       </div>
+
+      {/* Bottom row: full-width adsgram content + button */}
+      <adsgram-task
+        ref={taskRef}
+        data-block-id={blockId}
+        {...(isDev ? { 'data-debug': 'true' } : {})}
+        data-debug-console="false"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          marginTop: '10px',
+          minHeight: '40px',
+          color: 'rgba(255,255,255,0.85)',
+          fontSize: '12px',
+        }}
+      >
+        <div slot="button" className={buttonCls}>{translate('tasks:adsgramTask.buttonSlot')}</div>
+        <div slot="claim"  className={buttonCls}>{translate('tasks:adsgramTask.claimSlot')}</div>
+        <span slot="reward" style={{ display: 'none' }} />
+        <div slot="done" className="inline-flex items-center gap-1 rounded-xl border border-green-500/25 bg-green-500/10 px-2.5 py-1.5 text-[10px] font-bold text-green-400">
+          <CheckCircle2 size={11} />{translate('common:done')}
+        </div>
+      </adsgram-task>
     </motion.div>
   );
 }

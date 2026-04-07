@@ -68,12 +68,16 @@ def today_msk() -> date:
 
 
 def next_reset_datetime() -> datetime:
+    """Next midnight MSK as naive UTC datetime (for consistent DB storage)."""
     tomorrow = today_msk() + timedelta(days=1)
-    return datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=MSK).replace(tzinfo=None)
+    msk_midnight = datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=MSK)
+    return msk_midnight.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def next_reset_iso() -> str:
-    return next_reset_datetime().replace(tzinfo=MSK).isoformat()
+    tomorrow = today_msk() + timedelta(days=1)
+    msk_midnight = datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=MSK)
+    return msk_midnight.isoformat()
 
 
 def ensure_eligible(user: User) -> None:
