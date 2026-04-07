@@ -14,6 +14,8 @@ import { useAppStore } from '../stores/store';
 import { CaseOpenModal } from './game-screen/CaseOpenModal';
 import { WithdrawalModal } from './game-screen/WithdrawalModal';
 
+const CASE_ENABLED = import.meta.env.DEV;
+
 function buildCommentPayload(comment: string): string {
   const encoder = new TextEncoder();
   const textBytes = encoder.encode(comment);
@@ -297,7 +299,7 @@ export function ShopScreen() {
     try {
       const [catalog, info] = await Promise.allSettled([
         shopApi.getCatalog(),
-        caseApi.getInfo(),
+        CASE_ENABLED ? caseApi.getInfo() : Promise.reject(new Error('disabled')),
       ]);
 
       if (catalog.status === 'fulfilled') {
@@ -545,7 +547,7 @@ export function ShopScreen() {
             )}
 
             {/* ── Case section ── */}
-            {caseInfo && (
+            {CASE_ENABLED && caseInfo && (
               <section className="mb-5">
                 <div className="pl-1 mb-3 text-sm font-bold uppercase tracking-[0.18em] text-[#677086]">
                   {t('shop:cases.sectionTitle')}
@@ -765,7 +767,7 @@ export function ShopScreen() {
       </div>
 
       {/* Case opening modal */}
-      {caseInfo && (
+      {CASE_ENABLED && caseInfo && (
         <CaseOpenModal
           isOpen={caseModalOpen}
           currency={caseCurrency}
@@ -795,10 +797,12 @@ export function ShopScreen() {
       )}
 
       {/* Stars withdrawal modal */}
-      <WithdrawalModal
-        isOpen={withdrawalOpen}
-        onClose={() => setWithdrawalOpen(false)}
-      />
+      {CASE_ENABLED && (
+        <WithdrawalModal
+          isOpen={withdrawalOpen}
+          onClose={() => setWithdrawalOpen(false)}
+        />
+      )}
     </div>
   );
 }

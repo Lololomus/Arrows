@@ -51,6 +51,8 @@ FAILURE_AD_NOT_COMPLETED = "AD_NOT_COMPLETED"
 FAILURE_SPIN_RETRY_NOT_AVAILABLE = "SPIN_RETRY_NOT_AVAILABLE"
 FAILURE_SPIN_RETRY_ALREADY_GRANTED = "SPIN_RETRY_ALREADY_GRANTED"
 
+TASK_COINS_REWARD = 50
+
 MSK = timezone(timedelta(hours=3))
 REVIVE_LIMIT_PER_LEVEL = 3
 DAILY_COINS_WINDOW = timedelta(hours=24)
@@ -542,12 +544,17 @@ async def _grant_task_revive(
     result = await db.execute(
         update(User)
         .where(User.id == user.id)
-        .values(revive_balance=User.revive_balance + 1)
-        .returning(User.revive_balance)
+        .values(
+            revive_balance=User.revive_balance + 1,
+            coins=User.coins + TASK_COINS_REWARD,
+        )
+        .returning(User.revive_balance, User.coins)
     )
     row = result.first()
-    new_balance = int(row[0]) if row else (user.revive_balance + 1)
-    user.revive_balance = new_balance
+    new_revive_balance = int(row[0]) if row else (user.revive_balance + 1)
+    new_coins = int(row[1]) if row else (user.coins + TASK_COINS_REWARD)
+    user.revive_balance = new_revive_balance
+    user.coins = new_coins
 
     claim = AdRewardClaim(
         user_id=user.id,
@@ -564,6 +571,7 @@ async def _grant_task_revive(
     intent.failure_code = None
     intent.fulfilled_at = now
     intent.revive_granted = True
+    intent.coins = new_coins
     intent.used_today = 1
     intent.limit_today = 1
     intent.resets_at = resets_at

@@ -168,6 +168,38 @@ BOT_TEXT: dict[str, dict[SupportedLocale, str]] = {
         "ru": "🚀 Играть сейчас",
         "en": "🚀 Play now",
     },
+    "daily_task_available": {
+        "ru": (
+            "📋 <b>Новое ежедневное задание!</b>\n\n"
+            "Выполни задание и получи <b>1 ревайв + 50 монет</b>.\n"
+            "Задание сбрасывается каждый день — не пропусти!"
+        ),
+        "en": (
+            "📋 <b>New daily task available!</b>\n\n"
+            "Complete the task and get <b>1 revive + 50 coins</b>.\n"
+            "Resets every day — don't miss it!"
+        ),
+    },
+    "tasks_button": {
+        "ru": "📋 Задания",
+        "en": "📋 Tasks",
+    },
+    "adsgram_task_reward": {
+        "ru": (
+            "✅ <b>Задание выполнено!</b>\n\n"
+            "Ты получил <b>+1 ревайв</b> и <b>+50 монет</b>.\n"
+            "Возвращайся завтра за новой наградой!"
+        ),
+        "en": (
+            "✅ <b>Task completed!</b>\n\n"
+            "You received <b>+1 revive</b> and <b>+50 coins</b>.\n"
+            "Come back tomorrow for another reward!"
+        ),
+    },
+    "play_button": {
+        "ru": "🎮 Играть",
+        "en": "🎮 Play",
+    },
 }
 
 

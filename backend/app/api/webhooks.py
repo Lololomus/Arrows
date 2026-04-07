@@ -325,6 +325,7 @@ async def _handle_adsgram_reward_callback(
         f"resolved_user={user.id} pending_intent_found=true intent_id={granted_intent.intent_id} "
         f"ad_reference={ad_reference}"
     )
+
     return {"ok": True, "note": "processed", "intent": serialize_intent(granted_intent).model_dump()}
 
 

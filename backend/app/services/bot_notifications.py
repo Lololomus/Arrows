@@ -107,6 +107,60 @@ async def notify_new_season(telegram_id: int, locale: str | None = None) -> Noti
         return "failed"
 
 
+async def notify_daily_task_available(telegram_id: int, locale: str | None = None) -> NotificationDelivery:
+    """Broadcast: new daily AdsGram task is available."""
+    locale = normalize_locale(locale)
+    text = bot_text("daily_task_available", locale)
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text=bot_text("tasks_button", locale),
+                web_app=WebAppInfo(url=settings.WEBAPP_URL),
+            )
+        ]]
+    )
+    try:
+        await _get_bot().send_message(
+            chat_id=telegram_id,
+            text=text,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+        return "sent"
+    except (TelegramForbiddenError, TelegramBadRequest):
+        return "blocked"
+    except Exception as e:
+        logger.warning("Failed to send daily-task notification to %s: %s", telegram_id, e)
+        return "failed"
+
+
+async def notify_adsgram_task_reward(telegram_id: int, locale: str | None = None) -> NotificationDelivery:
+    """Notification: AdsGram task completed — revive + coins granted."""
+    locale = normalize_locale(locale)
+    text = bot_text("adsgram_task_reward", locale)
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text=bot_text("play_button", locale),
+                web_app=WebAppInfo(url=settings.WEBAPP_URL),
+            )
+        ]]
+    )
+    try:
+        await _get_bot().send_message(
+            chat_id=telegram_id,
+            text=text,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+        return "sent"
+    except (TelegramForbiddenError, TelegramBadRequest):
+        return "blocked"
+    except Exception as e:
+        logger.warning("Failed to send adsgram task reward notification to %s: %s", telegram_id, e)
+        return "failed"
+
+
 async def notify_streak_warning(telegram_id: int, streak: int, tier: int, locale: str | None = None) -> NotificationDelivery:
     """Notification: streak will reset in ~6 hours."""
     locale = normalize_locale(locale)
