@@ -465,7 +465,7 @@ function AdsGramTaskCard({ animDelay = 0 }: { animDelay?: number }) {
   // ── Active state — render web component ─────────────────────────────────────
   if (!elementReady && !isDev) return null;
 
-  const buttonCls = 'shrink-0 flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-red-500 to-pink-500 px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white shadow-[0_4px_15px_rgba(239,68,68,0.3)]';
+  const buttonCls = 'shrink-0 whitespace-nowrap flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-red-500 to-pink-500 px-3 py-2 text-[11px] font-bold uppercase tracking-normal text-white shadow-[0_4px_15px_rgba(239,68,68,0.3)]';
 
   return (
     <motion.div
@@ -489,23 +489,23 @@ function AdsGramTaskCard({ animDelay = 0 }: { animDelay?: number }) {
               </span>
             </div>
           </div>
-          <div className="mb-2 text-[11px] leading-tight text-white/50 line-clamp-1">
+          <p className="text-[11px] leading-tight text-white/50">
             {tooLongSession
               ? translate('tasks:adsgramTask.tooLongSession')
               : (error ?? translate('tasks:adsgramTask.description'))}
-          </div>
-          {/* adsgram-task: display:contents so only the button slot appears */}
+          </p>
+          {/* adsgram-task wraps its injected task content + our slotted buttons */}
           <adsgram-task
             ref={taskRef}
             data-block-id={blockId}
             {...(isDev ? { 'data-debug': 'true' } : {})}
             data-debug-console="false"
-            style={{ display: 'contents' }}
+            style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px', minHeight: '36px' }}
           >
             <div slot="button" className={buttonCls}>{translate('tasks:adsgramTask.buttonSlot')}</div>
             <div slot="claim"  className={buttonCls}>{translate('tasks:adsgramTask.claimSlot')}</div>
             <span slot="reward" style={{ display: 'none' }} />
-            <div slot="done" className="shrink-0 inline-flex items-center gap-1 rounded-xl border border-green-500/25 bg-green-500/10 px-2.5 py-1.5 text-[10px] font-bold text-green-400">
+            <div slot="done" className="inline-flex items-center gap-1 rounded-xl border border-green-500/25 bg-green-500/10 px-2.5 py-1.5 text-[10px] font-bold text-green-400">
               <CheckCircle2 size={11} />{translate('common:done')}
             </div>
           </adsgram-task>

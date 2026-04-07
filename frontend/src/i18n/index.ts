@@ -269,7 +269,7 @@ const resources = {
       },
       adsgramTask: {
         title: 'Ежедневное задание',
-        description: 'Выполни задание и получи +1 ❤️ и +50 монет',
+        description: 'Выполни задание и получи призы',
         rewardSlot: '+1 ❤️ + 50 монет',
         buttonSlot: 'Получить',
         claimSlot: 'Забрать',
@@ -890,7 +890,7 @@ const resources = {
       },
       adsgramTask: {
         title: 'Daily task',
-        description: 'Complete the task and get +1 ❤️ and +50 coins',
+        description: 'Complete the task and get your rewards',
         rewardSlot: '+1 ❤️ + 50 coins',
         buttonSlot: 'Get',
         claimSlot: 'Claim',

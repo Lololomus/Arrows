@@ -292,6 +292,31 @@ button, .clickable {
 }
 
 /* ============================================
+   ADSGRAM TASK WEB COMPONENT
+   ============================================ */
+
+/* Force dark-theme text & image styles on AdsGram injected content */
+adsgram-task * {
+  color: rgba(255, 255, 255, 0.85) !important;
+  background-color: transparent !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  font-family: inherit !important;
+}
+
+adsgram-task img {
+  border-radius: 10px !important;
+  width: 40px !important;
+  height: 40px !important;
+  object-fit: cover !important;
+  flex-shrink: 0 !important;
+}
+
+adsgram-task a {
+  color: #fbbf24 !important;
+  text-decoration: none !important;
+}
+
+/* ============================================
    GAME FIELD
    ============================================ */
 
