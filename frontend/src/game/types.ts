@@ -282,12 +282,12 @@ export interface TaskTier {
 export interface TaskChannelMeta {
   channelId: string;
   name: string;
-  username: string;
-  url: string;
+  username?: string | null;
+  url?: string | null;
 }
 
 export interface TaskDto {
-  id: 'arcade_levels' | 'daily_levels' | 'friends_confirmed' | 'official_channel';
+  id: 'arcade_levels' | 'daily_levels' | 'friends_confirmed' | 'official_channel' | 'partner_channel';
   kind: 'stepped' | 'single';
   baseTitle: string;
   baseDescription: string;

@@ -303,7 +303,7 @@ export const API_ENDPOINTS = {
 // ============================================
 
 export const ADS_ENABLED = import.meta.env.VITE_ADS_ENABLED === 'true';
-export const ADS_FIRST_ELIGIBLE_LEVEL = 21;
+export const ADS_FIRST_ELIGIBLE_LEVEL = 15;
 
 export const ADSGRAM_BLOCK_IDS = {
   rewardDailyCoins: import.meta.env.VITE_ADSGRAM_REWARD_DAILY_COINS_BLOCK_ID || '',

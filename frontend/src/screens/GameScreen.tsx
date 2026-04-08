@@ -1695,9 +1695,13 @@ export function GameScreen() {
         useGameStore.getState().revivePlayer();
         // Р•СЃР»Рё РЅРµ success (РІС‚РѕСЂР°СЏ РїРѕРїС‹С‚РєР°, SDK РЅРµ РІРµСЂРЅСѓР» done:true) вЂ” СЃРѕС…СЂР°РЅСЏРµРј
         // intent РґР»СЏ reconciler'Р° РЅР° СЃР»СѓС‡Р°Р№, РµСЃР»Рё webhook РѕС‚ AdsGram РїСЂРёРґС‘С‚ РїРѕР·Р¶Рµ.
-        if (!adResult.success) {
-          rememberPendingRewardIntent({ intentId: intent.intentId, placement: 'reward_revive' });
-        }
+        // Track intent always — reconciler retries clientComplete for successful ads,
+        // for failed-ad second attempts waits for AdsGram webhook only.
+        rememberPendingRewardIntent({
+          intentId: intent.intentId,
+          placement: 'reward_revive',
+          adCompleted: adResult.success,
+        });
         void adsApi.clientCompleteRewardIntent(intent.intentId).then((s) => {
           applyReviveQuotaFromStatus(s);
         }).catch(() => {

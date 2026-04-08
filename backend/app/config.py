@@ -45,8 +45,14 @@ class Settings(BaseSettings):
     WEBAPP_URL: str = "https://arrowreward.ru.tuna.am/"
     OFFICIAL_CHANNEL_ID: str = ""
     OFFICIAL_CHANNEL_USERNAME: str = ""
+    OFFICIAL_CHANNEL_URL: str = ""
     OFFICIAL_CHANNEL_NAME: str = "Официальный канал"
     OFFICIAL_CHANNEL_REWARD: int = 50
+    PARTNER_CHANNEL_ID: str = ""
+    PARTNER_CHANNEL_USERNAME: str = ""
+    PARTNER_CHANNEL_URL: str = ""
+    PARTNER_CHANNEL_NAME: str = "Партнёрский канал"
+    PARTNER_CHANNEL_REWARD: int = 50
     
     # TON
     TON_PAYMENTS_ENABLED: bool = False
@@ -101,7 +107,7 @@ class Settings(BaseSettings):
     AD_REWARD_COINS: int = 25
 
     # Ads & economy
-    AD_FIRST_ELIGIBLE_LEVEL: int = 21
+    AD_FIRST_ELIGIBLE_LEVEL: int = 15
     AD_DAILY_COINS_REWARD: int = 20
     AD_DAILY_COINS_LIMIT: int = 5
     AD_HINT_REWARD: int = 3

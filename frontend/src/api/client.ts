@@ -122,8 +122,8 @@ interface RawTaskChannelMeta {
   channel_id?: string;
   channelId?: string;
   name: string;
-  username: string;
-  url: string;
+  username?: string | null;
+  url?: string | null;
 }
 
 interface RawTaskDto {
@@ -1422,6 +1422,7 @@ export const tasksApi = {
     dailyLevels?: number;
     friendsConfirmed?: number;
     officialChannel?: boolean;
+    partnerChannel?: boolean;
   }> => {
     const raw = await request<Record<string, unknown>>(API_ENDPOINTS.tasks.devState);
     const state = (raw.state ?? {}) as Record<string, unknown>;
@@ -1430,6 +1431,7 @@ export const tasksApi = {
       dailyLevels: state.daily_levels != null ? Number(state.daily_levels) : undefined,
       friendsConfirmed: state.friends_confirmed != null ? Number(state.friends_confirmed) : undefined,
       officialChannel: state.official_channel != null ? Boolean(state.official_channel) : undefined,
+      partnerChannel: state.partner_channel != null ? Boolean(state.partner_channel) : undefined,
     };
   },
 
@@ -1438,11 +1440,13 @@ export const tasksApi = {
     dailyLevels?: number;
     friendsConfirmed?: number;
     officialChannel?: boolean;
+    partnerChannel?: boolean;
   }): Promise<{
     arcadeLevels?: number;
     dailyLevels?: number;
     friendsConfirmed?: number;
     officialChannel?: boolean;
+    partnerChannel?: boolean;
   }> => {
     const raw = await request<Record<string, unknown>>(API_ENDPOINTS.tasks.devState, {
       method: 'POST',
@@ -1451,6 +1455,7 @@ export const tasksApi = {
         daily_levels: payload.dailyLevels,
         friends_confirmed: payload.friendsConfirmed,
         official_channel: payload.officialChannel,
+        partner_channel: payload.partnerChannel,
       }),
     });
     const state = (raw.state ?? {}) as Record<string, unknown>;
@@ -1459,6 +1464,7 @@ export const tasksApi = {
       dailyLevels: state.daily_levels != null ? Number(state.daily_levels) : undefined,
       friendsConfirmed: state.friends_confirmed != null ? Number(state.friends_confirmed) : undefined,
       officialChannel: state.official_channel != null ? Boolean(state.official_channel) : undefined,
+      partnerChannel: state.partner_channel != null ? Boolean(state.partner_channel) : undefined,
     };
   },
 

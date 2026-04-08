@@ -39,6 +39,7 @@ type TaskDevState = {
   dailyLevels: number;
   friendsConfirmed: number;
   officialChannel: boolean;
+  partnerChannel: boolean;
 };
 
 const STAGGER = 0.07;
@@ -49,12 +50,14 @@ const DEV_TASKS_ENABLED = import.meta.env.DEV || (
 
 const TASK_UI: Record<TaskDto['id'], TaskUiConfig> = {
   official_channel: { icon: Send,   iconColor: 'text-green-400',  iconBg: 'bg-green-500/20'  },
+  partner_channel:  { icon: Send,   iconColor: 'text-cyan-400',   iconBg: 'bg-cyan-500/20'   },
   daily_levels:     { icon: Trophy, iconColor: 'text-amber-400',  iconBg: 'bg-amber-500/20'  },
   arcade_levels:    { icon: Trophy, iconColor: 'text-blue-400',   iconBg: 'bg-blue-500/20'   },
   friends_confirmed:{ icon: Users,  iconColor: 'text-purple-400', iconBg: 'bg-purple-500/20' },
 };
 
 const isDailyTask = (task: TaskDto) => task.id.startsWith('daily_');
+const isPartnerTask = (task: TaskDto) => task.id === 'partner_channel';
 
 function formatTaskRewardLabel(rewardCoins: number, rewardHints = 0, rewardRevives = 0): string {
   const parts: string[] = [];
@@ -217,8 +220,8 @@ function DailyAdTaskCard({ currentLevel, animDelay = 0, onReward, onEligible, de
         updateUser({ coins: currentCoins + 20 });
         setUsed(used + 1);
         onReward(20, triggerEl);
-        // Reconciler will correct usedToday / coins from server once confirmed.
-        rememberPendingRewardIntent({ intentId: result.intentId!, placement: 'reward_daily_coins' });
+        // Reconciler will retry clientComplete until server confirms.
+        rememberPendingRewardIntent({ intentId: result.intentId!, placement: 'reward_daily_coins', adCompleted: true });
         return;
       }
 
@@ -333,7 +336,7 @@ function AdsGramTaskCard({ animDelay = 0 }: { animDelay?: number }) {
   const [tooLongSession, setTooLongSession] = useState(false);
   const [now,          setNow]          = useState(() => Date.now());
 
-  const taskRef    = useRef<HTMLDivElement | null>(null);
+  const taskRef    = useRef<HTMLElement | null>(null);
   const grantingRef = useRef(false);
 
   const loadStatus = useCallback(async () => {
@@ -385,8 +388,10 @@ function AdsGramTaskCard({ animDelay = 0 }: { animDelay?: number }) {
       if (grantingRef.current) return;
       grantingRef.current = true;
       setError(null);
+      let intentId: string | null = null;
       try {
         const intent = await adsApi.createRewardIntent({ placement: 'reward_task' });
+        intentId = intent.intentId;
         const status = await adsApi.clientCompleteRewardIntent(intent.intentId);
         if (status.status === 'granted') {
           setTaskUsed(true);
@@ -396,7 +401,12 @@ function AdsGramTaskCard({ animDelay = 0 }: { animDelay?: number }) {
           setError(translate('tasks:adsgramTask.error'));
         }
       } catch {
-        setError(translate('tasks:adsgramTask.error'));
+        if (intentId) {
+          // Intent created but complete failed — reconciler retries in background.
+          rememberPendingRewardIntent({ intentId, placement: 'reward_task', adCompleted: true });
+        } else {
+          setError(translate('tasks:adsgramTask.error'));
+        }
       } finally {
         grantingRef.current = false;
       }
@@ -465,7 +475,35 @@ function AdsGramTaskCard({ animDelay = 0 }: { animDelay?: number }) {
   // ── Active state — render web component ─────────────────────────────────────
   if (!elementReady && !isDev) return null;
 
-  const buttonCls = 'shrink-0 whitespace-nowrap flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-red-500 to-pink-500 px-3 py-2 text-[12px] font-bold text-white shadow-[0_4px_15px_rgba(239,68,68,0.3)]';
+  const slotBtnStyle: React.CSSProperties = {
+    display: 'flex',
+    width: '100%',
+    boxSizing: 'border-box',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px',
+    minWidth: 0,
+    whiteSpace: 'nowrap',
+    borderRadius: '12px',
+    padding: '8px 16px',
+    fontSize: '12px',
+    fontWeight: 700,
+    color: '#ffffff',
+    background: 'linear-gradient(to right, #ef4444, #ec4899)',
+    boxShadow: '0 4px 15px rgba(239,68,68,0.3)',
+    border: 'none',
+    cursor: 'pointer',
+  };
+  const taskHostStyle = {
+    display: 'block',
+    width: '100%',
+    marginTop: '10px',
+    minHeight: '40px',
+    overflow: 'hidden',
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: '12px',
+    '--adsgram-task-button-width': '112px',
+  } as React.CSSProperties;
 
   return (
     <motion.div
@@ -497,28 +535,20 @@ function AdsGramTaskCard({ animDelay = 0 }: { animDelay?: number }) {
         </div>
       </div>
 
-      {/* Bottom row: full-width adsgram content + button */}
+      {/* Bottom row: let AdsGram layout itself and size the button column via CSS vars */}
       <adsgram-task
         ref={taskRef}
         data-block-id={blockId}
         {...(isDev ? { 'data-debug': 'true' } : {})}
         data-debug-console="false"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          marginTop: '10px',
-          minHeight: '40px',
-          color: 'rgba(255,255,255,0.85)',
-          fontSize: '12px',
-        }}
+        style={taskHostStyle}
       >
-        <div slot="button" className={buttonCls}>{translate('tasks:adsgramTask.buttonSlot')}</div>
-        <div slot="claim"  className={buttonCls}>{translate('tasks:adsgramTask.claimSlot')}</div>
-        <span slot="reward" style={{ display: 'none' }} />
-        <div slot="done" className="inline-flex items-center gap-1 rounded-xl border border-green-500/25 bg-green-500/10 px-2.5 py-1.5 text-[10px] font-bold text-green-400">
-          <CheckCircle2 size={11} />{translate('common:done')}
-        </div>
+          <div slot="button" style={slotBtnStyle}>{translate('tasks:adsgramTask.buttonSlot')}</div>
+          <div slot="claim"  style={slotBtnStyle}>{translate('tasks:adsgramTask.claimSlot')}</div>
+          <span slot="reward" style={{ display: 'none' }} />
+          <div slot="done" style={{ ...slotBtnStyle, background: 'transparent', border: '1px solid rgba(74,222,128,0.25)', color: 'rgba(74,222,128,1)', boxShadow: 'none', fontSize: '10px', gap: '4px', padding: '6px 10px' }}>
+            <CheckCircle2 size={11} />{translate('common:done')}
+          </div>
       </adsgram-task>
     </motion.div>
   );
@@ -532,6 +562,7 @@ const DEFAULT_TASK_DEV_STATE: TaskDevState = {
   dailyLevels: 0,
   friendsConfirmed: 0,
   officialChannel: false,
+  partnerChannel: false,
 };
 
 function DevPresetButton({
@@ -656,6 +687,26 @@ function TaskDevPanel({
               }`}
             >
               {value.officialChannel ? 'Enabled' : 'Disabled'}
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-white/8 bg-black/15 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-bold text-white">Partner channel</div>
+              <div className="mt-1 text-[11px] text-white/55">Makes the partner task claimable without opening the channel</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onChange({ partnerChannel: !value.partnerChannel })}
+              className={`rounded-full px-3 py-2 text-[11px] font-bold uppercase tracking-[0.14em] transition ${
+                value.partnerChannel
+                  ? 'bg-cyan-500/20 text-cyan-300'
+                  : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              {value.partnerChannel ? 'Enabled' : 'Disabled'}
             </button>
           </div>
         </div>
@@ -790,6 +841,7 @@ export function TasksScreen() {
           dailyLevels: state.dailyLevels ?? 0,
           friendsConfirmed: state.friendsConfirmed ?? 0,
           officialChannel: state.officialChannel ?? false,
+          partnerChannel: state.partnerChannel ?? false,
         });
         setTaskDevLoaded(true);
       } catch {
@@ -1021,11 +1073,14 @@ export function TasksScreen() {
 
   const renderTaskList = () => {
     const dailyTasks    = tasks.filter(isDailyTask);
-    const nonDailyTasks = tasks.filter((t) => !isDailyTask(t));
-    const active    = nonDailyTasks.filter((t) => t.status !== 'completed');
+    const partnerTasks = tasks.filter(isPartnerTask);
+    const otherTasks = tasks.filter((t) => !isDailyTask(t) && !isPartnerTask(t));
+    const active    = otherTasks.filter((t) => t.status !== 'completed');
     const dailyActive    = dailyTasks.filter((t) => t.status !== 'completed');
     const dailyCompleted = dailyTasks.filter((t) => t.status === 'completed');
-    const completed = [...dailyCompleted, ...nonDailyTasks.filter((t) => t.status === 'completed')];
+    const partnerActive = partnerTasks.filter((t) => t.status !== 'completed');
+    const partnerCompleted = partnerTasks.filter((t) => t.status === 'completed');
+    const completed = [...dailyCompleted, ...partnerCompleted, ...otherTasks.filter((t) => t.status === 'completed')];
     const DEV_ADS_PREVIEW  = import.meta.env.DEV;
     const showAds          = DEV_ADS_PREVIEW || (ADS_ENABLED && isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardDailyCoins));
     const showAdsGramTask  = DEV_ADS_PREVIEW || (ADS_ENABLED && isValidTaskBlockId(ADSGRAM_BLOCK_IDS.task));
@@ -1073,7 +1128,17 @@ export function TasksScreen() {
     }
 
     // 5. Divider → активные (если что-то есть выше)
-    const anythingAbove = hasDailySection;
+    if (partnerActive.length > 0) {
+      nodes.push(
+        <SectionDivider key="d-partner" label={translate('tasks:sections.partner')}
+          icon={<Send size={10} className="text-cyan-400" />}
+          lineClass="via-cyan-400/20" delay={i++ * STAGGER}
+        />
+      );
+      for (const task of partnerActive) nodes.push(renderTaskCard(task, i++ * STAGGER));
+    }
+
+    const anythingAbove = hasDailySection || partnerActive.length > 0;
     if (anythingAbove && active.length > 0) {
       nodes.push(
         <SectionDivider key="d-active" label={translate('tasks:sections.tasks')}
@@ -1110,6 +1175,7 @@ export function TasksScreen() {
         dailyLevels: next.dailyLevels ?? 0,
         friendsConfirmed: next.friendsConfirmed ?? 0,
         officialChannel: next.officialChannel ?? false,
+        partnerChannel: next.partnerChannel ?? false,
       });
       setTaskDevLoaded(true);
       setOpenedChannelIds(new Set());

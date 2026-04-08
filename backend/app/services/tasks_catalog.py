@@ -25,6 +25,20 @@ TASKS_CATALOG = [
         ],
     },
     {
+        "id": "partner_channel",
+        "kind": "single",
+        "base_title": "Подпишитесь на канал",
+        "base_description": "+50 монет за подписку",
+        "tiers": [
+            {
+                "claim_id": "partner_channel_subscribe",
+                "target": 1,
+                "reward_coins": 50,
+                "title": "Подпишитесь на канал",
+            }
+        ],
+    },
+    {
         "id": "arcade_levels",
         "kind": "stepped",
         "base_title": "Пройти уровни",

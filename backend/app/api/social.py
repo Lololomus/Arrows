@@ -23,7 +23,11 @@ from ..schemas import (
     LeaderboardEntry, LeaderboardResponse,
     RewardChannel, ClaimChannelRequest
 )
-from ..services.tasks import claim_task, get_official_channel_config
+from ..services.tasks import (
+    claim_task,
+    get_channel_task_config_by_channel_id,
+    get_configured_channel_task_configs,
+)
 from .auth import get_current_user
 
 
@@ -612,9 +616,6 @@ async def get_channels(
     db: AsyncSession = Depends(get_db)
 ):
     """Получить список каналов для подписки."""
-    channel = get_official_channel_config()
-    if not channel:
-        return []
 
     # Получаем уже заклейменные
     result = await db.execute(
@@ -630,6 +631,7 @@ async def get_channels(
             reward_coins=channel["reward_coins"],
             claimed=channel["channel_id"] in claimed,
         )
+        for channel in get_configured_channel_task_configs()
     ]
 
 
@@ -640,8 +642,8 @@ async def claim_channel_reward(
     db: AsyncSession = Depends(get_db)
 ):
     """Получить награду за подписку на канал."""
-    channel = get_official_channel_config()
-    if not channel or request.channel_id != channel["channel_id"]:
+    channel = get_channel_task_config_by_channel_id(request.channel_id)
+    if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
     locked_user_result = await db.execute(select(User).where(User.id == user.id).with_for_update())
@@ -649,7 +651,7 @@ async def claim_channel_reward(
     if not locked_user:
         raise HTTPException(status_code=401, detail="User not found")
 
-    result = await claim_task(locked_user, "official_channel_subscribe", db)
+    result = await claim_task(locked_user, channel["claim_id"], db)
     await db.commit()
     return {"success": True, "coins": result.coins, "bonus": result.reward_coins}
 

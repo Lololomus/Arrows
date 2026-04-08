@@ -1,10 +1,16 @@
 ﻿// ===== 📄 ФАЙЛ: frontend/src/screens/LeaderboardScreen.tsx =====
 import { useState, useMemo, useRef, useEffect, useCallback, memo, type ReactNode } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { Trophy, Gift, Info } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { useAppStore } from '../stores/store';
 import { socialApi } from '../api/client';
+import astralShardImage from '../assets/leaderboard-nfts/astral-shard.png';
+import heroicHelmetImage from '../assets/leaderboard-nfts/heroic-helmet.png';
+import ionGemImage from '../assets/leaderboard-nfts/ion-gem.png';
+import lootBagImage from '../assets/leaderboard-nfts/loot-bag.png';
+import perfumeBottleImage from '../assets/leaderboard-nfts/perfume-bottle.png';
+import preciousPeachImage from '../assets/leaderboard-nfts/precious-peach.png';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { StarParticles } from '../components/ui/StarParticles';
 import { useParticleRuntimeProfile } from '../components/ui/particleRuntimeProfile';
@@ -160,6 +166,7 @@ type SeasonGiftRow = {
   rank: number;
   medal: string;
   giftName: string;
+  giftImageSrc: string;
   prizeValue: string;
   gradientClass: string;
   borderClass: string;
@@ -167,13 +174,26 @@ type SeasonGiftRow = {
 };
 
 const SEASON_GIFT_ROWS: readonly SeasonGiftRow[] = [
-  { rank: 1, medal: '🥇', giftName: 'Precious Peach',  prizeValue: '~$500', gradientClass: 'from-yellow-500/25 via-yellow-900/15 to-transparent', borderClass: 'border-yellow-500/40', nameClass: 'text-yellow-300' },
-  { rank: 2, medal: '🥈', giftName: 'Heroic Helmet',   prizeValue: '~$270', gradientClass: 'from-slate-400/20 via-slate-700/10 to-transparent',   borderClass: 'border-gray-400/35',    nameClass: 'text-gray-200'   },
-  { rank: 3, medal: '🥉', giftName: 'Astral Shard',    prizeValue: '~$230', gradientClass: 'from-orange-500/25 via-orange-900/15 to-transparent', borderClass: 'border-orange-500/35',  nameClass: 'text-orange-300' },
-  { rank: 4, medal: '',   giftName: 'Loot Bag',         prizeValue: '~$180', gradientClass: 'from-yellow-500/15 to-transparent',                  borderClass: 'border-yellow-500/20',  nameClass: 'text-yellow-200' },
-  { rank: 5, medal: '',   giftName: 'Perfume Bottle',   prizeValue: '~$120', gradientClass: 'from-yellow-500/10 to-transparent',                  borderClass: 'border-yellow-500/15',  nameClass: 'text-yellow-200' },
-  { rank: 6, medal: '',   giftName: 'Ion Gem',          prizeValue: '~$105', gradientClass: 'from-yellow-500/10 to-transparent',                  borderClass: 'border-yellow-500/10',  nameClass: 'text-yellow-200' },
+  { rank: 1, medal: '🥇', giftName: 'Precious Peach',  giftImageSrc: preciousPeachImage,  prizeValue: '~$500', gradientClass: 'from-yellow-500/25 via-yellow-900/15 to-transparent', borderClass: 'border-yellow-500/40', nameClass: 'text-yellow-300' },
+  { rank: 2, medal: '🥈', giftName: 'Heroic Helmet',   giftImageSrc: heroicHelmetImage,   prizeValue: '~$270', gradientClass: 'from-slate-400/20 via-slate-700/10 to-transparent',   borderClass: 'border-gray-400/35',    nameClass: 'text-gray-200'   },
+  { rank: 3, medal: '🥉', giftName: 'Astral Shard',    giftImageSrc: astralShardImage,    prizeValue: '~$230', gradientClass: 'from-orange-500/25 via-orange-900/15 to-transparent', borderClass: 'border-orange-500/35',  nameClass: 'text-orange-300' },
+  { rank: 4, medal: '',   giftName: 'Loot Bag',        giftImageSrc: lootBagImage,        prizeValue: '~$180', gradientClass: 'from-yellow-500/15 to-transparent',                  borderClass: 'border-yellow-500/20',  nameClass: 'text-yellow-200' },
+  { rank: 5, medal: '',   giftName: 'Perfume Bottle',  giftImageSrc: perfumeBottleImage,  prizeValue: '~$120', gradientClass: 'from-yellow-500/10 to-transparent',                  borderClass: 'border-yellow-500/15',  nameClass: 'text-yellow-200' },
+  { rank: 6, medal: '',   giftName: 'Ion Gem',         giftImageSrc: ionGemImage,         prizeValue: '~$105', gradientClass: 'from-yellow-500/10 to-transparent',                  borderClass: 'border-yellow-500/10',  nameClass: 'text-yellow-200' },
 ];
+
+const SEASON_GIFT_IDLE_ANIMATION = {
+  y: [0, -3, 0, 2, 0],
+  rotate: [0, -1.4, 0, 1.4, 0],
+  scale: [1, 1.018, 1, 0.992, 1],
+};
+
+const SEASON_GIFT_IDLE_TRANSITION = {
+  duration: 3.8,
+  times: [0, 0.25, 0.5, 0.75, 1],
+  ease: 'easeInOut' as const,
+  repeat: Infinity,
+};
 
 type SeasonPrizeGroup = {
   rankLabel: string;
@@ -411,7 +431,9 @@ async function prepareLeaderboardForDisplay(players: Player[]): Promise<void> {
 
 // --- КОМПОНЕНТ: ИНФО О СЕЗОНЕ (СВАЙП-МОДАЛКА) ---
 const SeasonInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
+  const prefersReducedMotion = useReducedMotion();
   if (typeof document === 'undefined') return null;
+  const shouldAnimateGifts = isOpen && !prefersReducedMotion;
 
   return createPortal(
     <AnimatePresence>
@@ -470,7 +492,18 @@ const SeasonInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose: (
                           : <span className="text-white/40 font-black text-base">{row.rank}</span>
                         }
                       </div>
-                      <span className={row.rank <= 3 ? 'text-2xl' : 'text-xl'}>🎁</span>
+                      <motion.div
+                        animate={shouldAnimateGifts ? SEASON_GIFT_IDLE_ANIMATION : undefined}
+                        transition={shouldAnimateGifts ? SEASON_GIFT_IDLE_TRANSITION : undefined}
+                        className={`${row.rank <= 3 ? 'h-12 w-12' : 'h-10 w-10'} shrink-0`}
+                        style={{ transformOrigin: '50% 58%', willChange: shouldAnimateGifts ? 'transform' : 'auto' }}
+                      >
+                        <img
+                          src={row.giftImageSrc}
+                          alt={row.giftName}
+                          className="h-full w-full object-contain drop-shadow-[0_8px_12px_rgba(0,0,0,0.35)]"
+                        />
+                      </motion.div>
                       <span className={`font-black flex-1 ${row.rank <= 3 ? 'text-base' : 'text-sm'} ${row.nameClass}`}>
                         {row.giftName}
                       </span>

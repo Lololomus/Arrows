@@ -27,7 +27,28 @@ from .tasks_catalog import TASKS_CATALOG
 TASK_STATUSES = {"member", "administrator", "creator"}
 DAILY_TASK_PREFIX = "daily_"
 DAILY_CLAIM_SEPARATOR = ":"
-TASK_DEBUG_KEYS = frozenset({"arcade_levels", "daily_levels", "friends_confirmed", "official_channel"})
+CHANNEL_TASK_IDS = frozenset({"official_channel", "partner_channel"})
+CHANNEL_TASK_SETTINGS = {
+    "official_channel": {
+        "channel_id_attr": "OFFICIAL_CHANNEL_ID",
+        "channel_username_attr": "OFFICIAL_CHANNEL_USERNAME",
+        "channel_url_attr": "OFFICIAL_CHANNEL_URL",
+        "channel_name_attr": "OFFICIAL_CHANNEL_NAME",
+        "channel_reward_attr": "OFFICIAL_CHANNEL_REWARD",
+        "claim_id": "official_channel_subscribe",
+        "missing_message": "Official channel is not configured",
+    },
+    "partner_channel": {
+        "channel_id_attr": "PARTNER_CHANNEL_ID",
+        "channel_username_attr": "PARTNER_CHANNEL_USERNAME",
+        "channel_url_attr": "PARTNER_CHANNEL_URL",
+        "channel_name_attr": "PARTNER_CHANNEL_NAME",
+        "channel_reward_attr": "PARTNER_CHANNEL_REWARD",
+        "claim_id": "partner_channel_subscribe",
+        "missing_message": "Partner channel is not configured",
+    },
+}
+TASK_DEBUG_KEYS = frozenset({"arcade_levels", "daily_levels", "friends_confirmed", *CHANNEL_TASK_IDS})
 TASK_DEBUG_STATE: dict[int, dict[str, Any]] = {}
 
 
@@ -40,8 +61,9 @@ def _coerce_debug_state(raw: dict[str, Any] | None) -> dict[str, Any]:
         coerced["daily_levels"] = max(0, int(state["daily_levels"]))
     if "friends_confirmed" in state:
         coerced["friends_confirmed"] = max(0, int(state["friends_confirmed"]))
-    if "official_channel" in state:
-        coerced["official_channel"] = bool(state["official_channel"])
+    for task_id in CHANNEL_TASK_IDS:
+        if task_id in state:
+            coerced[task_id] = bool(state[task_id])
     return coerced
 
 
@@ -73,27 +95,63 @@ async def clear_task_debug_state(user_id: int) -> None:
     TASK_DEBUG_STATE.pop(user_id, None)
 
 
-def get_official_channel_config() -> dict[str, Any] | None:
-    username = settings.OFFICIAL_CHANNEL_USERNAME.strip().lstrip("@")
-    channel_id = settings.OFFICIAL_CHANNEL_ID.strip()
-    if not username or not channel_id:
+def _get_catalog_task(task_id: str) -> dict[str, Any] | None:
+    return next((task for task in TASKS_CATALOG if task["id"] == task_id), None)
+
+
+def get_channel_task_config(task_id: str) -> dict[str, Any] | None:
+    config = CHANNEL_TASK_SETTINGS.get(task_id)
+    if not config:
         return None
 
-    reward = settings.OFFICIAL_CHANNEL_REWARD
-    title = TASKS_CATALOG[0]["tiers"][0]["title"]
+    channel_id = str(getattr(settings, config["channel_id_attr"], "")).strip()
+    if not channel_id:
+        return None
+
+    username_raw = str(getattr(settings, config["channel_username_attr"], "")).strip()
+    username = username_raw.lstrip("@") or None
+    url = str(getattr(settings, config["channel_url_attr"], "")).strip() or None
+    if not url and username:
+        url = f"https://t.me/{username}"
+
+    task = _get_catalog_task(task_id)
+    title = task["tiers"][0]["title"] if task and task.get("tiers") else ""
+
     return {
+        "task_id": task_id,
         "channel_id": channel_id,
-        "name": settings.OFFICIAL_CHANNEL_NAME,
+        "name": str(getattr(settings, config["channel_name_attr"])),
         "username": username,
-        "url": f"https://t.me/{username}",
-        "reward_coins": reward,
-        "claim_id": "official_channel_subscribe",
+        "url": url,
+        "reward_coins": int(getattr(settings, config["channel_reward_attr"])),
+        "claim_id": config["claim_id"],
         "title": title,
+        "missing_message": config["missing_message"],
     }
 
 
-def _build_channel_meta() -> ChannelMetaDto | None:
-    channel = get_official_channel_config()
+def get_official_channel_config() -> dict[str, Any] | None:
+    return get_channel_task_config("official_channel")
+
+
+def get_configured_channel_task_configs() -> list[dict[str, Any]]:
+    configs: list[dict[str, Any]] = []
+    for task in TASKS_CATALOG:
+        if task["id"] not in CHANNEL_TASK_IDS:
+            continue
+        channel = get_channel_task_config(task["id"])
+        if channel:
+            configs.append(channel)
+    return configs
+
+
+def get_channel_task_config_by_channel_id(channel_id: str) -> dict[str, Any] | None:
+    needle = channel_id.strip()
+    return next((channel for channel in get_configured_channel_task_configs() if channel["channel_id"] == needle), None)
+
+
+def _build_channel_meta(task_id: str) -> ChannelMetaDto | None:
+    channel = get_channel_task_config(task_id)
     if not channel:
         return None
 
@@ -174,7 +232,7 @@ def _get_progress(
     overrides = debug_state or {}
     if task_id in overrides:
         override = overrides[task_id]
-        if task_id == "official_channel":
+        if task_id in CHANNEL_TASK_IDS:
             return 1 if bool(override) else 0
         return max(0, int(override))
 
@@ -182,7 +240,7 @@ def _get_progress(
         return max(0, user.current_level - 1)
     if task_id == "friends_confirmed":
         return max(0, season_referrals_count if season_referrals_count is not None else user.referrals_count)
-    if task_id == "official_channel":
+    if task_id in CHANNEL_TASK_IDS:
         return 0
     if task_id == "daily_levels":
         return max(0, daily_levels_completed or 0)
@@ -190,8 +248,8 @@ def _get_progress(
 
 
 def _resolve_tier(task_id: str, tier: dict[str, Any]) -> dict[str, Any]:
-    if task_id == "official_channel":
-        channel = get_official_channel_config()
+    if task_id in CHANNEL_TASK_IDS:
+        channel = get_channel_task_config(task_id)
         if not channel:
             return tier
         return {
@@ -241,7 +299,7 @@ def _build_task_dto(
 
     if next_tier_index is None:
         status = "completed"
-    elif task["id"] == "official_channel":
+    elif task["id"] in CHANNEL_TASK_IDS:
         next_tier = tiers[next_tier_index]
         status = "claimable" if progress >= next_tier.target else "action_required"
     else:
@@ -257,7 +315,7 @@ def _build_task_dto(
         status=status,
         next_tier_index=next_tier_index,
         tiers=tiers,
-        channel=_build_channel_meta() if task["id"] == "official_channel" else None,
+        channel=_build_channel_meta(task["id"]) if task["id"] in CHANNEL_TASK_IDS else None,
     )
 
 
@@ -306,12 +364,12 @@ def _get_tier_by_claim_id(claim_id: str) -> tuple[dict[str, Any], dict[str, Any]
     raise HTTPException(status_code=404, detail={"code": "TASK_NOT_FOUND", "message": "Task not found"})
 
 
-async def verify_official_channel_subscription(user: User) -> dict[str, Any]:
-    channel = get_official_channel_config()
+async def verify_channel_subscription(user: User, task_id: str) -> dict[str, Any]:
+    channel = get_channel_task_config(task_id)
     if not channel:
         raise HTTPException(
             status_code=503,
-            detail={"code": "CHANNEL_CONFIG_MISSING", "message": "Official channel is not configured"},
+            detail={"code": "CHANNEL_CONFIG_MISSING", "message": CHANNEL_TASK_SETTINGS[task_id]["missing_message"]},
         )
     if not settings.TELEGRAM_BOT_TOKEN:
         raise HTTPException(
@@ -401,13 +459,13 @@ async def claim_task(
             season_referrals_count = await _count_season_referrals(db, user.id)
         progress = _get_progress(task["id"], user, season_referrals_count=season_referrals_count, debug_state=debug_state)
 
-    if task["id"] == "official_channel":
+    if task["id"] in CHANNEL_TASK_IDS:
         if progress >= tier["target"]:
-            channel = get_official_channel_config()
+            channel = get_channel_task_config(task["id"])
             if channel:
                 await _ensure_channel_subscription(user, db, channel)
         else:
-            channel = await verify_official_channel_subscription(user)
+            channel = await verify_channel_subscription(user, task["id"])
             await _ensure_channel_subscription(user, db, channel)
     elif progress < tier["target"]:
         raise HTTPException(

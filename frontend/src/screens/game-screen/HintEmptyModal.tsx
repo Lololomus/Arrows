@@ -196,6 +196,9 @@ export function HintEmptyModal({
 
       // Ad completed — apply reward immediately without waiting for server.
       if (result.outcome === 'completed') {
+        if (result.intentId) {
+          rememberPendingRewardIntent({ intentId: result.intentId, placement: 'reward_hint', adCompleted: true });
+        }
         const currentBalance = useAppStore.getState().user?.hintBalance ?? 0;
         useAppStore.getState().updateUser({ hintBalance: currentBalance + hintRewardAmount });
         onClose();

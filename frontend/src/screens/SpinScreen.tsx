@@ -1054,7 +1054,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
       // Optimistic path: ad completed, clientComplete fires in background.
       if (rewardResult.outcome === 'completed') {
         if (rewardResult.intentId) {
-          rememberPendingRewardIntent({ intentId: rewardResult.intentId, placement: 'reward_spin_retry' });
+          rememberPendingRewardIntent({ intentId: rewardResult.intentId, placement: 'reward_spin_retry', adCompleted: true });
         }
         setResult(null);
         setSpinning(true);

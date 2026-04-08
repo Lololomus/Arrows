@@ -16,6 +16,37 @@ import { INITIAL_LIVES } from '../config/constants';
 import { rebuildIndex, removeFromIndex, globalIndex } from '../game/spatialIndex';
 import type { AppLocale } from '../i18n';
 
+const APP_PERSIST_STORAGE_KEY = 'arrow-puzzle-app';
+const STATIC_BACKGROUND_STORAGE_KEY = 'arrow-puzzle-static-background';
+
+function readStaticBackgroundPreference(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    const explicitValue = window.localStorage.getItem(STATIC_BACKGROUND_STORAGE_KEY);
+    if (explicitValue === 'true') return true;
+    if (explicitValue === 'false') return false;
+
+    const legacyStore = window.localStorage.getItem(APP_PERSIST_STORAGE_KEY);
+    if (!legacyStore) return false;
+
+    const parsed = JSON.parse(legacyStore) as { state?: { staticBackground?: unknown } };
+    return parsed.state?.staticBackground === true;
+  } catch {
+    return false;
+  }
+}
+
+function writeStaticBackgroundPreference(value: boolean): void {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(STATIC_BACKGROUND_STORAGE_KEY, String(value));
+  } catch {
+    // Ignore storage failures: the toggle should still work in-memory.
+  }
+}
+
 // ============================================
 // APP STORE (без изменений)
 // ============================================
@@ -173,8 +204,11 @@ export const useAppStore = create<AppState>()(
       serverUnavailable: false,
       setServerUnavailable: (serverUnavailable) => set({ serverUnavailable }),
 
-      staticBackground: false,
-      setStaticBackground: (staticBackground) => set({ staticBackground }),
+      staticBackground: readStaticBackgroundPreference(),
+      setStaticBackground: (staticBackground) => {
+        writeStaticBackgroundPreference(staticBackground);
+        set({ staticBackground });
+      },
     }),
     {
       name: 'arrow-puzzle-app',
@@ -183,7 +217,6 @@ export const useAppStore = create<AppState>()(
         authExpiresAt: state.authExpiresAt,
         locale: state.locale,
         localeManuallySet: state.localeManuallySet,
-        staticBackground: state.staticBackground,
       }),
     }
   )

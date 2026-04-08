@@ -443,12 +443,12 @@ class TaskTierDto(BaseModel):
 class ChannelMetaDto(BaseModel):
     channel_id: str
     name: str
-    username: str
-    url: str
+    username: Optional[str] = None
+    url: Optional[str] = None
 
 
 class TaskDto(BaseModel):
-    id: Literal["arcade_levels", "daily_levels", "friends_confirmed", "official_channel"]
+    id: Literal["arcade_levels", "daily_levels", "friends_confirmed", "official_channel", "partner_channel"]
     kind: Literal["stepped", "single"]
     base_title: str
     base_description: str

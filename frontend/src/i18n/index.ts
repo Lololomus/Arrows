@@ -257,6 +257,7 @@ const resources = {
       },
       sections: {
         daily: 'Ежедневные',
+        partner: 'Партнёрские',
         tasks: 'Задания',
         completed: 'Выполнено',
       },
@@ -297,6 +298,10 @@ const resources = {
             title: 'Подпишись на канал',
             description: 'Официальные новости и промокоды',
           },
+          partner_channel: {
+            title: 'Подпишитесь на канал',
+            description: '+50 монет за подписку',
+          },
           daily_levels: {
             title: 'Пройти 10 уровней',
             description: 'Ежедневное задание',
@@ -312,6 +317,7 @@ const resources = {
         },
         tiers: {
           official_channel_subscribe: 'Подпишись на канал',
+          partner_channel_subscribe: 'Подпишитесь на канал',
           daily_levels_10: 'Пройди 10 уровней',
           arcade_levels_5: 'Пройди 5 уровней',
           arcade_levels_10: 'Пройди 10 уровней',
@@ -878,6 +884,7 @@ const resources = {
       },
       sections: {
         daily: 'Daily',
+        partner: 'Partner',
         tasks: 'Tasks',
         completed: 'Completed',
       },
@@ -918,6 +925,10 @@ const resources = {
             title: 'Join the channel',
             description: 'Official news and promo codes',
           },
+          partner_channel: {
+            title: 'Subscribe to channel',
+            description: '+50 coins for subscribing',
+          },
           daily_levels: {
             title: 'Clear 10 levels',
             description: 'Daily task',
@@ -933,6 +944,7 @@ const resources = {
         },
         tiers: {
           official_channel_subscribe: 'Join the channel',
+          partner_channel_subscribe: 'Subscribe to channel',
           daily_levels_10: 'Clear 10 levels',
           arcade_levels_5: 'Clear 5 levels',
           arcade_levels_10: 'Clear 10 levels',

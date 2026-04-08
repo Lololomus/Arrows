@@ -11,7 +11,9 @@ import { useRewardStore } from '../stores/rewardStore';
 const RECONCILE_INTERVAL_MS = 5_000;
 const PENDING_INTENTS_LS_KEY = 'arrows_pending_intents';
 
-type PersistedIntent = Pick<ActiveRewardIntentResponse, 'intentId' | 'placement' | 'level' | 'sessionId'>;
+type PersistedIntent = Pick<ActiveRewardIntentResponse, 'intentId' | 'placement' | 'level' | 'sessionId'> & {
+  adCompleted?: boolean;
+};
 
 function loadPersistedIntents(): PersistedIntent[] {
   try {
@@ -160,7 +162,32 @@ export async function reconcileRewardIntents(): Promise<void> {
       useRewardStore.getState().setActiveIntents(activeIntents);
 
       const tracked = buildTrackedIntentMap(activeIntents, previous);
+      const persistedIntents = loadPersistedIntents();
       for (const intent of tracked.values()) {
+        const persisted = persistedIntents.find((p) => p.intentId === intent.intentId);
+
+        // If the ad was watched client-side, retry clientComplete until the server confirms.
+        // clientCompleteRewardIntent is idempotent: safe to call multiple times per cycle.
+        if (persisted?.adCompleted) {
+          let status: RewardIntentStatusResponse;
+          try {
+            status = await adsApi.clientCompleteRewardIntent(intent.intentId);
+          } catch (error) {
+            if (error instanceof ApiError && error.status === 401) {
+              throw error;
+            }
+            // Network failure — try again next cycle
+            continue;
+          }
+          if (status.status === 'granted' || status.status === 'rejected' || status.status === 'expired') {
+            await handleResolvedIntent(status);
+            continue;
+          }
+          useRewardStore.getState().upsertActiveIntent({ ...intent, ...status });
+          continue;
+        }
+
+        // Standard status poll for intents waiting on the AdsGram server webhook.
         let status: RewardIntentStatusResponse;
         try {
           status = await adsApi.getRewardIntentStatus(intent.intentId);
@@ -194,7 +221,7 @@ export async function reconcileRewardIntents(): Promise<void> {
 }
 
 export function rememberPendingRewardIntent(
-  intent: Pick<ActiveRewardIntentResponse, 'intentId' | 'placement' | 'level' | 'sessionId'>,
+  intent: Pick<ActiveRewardIntentResponse, 'intentId' | 'placement' | 'level' | 'sessionId'> & { adCompleted?: boolean },
 ): void {
   useRewardStore.getState().upsertActiveIntent({
     intentId: intent.intentId,
@@ -212,6 +239,7 @@ export function rememberPendingRewardIntent(
     placement: intent.placement,
     level: intent.level,
     sessionId: intent.sessionId,
+    adCompleted: intent.adCompleted,
   }]);
 }
 
