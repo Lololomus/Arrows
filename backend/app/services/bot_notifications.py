@@ -166,17 +166,20 @@ async def broadcast_usdt_wheel_launch(channel_id: str) -> None:
 
     Posts two messages back-to-back: Russian first, then English.
     ``channel_id`` should be the numeric channel ID or @username from settings.
+    WebApp buttons are not allowed in channels — uses a regular URL button instead.
     """
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[[
-            InlineKeyboardButton(
-                text=bot_text("spin_button", "ru"),
-                web_app=WebAppInfo(url=settings.WEBAPP_URL),
-            )
-        ]]
-    )
     for locale in ("ru", "en"):
         text = bot_text("usdt_wheel_broadcast", locale)
+        button_text = bot_text("spin_button", locale)
+        miniapp_url = f"https://t.me/{settings.TELEGRAM_BOT_USERNAME}/app"
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[[
+                InlineKeyboardButton(
+                    text=button_text,
+                    url=miniapp_url,
+                )
+            ]]
+        )
         await _get_bot().send_message(
             chat_id=channel_id,
             text=text,
