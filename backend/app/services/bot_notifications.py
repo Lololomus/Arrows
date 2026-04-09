@@ -135,7 +135,7 @@ async def notify_daily_task_available(telegram_id: int, locale: str | None = Non
 
 
 async def notify_adsgram_task_reward(telegram_id: int, locale: str | None = None) -> NotificationDelivery:
-    """Notification: AdsGram task completed — revive + coins granted."""
+    """Notification: AdsGram task completed — revive granted."""
     locale = normalize_locale(locale)
     text = bot_text("adsgram_task_reward", locale)
     keyboard = InlineKeyboardMarkup(
@@ -159,6 +159,31 @@ async def notify_adsgram_task_reward(telegram_id: int, locale: str | None = None
     except Exception as e:
         logger.warning("Failed to send adsgram task reward notification to %s: %s", telegram_id, e)
         return "failed"
+
+
+async def broadcast_usdt_wheel_launch(channel_id: str) -> None:
+    """Send USDT wheel launch announcement to the official channel.
+
+    Posts two messages back-to-back: Russian first, then English.
+    ``channel_id`` should be the numeric channel ID or @username from settings.
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text=bot_text("spin_button", "ru"),
+                web_app=WebAppInfo(url=settings.WEBAPP_URL),
+            )
+        ]]
+    )
+    for locale in ("ru", "en"):
+        text = bot_text("usdt_wheel_broadcast", locale)
+        await _get_bot().send_message(
+            chat_id=channel_id,
+            text=text,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+
 
 
 async def notify_streak_warning(telegram_id: int, streak: int, tier: int, locale: str | None = None) -> NotificationDelivery:

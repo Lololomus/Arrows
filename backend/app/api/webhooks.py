@@ -5,6 +5,7 @@ Telegram Payments, TON, AdsGram and Telegram bot updates.
 """
 
 import logging
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, Request
@@ -56,21 +57,68 @@ async def handle_telegram_payment(
         bot_token = settings.BOT_TOKEN or settings.TELEGRAM_BOT_TOKEN
         if bot_token:
             query = body["pre_checkout_query"]
-            ok, error_message = validate_admin_topup_checkout(
-                query.get("from", {}).get("id"),
-                query.get("invoice_payload"),
-            )
-            payload = {
-                "pre_checkout_query_id": query["id"],
-                "ok": ok,
-            }
+            invoice_payload = query.get("invoice_payload", "")
+
+            ok = True
+            error_message = None
+
+            if invoice_payload.startswith("welcome_bundle:"):
+                try:
+                    from ..api.shop import WELCOME_BUNDLE, _discount_until
+                    parts = invoice_payload.split(":")
+                    bundle_user_id = int(parts[1])
+                    expected_tg_id = int(parts[2]) if len(parts) > 2 else None
+                    expected_price = int(parts[3]) if len(parts) > 3 else None
+
+                    payer_tg_id = query.get("from", {}).get("id")
+                    total_amount = query.get("total_amount")
+
+                    if expected_tg_id is not None and payer_tg_id != expected_tg_id:
+                        ok = False
+                        error_message = "Not your offer"
+                    elif expected_price is not None and total_amount != expected_price:
+                        ok = False
+                        error_message = "Price has changed"
+                    else:
+                        result = await db.execute(
+                            select(User.welcome_offer_purchased, User.created_at)
+                            .where(User.id == bundle_user_id)
+                        )
+                        row = result.one_or_none()
+                        if row is None:
+                            ok = False
+                            error_message = "User not found"
+                        else:
+                            already_purchased, created_at = row
+                            if already_purchased:
+                                ok = False
+                                error_message = "Already purchased"
+                            elif (
+                                expected_price is not None
+                                and expected_price == WELCOME_BUNDLE["price_discounted"]
+                                and settings.ENVIRONMENT != "development"
+                            ):
+                                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                                deadline = _discount_until(created_at)
+                                if deadline is None or now >= deadline:
+                                    ok = False
+                                    error_message = "Discount expired"
+                except Exception:
+                    logger.exception("telegram/payment: failed to validate welcome_bundle pre_checkout")
+            else:
+                ok, error_message = validate_admin_topup_checkout(
+                    query.get("from", {}).get("id"),
+                    invoice_payload,
+                )
+
+            answer_payload: dict = {"pre_checkout_query_id": query["id"], "ok": ok}
             if error_message:
-                payload["error_message"] = error_message
+                answer_payload["error_message"] = error_message
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     await client.post(
                         f"https://api.telegram.org/bot{bot_token}/answerPreCheckoutQuery",
-                        json=payload,
+                        json=answer_payload,
                     )
             except Exception:
                 logger.exception("telegram/payment: failed to answer pre_checkout_query")
@@ -80,7 +128,37 @@ async def handle_telegram_payment(
         payment = body["message"]["successful_payment"]
         user_id = body["message"]["from"]["id"]
         charge_id = payment.get("telegram_payment_charge_id") or payment.get("provider_payment_charge_id", "")
-        item_type, item_id = payment["invoice_payload"].split(":")
+        payload_str = payment["invoice_payload"]
+
+        if payload_str.startswith("welcome_bundle:"):
+            from ..api.shop import WELCOME_BUNDLE
+            parts = payload_str.split(":")
+            bundle_user_id = int(parts[1])
+            result = await db.execute(
+                select(User).where(User.id == bundle_user_id).with_for_update()
+            )
+            bundle_user = result.scalar_one_or_none()
+            if bundle_user and not bundle_user.welcome_offer_purchased:
+                bundle_user.hint_balance += WELCOME_BUNDLE["hints"]
+                bundle_user.revive_balance += WELCOME_BUNDLE["revives"]
+                bundle_user.welcome_offer_purchased = True
+                db.add(Transaction(
+                    user_id=bundle_user.id,
+                    type="purchase",
+                    currency="stars",
+                    amount=payment["total_amount"],
+                    item_type="welcome_bundle",
+                    item_id="bundle",
+                    status="completed",
+                    ton_tx_hash=charge_id,
+                ))
+                await db.commit()
+                redis_client = await get_redis()
+                if redis_client:
+                    await redis_client.delete(f"welcome_offer_pending:{bundle_user_id}")
+            return {"ok": True}
+
+        item_type, item_id = payload_str.split(":")
 
         result = await db.execute(
             select(User)

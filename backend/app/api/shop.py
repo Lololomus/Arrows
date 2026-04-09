@@ -6,10 +6,13 @@ Arrow Puzzle - Shop API
 
 import json
 import logging
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
 import aiohttp
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -100,6 +103,15 @@ BOOSTS = [
     {"id": "vip_forever", "name": "VIP навсегда", "price_ton": 50.0, "preview": "💎"},
     {"id": "extra_life", "name": "+1 жизнь", "price_ton": 1.0, "preview": "💖", "max_purchases": 2},
 ]
+
+
+WELCOME_BUNDLE = {
+    "hints": 20,
+    "revives": 10,
+    "price_full": 100,
+    "price_discounted": 25,
+    "discount_hours": 24,
+}
 
 
 def ton_payments_enabled() -> bool:
@@ -858,6 +870,141 @@ async def get_withdrawals(
             for w in withdrawals
         ]
     )
+
+
+def _discount_until(created_at: datetime | None) -> datetime | None:
+    """Return the naive UTC deadline for the welcome offer discount, or None."""
+    if not created_at:
+        return None
+    ts = created_at.replace(tzinfo=None) if created_at.tzinfo else created_at
+    return ts + timedelta(hours=WELCOME_BUNDLE["discount_hours"])
+
+
+@router.get("/welcome-offer")
+async def get_welcome_offer(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return welcome offer state. Stamps welcome_offer_opened_at on first call (analytics)."""
+    if user.welcome_offer_purchased:
+        return {
+            "eligible": False,
+            "discounted": False,
+            "price_stars": WELCOME_BUNDLE["price_full"],
+            "expires_at": None,
+            "hints": WELCOME_BUNDLE["hints"],
+            "revives": WELCOME_BUNDLE["revives"],
+        }
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # Stamp first shop visit for analytics (not used for discount logic)
+    if not user.welcome_offer_opened_at:
+        result = await db.execute(select(User).where(User.id == user.id).with_for_update())
+        locked = result.scalar_one()
+        if not locked.welcome_offer_opened_at:
+            locked.welcome_offer_opened_at = now
+            await db.commit()
+
+    # Discount = 24h from account creation → new users only
+    # In development: always discounted so the offer can be tested without a fresh account
+    if settings.ENVIRONMENT == "development":
+        discounted = True
+        deadline = now + timedelta(hours=WELCOME_BUNDLE["discount_hours"])
+    else:
+        deadline = _discount_until(user.created_at)
+        discounted = deadline is not None and now < deadline
+
+    return {
+        "eligible": True,
+        "discounted": discounted,
+        "price_stars": WELCOME_BUNDLE["price_discounted"] if discounted else WELCOME_BUNDLE["price_full"],
+        "expires_at": deadline.isoformat() + "Z" if discounted and deadline else None,
+        "hints": WELCOME_BUNDLE["hints"],
+        "revives": WELCOME_BUNDLE["revives"],
+    }
+
+
+@router.post("/welcome-offer/purchase")
+async def purchase_welcome_offer(
+    user: User = Depends(get_current_user),
+):
+    """Create a Telegram Stars invoice for the welcome bundle."""
+    if user.welcome_offer_purchased:
+        raise api_error(409, "ALREADY_PURCHASED", "Welcome offer already purchased")
+
+    # Dedup: return the same pending invoice if one was recently created (30 min TTL).
+    # Prevents users from generating multiple valid invoice links before paying.
+    redis_client = await get_redis()
+    pending_key = f"welcome_offer_pending_v2:{user.id}"
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if settings.ENVIRONMENT == "development":
+        discounted = True
+    else:
+        deadline = _discount_until(user.created_at)
+        discounted = deadline is not None and now < deadline
+
+    price_stars = WELCOME_BUNDLE["price_discounted"] if discounted else WELCOME_BUNDLE["price_full"]
+
+    if redis_client:
+        cached = await redis_client.get(pending_key)
+        if cached:
+            cached_data = json.loads(cached)
+            if cached_data["price_stars"] == price_stars:
+                return {"invoice_url": cached_data["invoice_url"], "price_stars": cached_data["price_stars"]}
+            # Cached invoice has wrong price (discount expired) — drop it and issue a new one
+            await redis_client.delete(pending_key)
+
+    bot_token = settings.BOT_TOKEN or settings.TELEGRAM_BOT_TOKEN
+    if not bot_token:
+        raise api_error(503, "BOT_NOT_CONFIGURED", "Bot token is not configured")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            f"https://api.telegram.org/bot{bot_token}/createInvoiceLink",
+            json={
+                "title": "Welcome Bundle",
+                "description": f"+{WELCOME_BUNDLE['revives']} revives + {WELCOME_BUNDLE['hints']} hints",
+                "payload": f"welcome_bundle:{user.id}:{user.telegram_id}:{price_stars}",
+                "currency": "XTR",
+                "prices": [{"label": "Welcome Bundle", "amount": price_stars}],
+            },
+        )
+
+    data = resp.json()
+    if not data.get("ok"):
+        raise api_error(502, "INVOICE_CREATION_FAILED", str(data.get("description", "Unknown error")))
+
+    invoice_url = data["result"]
+    if redis_client:
+        await redis_client.setex(pending_key, 1800, json.dumps({"invoice_url": invoice_url, "price_stars": price_stars}))
+
+    return {"invoice_url": invoice_url, "price_stars": price_stars}
+
+
+def _ensure_dev() -> None:
+    if settings.ENVIRONMENT != "development":
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Dev endpoints are disabled")
+
+
+@router.post("/dev/reset-welcome-offer")
+async def dev_reset_welcome_offer(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """DEV only. Reset welcome offer and force discount for 30 min."""
+    _ensure_dev()
+    result = await db.execute(select(User).where(User.id == user.id).with_for_update())
+    locked = result.scalar_one()
+    locked.welcome_offer_opened_at = None
+    locked.welcome_offer_purchased = False
+    await db.commit()
+    redis_client = await get_redis()
+    if redis_client:
+        await redis_client.delete(f"welcome_offer_pending:{user.id}")
+    return {"success": True}
 
 
 @router.post("/equip/{item_type}/{item_id}")

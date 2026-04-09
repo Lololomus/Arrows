@@ -51,11 +51,10 @@ FAILURE_AD_NOT_COMPLETED = "AD_NOT_COMPLETED"
 FAILURE_SPIN_RETRY_NOT_AVAILABLE = "SPIN_RETRY_NOT_AVAILABLE"
 FAILURE_SPIN_RETRY_ALREADY_GRANTED = "SPIN_RETRY_ALREADY_GRANTED"
 
-TASK_COINS_REWARD = 50
-
 MSK = timezone(timedelta(hours=3))
 REVIVE_LIMIT_PER_LEVEL = 3
 DAILY_COINS_WINDOW = timedelta(hours=24)
+TASK_REVIVE_COOLDOWN = timedelta(hours=8)
 SPIN_COOLDOWN = timedelta(hours=24)
 
 
@@ -67,17 +66,17 @@ def today_msk() -> date:
     return datetime.now(MSK).date()
 
 
-def next_reset_datetime() -> datetime:
-    """Next midnight MSK as naive UTC datetime (for consistent DB storage)."""
-    tomorrow = today_msk() + timedelta(days=1)
-    msk_midnight = datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=MSK)
-    return msk_midnight.astimezone(timezone.utc).replace(tzinfo=None)
+def _task_revive_resets_at(
+    last_claim_at: datetime | None,
+    *,
+    now: datetime | None = None,
+) -> datetime | None:
+    if last_claim_at is None:
+        return None
 
-
-def next_reset_iso() -> str:
-    tomorrow = today_msk() + timedelta(days=1)
-    msk_midnight = datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=MSK)
-    return msk_midnight.isoformat()
+    current_time = now or utcnow()
+    candidate = last_claim_at + TASK_REVIVE_COOLDOWN
+    return candidate if current_time < candidate else None
 
 
 def ensure_eligible(user: User) -> None:
@@ -190,15 +189,21 @@ async def count_spin_retry_used_today(db: AsyncSession, user_id: int) -> int:
     return int(result.scalar_one())
 
 
-async def count_task_revive_used_today(db: AsyncSession, user_id: int) -> int:
+async def get_task_revive_status(db: AsyncSession, user_id: int) -> dict[str, int | datetime | None]:
+    now = utcnow()
     result = await db.execute(
-        select(func.count(AdRewardClaim.id)).where(
+        select(func.max(AdRewardClaim.created_at)).where(
             AdRewardClaim.user_id == user_id,
             AdRewardClaim.placement == PLACEMENT_TASK,
-            AdRewardClaim.claim_day_msk == today_msk(),
         )
     )
-    return int(result.scalar_one())
+    last_claim_at = result.scalar_one()
+    resets_at = _task_revive_resets_at(last_claim_at, now=now)
+    return {
+        "used": 1 if resets_at is not None else 0,
+        "limit": 1,
+        "resets_at": resets_at,
+    }
 
 
 def serialize_intent(
@@ -357,8 +362,8 @@ async def create_reward_intent(
         if _is_spin_retry_used_for_current_spin(locked_user, last_spin_at):
             raise HTTPException(status_code=409, detail={"error": FAILURE_SPIN_RETRY_ALREADY_GRANTED})
     elif placement == PLACEMENT_TASK:
-        used = await count_task_revive_used_today(db, locked_user.id)
-        if used >= 1:
+        task_status = await get_task_revive_status(db, locked_user.id)
+        if int(task_status["used"]) >= 1:
             raise HTTPException(status_code=409, detail={"error": FAILURE_DAILY_LIMIT_REACHED})
     else:
         raise HTTPException(status_code=400, detail={"error": "UNKNOWN_PLACEMENT"})
@@ -541,24 +546,19 @@ async def _grant_task_revive(
     ad_reference: str | None,
 ) -> AdRewardIntent:
     now = utcnow()
-    used = await count_task_revive_used_today(db, user.id)
-    if used >= 1:
+    task_status = await get_task_revive_status(db, user.id)
+    if int(task_status["used"]) >= 1:
         return await reject_intent(db, intent, FAILURE_DAILY_LIMIT_REACHED)
 
     result = await db.execute(
         update(User)
         .where(User.id == user.id)
-        .values(
-            revive_balance=User.revive_balance + 1,
-            coins=User.coins + TASK_COINS_REWARD,
-        )
-        .returning(User.revive_balance, User.coins)
+        .values(revive_balance=User.revive_balance + 1)
+        .returning(User.revive_balance)
     )
     row = result.first()
     new_revive_balance = int(row[0]) if row else (user.revive_balance + 1)
-    new_coins = int(row[1]) if row else (user.coins + TASK_COINS_REWARD)
     user.revive_balance = new_revive_balance
-    user.coins = new_coins
 
     claim = AdRewardClaim(
         user_id=user.id,
@@ -570,12 +570,12 @@ async def _grant_task_revive(
     )
     db.add(claim)
 
-    resets_at = next_reset_datetime()
+    resets_at = now + TASK_REVIVE_COOLDOWN
     intent.status = INTENT_STATUS_GRANTED
     intent.failure_code = None
     intent.fulfilled_at = now
     intent.revive_granted = True
-    intent.coins = new_coins
+    intent.coins = user.coins
     intent.used_today = 1
     intent.limit_today = 1
     intent.resets_at = resets_at

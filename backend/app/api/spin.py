@@ -24,6 +24,9 @@ from .auth import get_current_user
 
 router = APIRouter(prefix="/spin", tags=["spin"])
 
+# DEV-only in-memory fallback when Redis is not running locally
+_dev_force_usdt_flags: set[int] = set()
+
 SPIN_COOLDOWN = timedelta(hours=24)
 SPIN_STREAK_WINDOW = timedelta(hours=48)
 STREAK_RESTORE_WINDOW = timedelta(hours=48)
@@ -128,6 +131,13 @@ PRIZE_TABLE = [
     ("coins", 250, [5, 10, 80]),
 ]
 
+# USDT сектор: визуальный, никогда не выпадает (кроме DEV-режима)
+USDT_PRIZE_BY_TIER = {0: 1, 1: 3, 2: 5}
+
+
+def _get_usdt_display_amount(streak: int) -> int:
+    return USDT_PRIZE_BY_TIER[_get_tier(streak)]
+
 
 def _get_tier(streak: int) -> int:
     if streak >= 14:
@@ -171,6 +181,7 @@ class SpinStatusResponse(BaseModel):
     pending_prize: Optional[SpinPendingPrize]
     streak_lost_at: Optional[str] = None
     streak_lost_count: int = 0
+    usdt_display_amount: int = 1
 
 
 class SpinRollResponse(BaseModel):
@@ -179,6 +190,7 @@ class SpinRollResponse(BaseModel):
     streak: int
     tier: int
     retry_available: bool
+    usdt_display_amount: int = 1
 
 
 class SpinCollectResponse(BaseModel):
@@ -194,6 +206,10 @@ class SpinRestoreResponse(BaseModel):
 
 class SpinDevSetStreakRequest(BaseModel):
     streak: int
+
+
+class SpinDevForceUsdtRequest(BaseModel):
+    enabled: bool
 
 
 def _ensure_dev() -> None:
@@ -272,6 +288,7 @@ async def get_spin_status(
         pending_prize=pending_prize,
         streak_lost_at=_to_iso_utc(streak_lost_at),
         streak_lost_count=streak_lost_count,
+        usdt_display_amount=_get_usdt_display_amount(streak),
     )
 
 
@@ -314,7 +331,20 @@ async def roll_spin(
     else:
         new_streak = 1
 
-    prize_type, prize_amount = _roll_prize(new_streak)
+    # DEV: принудительное выпадение USDT (только в dev-режиме)
+    force_usdt = False
+    if settings.ENVIRONMENT == "development":
+        from ..database import get_redis as _get_redis
+        redis_client = await _get_redis()
+        if redis_client:
+            force_usdt = bool(await redis_client.get(f"dev_force_usdt:{locked_user.id}"))
+        else:
+            force_usdt = locked_user.id in _dev_force_usdt_flags
+    if force_usdt:
+        prize_type = "usdt"
+        prize_amount = _get_usdt_display_amount(new_streak)
+    else:
+        prize_type, prize_amount = _roll_prize(new_streak)
 
     locked_user.pending_spin_prize_type = prize_type
     locked_user.pending_spin_prize_amount = prize_amount
@@ -332,6 +362,7 @@ async def roll_spin(
         streak=new_streak,
         tier=_get_tier(new_streak),
         retry_available=retry_available,
+        usdt_display_amount=_get_usdt_display_amount(new_streak),
     )
 
 
@@ -409,15 +440,18 @@ async def collect_spin(
         locked_user.hint_balance = (locked_user.hint_balance or 0) + prize_amount
     elif prize_type == "revive":
         locked_user.revive_balance = (locked_user.revive_balance or 0) + prize_amount
+    # "usdt" — реальная выплата обрабатывается отдельно, здесь только фиксируем
 
+    tx_currency = prize_type if prize_type == "coins" else ("usdt" if prize_type == "usdt" else "item")
+    tx_status = "pending" if prize_type == "usdt" else "completed"
     tx = Transaction(
         user_id=locked_user.id,
         type="reward",
-        currency=prize_type if prize_type == "coins" else "item",
+        currency=tx_currency,
         amount=prize_amount,
         item_type="spin",
         item_id=f"daily_spin_{prize_type}",
-        status="completed",
+        status=tx_status,
     )
     db.add(tx)
 
@@ -561,6 +595,31 @@ async def dev_set_spin_streak(
 
     await db.commit()
     return {"success": True, "streak": target}
+
+
+@router.post("/dev/force-usdt")
+async def dev_force_usdt(
+    payload: SpinDevForceUsdtRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """DEV: включить/выключить принудительное выпадение USDT на следующем спине."""
+    _ensure_dev()
+    from ..database import get_redis as _get_redis
+    redis_client = await _get_redis()
+    key = f"dev_force_usdt:{user.id}"
+    if redis_client:
+        if payload.enabled:
+            await redis_client.setex(key, 3600, "1")
+        else:
+            await redis_client.delete(key)
+    else:
+        # Redis не запущен локально — используем in-memory fallback
+        if payload.enabled:
+            _dev_force_usdt_flags.add(user.id)
+        else:
+            _dev_force_usdt_flags.discard(user.id)
+    return {"success": True, "enabled": payload.enabled}
 
 
 @router.post("/dev/set-frozen-streak")

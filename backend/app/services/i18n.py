@@ -187,18 +187,38 @@ BOT_TEXT: dict[str, dict[SupportedLocale, str]] = {
     "adsgram_task_reward": {
         "ru": (
             "✅ <b>Задание выполнено!</b>\n\n"
-            "Ты получил <b>+1 ревайв</b> и <b>+50 монет</b>.\n"
-            "Возвращайся завтра за новой наградой!"
+            "Ты получил <b>+1 ревайв</b>.\n"
+            "Возвращайся через 8 часов за новой наградой!"
         ),
         "en": (
             "✅ <b>Task completed!</b>\n\n"
-            "You received <b>+1 revive</b> and <b>+50 coins</b>.\n"
-            "Come back tomorrow for another reward!"
+            "You received <b>+1 revive</b>.\n"
+            "Come back in 8 hours for another reward!"
         ),
     },
     "play_button": {
         "ru": "🎮 Играть",
         "en": "🎮 Play",
+    },
+    "usdt_wheel_broadcast": {
+        "ru": (
+            "🎰 <b>USDT на колесе фортуны!</b>\n\n"
+            "Теперь на рулетке есть сектор с реальным USDT-призом.\n"
+            "Сумма зависит от твоего тира стрика:\n"
+            "• Тир 1 (1–5 дней): <b>1 USDT</b>\n"
+            "• Тир 2 (6–13 дней): <b>3 USDT</b>\n"
+            "• Тир 3 (14+ дней): <b>5 USDT</b>\n\n"
+            "Крути рулетку каждый день!"
+        ),
+        "en": (
+            "🎰 <b>USDT added to the Fortune Wheel!</b>\n\n"
+            "The wheel now has a real USDT prize sector.\n"
+            "Amount depends on your streak tier:\n"
+            "• Tier 1 (1–5 days): <b>1 USDT</b>\n"
+            "• Tier 2 (6–13 days): <b>3 USDT</b>\n"
+            "• Tier 3 (14+ days): <b>5 USDT</b>\n\n"
+            "Spin every day!"
+        ),
     },
 }
 

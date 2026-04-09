@@ -84,6 +84,13 @@ class User(Base):
     streak_reset_notified_for_spin_at = Column(DateTime, nullable=True)
     
     
+    # Онбординг
+    onboarding_shown = Column(Boolean, nullable=False, server_default=text("false"))
+
+    # Welcome offer
+    welcome_offer_opened_at = Column(DateTime, nullable=True)   # когда юзер впервые открыл магазин
+    welcome_offer_purchased = Column(Boolean, nullable=False, server_default=text("false"))
+
     # Ban система (для anti-cheat)
     is_banned = Column(Boolean, default=False)
     ban_reason = Column(String(256), nullable=True)

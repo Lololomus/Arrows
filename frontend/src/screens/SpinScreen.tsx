@@ -4,7 +4,7 @@
  * v5: roll → (retry?) → collect flow. Приз начисляется только при нажатии "Забрать".
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, animate, useAnimation, AnimatePresence } from 'framer-motion';
 import { Info, RotateCcw } from 'lucide-react';
@@ -16,6 +16,10 @@ import { getErrorCodeMessage } from '../i18n/content';
 import { IceOverlay } from '../components/spin/IceOverlay';
 import { runRewardedFlow, getRewardedFlowMessage } from '../services/rewardedAds';
 import { clearPendingRewardIntent, rememberPendingRewardIntent } from '../services/rewardReconciler';
+import spinCoinBadgeUrl from '../assets/spin-coin-badge.svg';
+import spinHintBadgeUrl from '../assets/spin-hint-badge.svg';
+import spinReviveBadgeUrl from '../assets/spin-revive-badge.svg';
+import usdtLogoUrl from '../assets/usdt-logo-circle.svg';
 
 // ============================================
 // TELEGRAM HAPTICS
@@ -43,7 +47,7 @@ interface Sector {
   icon: string;
   color: string;
   rarity: Rarity;
-  prizeType: 'coins' | 'hints' | 'revive';
+  prizeType: 'coins' | 'hints' | 'revive' | 'usdt';
   prizeAmount: number;
 }
 
@@ -91,6 +95,24 @@ const RARITY_CONFIG: Record<Rarity, { color: string; bg: string; glow: string; l
 const COIN_SECTOR_COLOR = '#f59e0b';
 const HINT_SECTOR_COLOR = '#06b6d4';
 const REVIVE_SECTOR_COLOR = '#f43f5e';
+const USDT_SECTOR_COLOR = '#15803d';
+const PRIZE_BADGE_SIZE = 36;
+const SECTOR_ICON_RADIUS_RATIO = 0.48;
+const SECTOR_AMOUNT_RADIUS_RATIO = 0.78;
+
+const PRIZE_BADGE_URLS: Record<Sector['prizeType'], string> = {
+  coins: spinCoinBadgeUrl,
+  hints: spinHintBadgeUrl,
+  revive: spinReviveBadgeUrl,
+  usdt: usdtLogoUrl,
+};
+
+const PRIZE_BADGE_ALT: Record<Sector['prizeType'], string> = {
+  coins: 'Coins',
+  hints: 'Hints',
+  revive: 'Revive',
+  usdt: 'USDT',
+};
 
 const SECTORS: Sector[] = [
   { label: '10 coins',      wheelLabel: '🪙 10',  icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'common',    prizeType: 'coins',  prizeAmount: 10  },
@@ -101,10 +123,11 @@ const SECTORS: Sector[] = [
   { label: '3 hints',       wheelLabel: '💡 3',   icon: '💡', color: HINT_SECTOR_COLOR,   rarity: 'rare',      prizeType: 'hints',  prizeAmount: 3   },
   { label: '250 coins',     wheelLabel: '🪙 250', icon: '🪙', color: COIN_SECTOR_COLOR,   rarity: 'epic',      prizeType: 'coins',  prizeAmount: 250 },
   { label: '1 revive',      wheelLabel: '❤️ 1',  icon: '❤️', color: REVIVE_SECTOR_COLOR, rarity: 'legendary', prizeType: 'revive', prizeAmount: 1   },
+  { label: '1 USDT',        wheelLabel: 'USDT 1', icon: 'USDT', color: USDT_SECTOR_COLOR,   rarity: 'legendary', prizeType: 'usdt',   prizeAmount: 1   },
 ];
 
-const SECTOR_COUNT = SECTORS.length;
-const SECTOR_ANGLE = 360 / SECTOR_COUNT;
+const SECTOR_COUNT = SECTORS.length; // 9
+const SECTOR_ANGLE = 360 / SECTOR_COUNT; // 40
 
 function formatTimeLeft(targetIso: string | null, nowTs: number): string | null {
   return formatTimeUntil(targetIso, nowTs);
@@ -137,6 +160,8 @@ function formatSpinPrizeLabel(prizeType: Sector['prizeType'], prizeAmount: numbe
       return translate(`game:spin.prizeLabel.hints_${suffix}`, { count });
     case 'revive':
       return translate(`game:spin.prizeLabel.revive_${suffix}`, { count });
+    case 'usdt':
+      return `${count} USDT`;
     default:
       return `${count}`;
   }
@@ -173,6 +198,8 @@ function getSectorFill(sector: Sector): string {
     return sector.prizeAmount >= 3 ? '#0891b2' : '#06b6d4';
   }
 
+  if (sector.prizeType === 'usdt') return '#15803d';
+
   return '#f43f5e';
 }
 
@@ -180,6 +207,39 @@ function getSectorAmountFontSize(amount: number): number {
   if (amount >= 100) return 18;
   if (amount >= 10) return 22;
   return 24;
+}
+
+function renderWheelSectorIcon(
+  sector: Sector,
+  x: number,
+  y: number,
+  angle: number,
+) {
+  const size = PRIZE_BADGE_SIZE;
+  const offset = size / 2;
+
+  return (
+    <g style={{ transform: `rotate(${angle}deg)`, transformOrigin: `${x}px ${y}px` }}>
+      <image
+        href={PRIZE_BADGE_URLS[sector.prizeType]}
+        x={x - offset}
+        y={y - offset}
+        width={size}
+        height={size}
+        preserveAspectRatio="xMidYMid meet"
+      />
+    </g>
+  );
+}
+
+function PrizeIcon({ prizeType }: { prizeType: Sector['prizeType'] }) {
+  return (
+    <img
+      src={PRIZE_BADGE_URLS[prizeType]}
+      alt={PRIZE_BADGE_ALT[prizeType]}
+      className="h-28 w-28 object-contain"
+    />
+  );
 }
 
 // ============================================
@@ -219,27 +279,45 @@ function SpinInfoModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
 
             <div className="space-y-3 overflow-y-auto custom-scrollbar">
               <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-emerald-400 font-black text-sm uppercase tracking-widest drop-shadow-[0_0_8px_rgba(52,211,153,0.3)]">{formatTierBadge(1)}</span>
-                  <span className="text-white/50 text-[11px] font-bold bg-white/5 px-2 py-1 rounded-md">0-5</span>
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <span className="text-emerald-400 font-black text-sm uppercase tracking-widest drop-shadow-[0_0_8px_rgba(52,211,153,0.3)]">{formatTierBadge(1)}</span>
+                    <span className="ml-2 text-white/40 text-[11px] font-bold bg-white/5 px-2 py-0.5 rounded-md">{translate('game:spin.tier1Days')}</span>
+                  </div>
+                  <div className="flex flex-col items-end">
+                    <span className="text-emerald-300 font-black text-xl leading-none drop-shadow-[0_0_10px_rgba(52,211,153,0.5)]">1 USDT</span>
+                    <span className="text-white/30 text-[10px] mt-0.5">{translate('game:spin.jackpot')}</span>
+                  </div>
                 </div>
                 <h4 className="text-white font-bold mb-1 text-base">{translate('game:spin.tier1Label')}</h4>
                 <p className="text-white/50 text-xs leading-relaxed">{translate('game:spin.tier1Desc')}</p>
               </div>
 
               <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-blue-400 font-black text-sm uppercase tracking-widest drop-shadow-[0_0_8px_rgba(96,165,250,0.3)]">{formatTierBadge(2)}</span>
-                  <span className="text-blue-200/50 text-[11px] font-bold bg-blue-500/10 px-2 py-1 rounded-md">6-13</span>
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <span className="text-blue-400 font-black text-sm uppercase tracking-widest drop-shadow-[0_0_8px_rgba(96,165,250,0.3)]">{formatTierBadge(2)}</span>
+                    <span className="ml-2 text-blue-200/40 text-[11px] font-bold bg-blue-500/10 px-2 py-0.5 rounded-md">{translate('game:spin.tier2Days')}</span>
+                  </div>
+                  <div className="flex flex-col items-end">
+                    <span className="text-blue-300 font-black text-xl leading-none drop-shadow-[0_0_10px_rgba(96,165,250,0.5)]">3 USDT</span>
+                    <span className="text-blue-200/30 text-[10px] mt-0.5">{translate('game:spin.jackpot')}</span>
+                  </div>
                 </div>
                 <h4 className="text-white font-bold mb-1 text-base">{translate('game:spin.tier2Label')}</h4>
                 <p className="text-blue-100/60 text-xs leading-relaxed">{translate('game:spin.tier2Desc')}</p>
               </div>
 
               <div className="bg-gradient-to-br from-yellow-500/20 to-orange-500/10 border border-yellow-500/30 rounded-2xl p-4 relative overflow-hidden">
-                <div className="flex justify-between items-center mb-2 relative z-10">
-                  <span className="text-yellow-400 font-black text-sm uppercase tracking-widest drop-shadow-[0_0_12px_rgba(250,204,21,0.5)]">{formatTierBadge(3)}</span>
-                  <span className="text-yellow-200/60 text-[11px] font-bold bg-yellow-500/10 px-2 py-1 rounded-md">14+</span>
+                <div className="flex justify-between items-start mb-2 relative z-10">
+                  <div>
+                    <span className="text-yellow-400 font-black text-sm uppercase tracking-widest drop-shadow-[0_0_12px_rgba(250,204,21,0.5)]">{formatTierBadge(3)}</span>
+                    <span className="ml-2 text-yellow-200/50 text-[11px] font-bold bg-yellow-500/10 px-2 py-0.5 rounded-md">{translate('game:spin.tier3Days')}</span>
+                  </div>
+                  <div className="flex flex-col items-end relative z-10">
+                    <span className="text-yellow-300 font-black text-xl leading-none drop-shadow-[0_0_12px_rgba(250,204,21,0.6)]">5 USDT</span>
+                    <span className="text-yellow-200/40 text-[10px] mt-0.5">{translate('game:spin.jackpot')}</span>
+                  </div>
                 </div>
                 <h4 className="text-white font-bold mb-1 text-base relative z-10">{translate('game:spin.tier3Label')}</h4>
                 <p className="text-yellow-100/70 text-xs leading-relaxed relative z-10">{translate('game:spin.tier3Desc')}</p>
@@ -307,6 +385,7 @@ function SpinWheel({
   activeIndex,
   isSpinning,
   isFrozen,
+  sectors,
 }: {
   rotation: number;
   size: number;
@@ -314,6 +393,7 @@ function SpinWheel({
   activeIndex: number;
   isSpinning: boolean;
   isFrozen: boolean;
+  sectors: Sector[];
 }) {
   const cx = size / 2;
   const cy = size / 2;
@@ -343,12 +423,12 @@ function SpinWheel({
         </defs>
 
         <g style={{ transformOrigin: `${cx}px ${cy}px`, transform: `rotate(${rotation}deg)`, willChange: 'transform' }}>
-          {SECTORS.map((s, i) => {
+          {sectors.map((s, i) => {
             const start = i * SECTOR_ANGLE;
             const end = start + SECTOR_ANGLE;
             const mid = start + SECTOR_ANGLE / 2;
-            const iconPt = polarToCartesian(cx, cy, r * 0.5, mid);
-            const amountPt = polarToCartesian(cx, cy, r * 0.68, mid);
+            const iconPt = polarToCartesian(cx, cy, r * SECTOR_ICON_RADIUS_RATIO, mid);
+            const amountPt = polarToCartesian(cx, cy, r * SECTOR_AMOUNT_RADIUS_RATIO, mid);
             const fill = getSectorFill(s);
             const amountFontSize = getSectorAmountFontSize(s.prizeAmount);
 
@@ -367,17 +447,7 @@ function SpinWheel({
                   <path d={sectorPath(cx, cy, r, start, end)} fill="url(#activeGlow)" />
                 )}
 
-                <text
-                  x={iconPt.x}
-                  y={iconPt.y}
-                  textAnchor="middle"
-                  dominantBaseline="central"
-                  fontSize={18}
-                  fill="#ffffff"
-                  style={{ transform: `rotate(${mid}deg)`, transformOrigin: `${iconPt.x}px ${iconPt.y}px` }}
-                >
-                  {s.icon}
-                </text>
+                {renderWheelSectorIcon(s, iconPt.x, iconPt.y, mid)}
                 <text
                   x={amountPt.x}
                   y={amountPt.y}
@@ -468,19 +538,33 @@ function SleekStreakTimeline({ streak, onInfoClick }: { streak: number; onInfoCl
 
   return (
     <div className="w-full flex flex-col items-center">
-      <button
-        onClick={onInfoClick}
-        className="flex items-center gap-2 bg-white/5 hover:bg-white/10 transition-colors border border-white/10 px-4 py-1.5 rounded-full mb-3 active:scale-95"
-      >
-        <span className={`text-[13px] font-black uppercase tracking-widest ${tierInfo.color} drop-shadow-sm`}>
-          {tierInfo.name}
-        </span>
-        <Info size={16} className="text-white/40" />
-      </button>
+      {/* Day X + Tier side by side, centered */}
+      <div className="flex items-center justify-center gap-4 mb-6">
+        <h2 className="text-3xl font-black text-white drop-shadow-md tracking-tight">
+          {translate('game:spin.day', { count: displayStreak })}
+        </h2>
 
-      <h2 className="text-3xl font-black text-white drop-shadow-md mb-6 tracking-tight">
-        {translate('game:spin.day', { count: displayStreak })}
-      </h2>
+        <button
+          onClick={onInfoClick}
+          className={`flex flex-col items-center gap-0.5 rounded-2xl border px-3 py-2 active:scale-95 transition-all ${
+            displayStreak >= 14
+              ? 'bg-yellow-500/10 border-yellow-500/30 hover:bg-yellow-500/20'
+              : displayStreak >= 6
+              ? 'bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/20'
+              : 'bg-emerald-500/10 border-emerald-500/20 hover:bg-emerald-500/20'
+          }`}
+        >
+          <div className="flex items-center gap-1">
+            <span className={`text-sm font-black uppercase tracking-widest ${tierInfo.color}`}>
+              {tierInfo.name}
+            </span>
+            <Info size={13} className="text-white/40" />
+          </div>
+          <span className={`text-[11px] font-bold ${tierInfo.color} opacity-70`}>
+            {displayStreak >= 14 ? '5 USDT' : displayStreak >= 6 ? '3 USDT' : '1 USDT'}
+          </span>
+        </button>
+      </div>
       <div className="relative w-full max-w-[280px]">
         <div className="absolute top-1/2 left-[14px] right-[14px] h-1.5 -translate-y-1/2 rounded-full overflow-hidden bg-white/5">
           <div className={`absolute inset-0 ${tierInfo.trackColor}`} />
@@ -549,9 +633,9 @@ function PrizeResult({
       <motion.div
         animate={isHighTier ? { scale: [1, 1.15, 1], rotate: [0, -5, 5, 0] } : { y: [0, -8, 0] }}
         transition={{ repeat: Infinity, duration: isHighTier ? 1.5 : 2.5, ease: "easeInOut" }}
-        className="text-[100px] relative drop-shadow-2xl z-10"
+        className="relative z-10 flex h-[132px] items-center justify-center drop-shadow-2xl"
       >
-        {result.icon}
+        <PrizeIcon prizeType={result.prizeType} />
       </motion.div>
 
       <div className="mt-4 z-10 w-full px-4 flex flex-col items-center">
@@ -684,7 +768,7 @@ function StreakRestoreCard({
           {/* Lost streak badge */}
           <div className="shrink-0 flex flex-col items-center bg-red-500/10 border border-red-500/20 rounded-xl px-2.5 py-1.5">
             <span className="text-red-400 font-black text-[13px] leading-none">−{lostCount}</span>
-            <span className="text-red-400/60 text-[9px] uppercase tracking-wide font-bold mt-0.5">дней</span>
+            <span className="text-red-400/60 text-[9px] uppercase tracking-wide font-bold mt-0.5">{translate('game:spin.days')}</span>
           </div>
         </div>
 
@@ -736,7 +820,7 @@ function StreakRestoreCard({
 // MAIN COMPONENT
 // ============================================
 
-export function SpinScreen({ onClose }: { onClose: () => void }) {
+export function SpinScreen({ onClose, isForced = false }: { onClose: () => void; isForced?: boolean }) {
   const {
     setSpinStatus,
     loginStreak,
@@ -748,6 +832,24 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
     spinStreakLostAt,
     spinStreakLostCount,
   } = useAppStore();
+
+  // USDT сектор: сумма зависит от тира (computed locally, matches server logic)
+  const usdtDisplayAmount = loginStreak >= 14 ? 5 : loginStreak >= 6 ? 3 : 1;
+
+  const buildFreshSectors = (streak: number) => {
+    const amount = streak >= 14 ? 5 : streak >= 6 ? 3 : 1;
+    return SECTORS.map(s => s.prizeType === 'usdt'
+      ? { ...s, prizeAmount: amount, label: `${amount} USDT`, wheelLabel: `USDT ${amount}` }
+      : s
+    );
+  };
+  const SECTORS_DISPLAY = useMemo(() =>
+    SECTORS.map(s => s.prizeType === 'usdt'
+      ? { ...s, prizeAmount: usdtDisplayAmount, label: `${usdtDisplayAmount} USDT`, wheelLabel: `USDT ${usdtDisplayAmount}` }
+      : s
+    ),
+    [usdtDisplayAmount]
+  );
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const SHOW_DEV_TOOLS = import.meta.env.DEV;
 
@@ -766,6 +868,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [timeNow, setTimeNow] = useState(() => Date.now());
   const [isRestoringStreak, setIsRestoringStreak] = useState(false);
+  const [forceUsdtEnabled, setForceUsdtEnabled] = useState(false);
 
   const isStreakFrozen = spinStreakLostAt !== null
     && spinStreakLostCount >= 7
@@ -787,8 +890,8 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
     if (!spinPendingPrize) return;
     if (result || spinning || isPreparing) return;
     const { prizeType, prizeAmount } = spinPendingPrize;
-    const targetIdx = SECTORS.findIndex(s => s.prizeType === prizeType && s.prizeAmount === prizeAmount);
-    const sector = SECTORS[targetIdx >= 0 ? targetIdx : 0];
+    const targetIdx = SECTORS_DISPLAY.findIndex(s => s.prizeType === prizeType && s.prizeAmount === prizeAmount);
+    const sector = SECTORS_DISPLAY[targetIdx >= 0 ? targetIdx : 0];
     setRetryAvailable(spinRetryAvailable);
     setResult({
       prizeType,
@@ -910,12 +1013,14 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
     targetPrizeType: string,
     targetPrizeAmount: number,
     onComplete: () => void,
+    sectorsOverride?: typeof SECTORS_DISPLAY,
   ) => {
-    const targetIdx = SECTORS.findIndex(
+    const sectors = sectorsOverride ?? SECTORS_DISPLAY;
+    const targetIdx = sectors.findIndex(
       s => s.prizeType === targetPrizeType && s.prizeAmount === targetPrizeAmount
     );
     const safeTargetIdx = targetIdx >= 0 ? targetIdx : 0;
-    const sector = SECTORS[safeTargetIdx];
+    const sector = sectors[safeTargetIdx];
 
     const isSmallPrize = sector.rarity === 'common';
     const isNearMiss = isSmallPrize && Math.random() > 0.3;
@@ -990,10 +1095,11 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
       if (!isMountedRef.current) return;
       setIsPreparing(false);
 
-      const targetIdx = SECTORS.findIndex(
+      const freshSectors = buildFreshSectors(res.streak);
+      const targetIdx = freshSectors.findIndex(
         s => s.prizeType === res.prizeType && s.prizeAmount === res.prizeAmount
       );
-      const sector = SECTORS[targetIdx >= 0 ? targetIdx : 0];
+      const sector = freshSectors[targetIdx >= 0 ? targetIdx : 0];
       const extendedResult: ExtendedSpinResult = {
         ...res,
         label: sector.label,
@@ -1018,7 +1124,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
         if (!isMountedRef.current) return;
         setResult(extendedResult);
         setSpinning(false);
-      });
+      }, freshSectors);
     } catch (err) {
       if (isMountedRef.current) {
         setSpinning(false);
@@ -1087,8 +1193,9 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
         await new Promise(r => setTimeout(r, 650));
         if (!isMountedRef.current) return;
 
-        const targetIdx = SECTORS.findIndex(s => s.prizeType === res!.prizeType && s.prizeAmount === res!.prizeAmount);
-        const sector = SECTORS[targetIdx >= 0 ? targetIdx : 0];
+        const freshSectorsRetry = buildFreshSectors(res!.streak);
+        const targetIdx = freshSectorsRetry.findIndex(s => s.prizeType === res!.prizeType && s.prizeAmount === res!.prizeAmount);
+        const sector = freshSectorsRetry[targetIdx >= 0 ? targetIdx : 0];
         const extendedResult: ExtendedSpinResult = {
           ...res!,
           label: sector.label,
@@ -1112,7 +1219,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
           if (!isMountedRef.current) return;
           setResult(extendedResult);
           setSpinning(false);
-        });
+        }, freshSectorsRetry);
         return;
       }
 
@@ -1161,10 +1268,11 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
       await new Promise(r => setTimeout(r, 650));
       if (!isMountedRef.current) return;
 
-      const targetIdx = SECTORS.findIndex(
+      const freshSectorsNoAd = buildFreshSectors(res.streak);
+      const targetIdx = freshSectorsNoAd.findIndex(
         s => s.prizeType === res.prizeType && s.prizeAmount === res.prizeAmount
       );
-      const sector = SECTORS[targetIdx >= 0 ? targetIdx : 0];
+      const sector = freshSectorsNoAd[targetIdx >= 0 ? targetIdx : 0];
       const extendedResult: ExtendedSpinResult = {
         ...res,
         label: sector.label,
@@ -1188,7 +1296,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
         if (!isMountedRef.current) return;
         setResult(extendedResult);
         setSpinning(false);
-      });
+      }, freshSectorsNoAd);
     } catch (err) {
       if (isMountedRef.current) {
         setSpinning(false);
@@ -1310,6 +1418,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
               activeIndex={activeIndex}
               isSpinning={spinning}
               isFrozen={isStreakFrozen}
+              sectors={SECTORS_DISPLAY}
             />
           )}
         </div>
@@ -1348,7 +1457,7 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
                 setError(null);
                 setSpinning(false);
                 setIsPreparing(false);
-                setIsSlowMo(false);
+
                 spinAnimationRef.current?.stop();
                 setRotation(360 - SECTOR_ANGLE / 2);
                 setActiveIndex(0);
@@ -1405,6 +1514,27 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
               </button>
             </div>
 
+            {/* Force USDT */}
+            <div className="h-px bg-white/10 mx-1" />
+            <button
+              onClick={async () => {
+                setError(null);
+                try {
+                  const next = !forceUsdtEnabled;
+                  await spinApi.devForceUsdt(next);
+                  setForceUsdtEnabled(next);
+                } catch {
+                  setError('Dev force USDT failed');
+                }
+              }}
+              className={`w-full py-2.5 rounded-xl font-semibold text-xs active:scale-95 transition-all ${
+                forceUsdtEnabled
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/30'
+                  : 'bg-white/10 text-white/80 hover:bg-white/15'
+              }`}
+            >
+              💵 Force USDT {forceUsdtEnabled ? 'ON' : 'OFF'}
+            </button>
             {/* Frozen streak simulation */}
             <div className="h-px bg-white/10 mx-1" />
             <button
@@ -1463,9 +1593,11 @@ export function SpinScreen({ onClose }: { onClose: () => void }) {
               </p>
             )}
 
-            <button onClick={onClose} className="w-full py-2.5 text-white/50 hover:text-white font-semibold text-[15px] transition-colors">
-              {translate('common:later')}
-            </button>
+            {!isForced && (
+              <button onClick={onClose} className="w-full py-2.5 text-white/50 hover:text-white font-semibold text-[15px] transition-colors">
+                {translate('common:later')}
+              </button>
+            )}
           </>
         )}
       </div>

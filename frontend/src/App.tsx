@@ -7,6 +7,7 @@ import { authApi, socialApi } from './api/client';
 import { ADS_ENABLED, UI_ANIMATIONS } from './config/constants';
 import { RewardToastHost } from './components/ui/RewardToastHost';
 import { TunnelDownOverlay } from './components/TunnelDownOverlay';
+import { OnboardingSlides } from './components/OnboardingSlides';
 import { SmartLoader } from './components/ui/SmartLoader';
 import { AuthExpiredScreen } from './components/AuthExpiredScreen';
 import { BottomNav, type TabId } from './components/BottomNav';
@@ -18,6 +19,10 @@ import { bootstrapAuth, hasUsableTelegramInitData, markAuthExpired } from './ser
 import { startRewardReconciler, stopRewardReconciler } from './services/rewardReconciler';
 import { extractReferralCode, getSavedReferralCode, clearSavedReferralCode } from './utils/referralLaunch';
 import { detectTelegramLocale, setAppLocale, translate } from './i18n';
+
+// Key stored in localStorage so new-user onboarding survives app restarts
+// if the /onboarding/complete request was dropped (fire-and-forget).
+const PENDING_NEW_USER_KEY = 'arrowPendingNewUser';
 
 const ShopScreen = lazy(() =>
   import('./screens/ShopScreen').then((module) => ({ default: module.ShopScreen }))
@@ -58,6 +63,8 @@ function AppInner() {
     setError,
     setAuthenticatedSession,
     setLocale,
+    onboardingPending,
+    setOnboardingPending,
   } = useAppStore();
   const [activeTab, setActiveTab] = useState<TabId>('play');
   const handleTabChange = useCallback((id: TabId) => setActiveTab(id), []);
@@ -89,9 +96,11 @@ function AppInner() {
         return;
       }
 
+      // Capture isNew synchronously before any async gap — /me never returns this field
+      const isNewSnapshot = useAppStore.getState().user?.isNew ?? false;
       const syncedUser = await authApi.getMe();
       if (isCancelled?.()) return;
-      setUser(syncedUser);
+      setUser(isNewSnapshot ? { ...syncedUser, isNew: true } : syncedUser);
     } catch (error) {
       // Network error — keep code in localStorage for retry on next launch
       console.error('[Referral] Auto-apply failed:', error);
@@ -132,6 +141,15 @@ function AppInner() {
       const currentUser = useAppStore.getState().user;
       if (currentUser) {
         console.log('Authenticated:', currentUser.id);
+        if (currentUser.isNew) {
+          localStorage.setItem(PENDING_NEW_USER_KEY, '1');
+          useAppStore.getState().setOnboardingPending('new_user');
+        } else if (localStorage.getItem(PENDING_NEW_USER_KEY) === '1' && !currentUser.onboardingShown) {
+          // Crash recovery: was a new user but onboarding/complete never reached server
+          useAppStore.getState().setOnboardingPending('new_user');
+        } else if (!currentUser.onboardingShown) {
+          useAppStore.getState().setOnboardingPending('existing_user');
+        }
       }
     } catch (error) {
       if (cancelled()) return;
@@ -285,6 +303,12 @@ function AppInner() {
   return (
     <div className="relative w-full app-viewport overflow-hidden bg-slate-900 font-sans select-none">
       <RewardToastHost />
+      {onboardingPending === 'existing_user' && (
+        <OnboardingSlides
+          isNewUser={false}
+          onComplete={() => setOnboardingPending(null)}
+        />
+      )}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap');
         .font-sans { font-family: 'Inter', sans-serif; }

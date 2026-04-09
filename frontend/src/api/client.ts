@@ -996,6 +996,15 @@ export const adsApi = {
 // SHOP API
 // ============================================
 
+export interface WelcomeOfferData {
+  eligible: boolean;
+  discounted: boolean;
+  priceStars: number;
+  expiresAt: string | null;
+  hints: number;
+  revives: number;
+}
+
 export const shopApi = {
   getCatalog: async (): Promise<ShopCatalog> =>
     normalizeShopCatalog(await request<RawShopCatalog>(API_ENDPOINTS.shop.catalog)),
@@ -1059,6 +1068,27 @@ export const shopApi = {
       API_ENDPOINTS.shop.transactionConfirm(txId),
       { method: 'POST' }
     ),
+
+  getWelcomeOffer: async (): Promise<WelcomeOfferData> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.shop.welcomeOffer);
+    return {
+      eligible: Boolean(raw.eligible),
+      discounted: Boolean(raw.discounted),
+      priceStars: Number(raw.price_stars ?? raw.priceStars ?? 100),
+      expiresAt: (raw.expires_at ?? raw.expiresAt ?? null) as string | null,
+      hints: Number(raw.hints ?? 20),
+      revives: Number(raw.revives ?? 10),
+    };
+  },
+
+  purchaseWelcomeOffer: async (): Promise<{ invoiceUrl: string; priceStars: number }> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.shop.purchaseWelcomeOffer, { method: 'POST' });
+    return {
+      invoiceUrl: String(raw.invoice_url ?? raw.invoiceUrl ?? ''),
+      priceStars: Number(raw.price_stars ?? raw.priceStars ?? 100),
+    };
+  },
+  devResetWelcomeOffer: () => request(API_ENDPOINTS.shop.devResetWelcomeOffer, { method: 'POST' }),
 };
 
 // ============================================
@@ -1405,6 +1435,14 @@ export const spinApi = {
     });
     return { success: Boolean(raw.success), streak: Number(raw.streak ?? streak) };
   },
+
+  devForceUsdt: async (enabled: boolean): Promise<{ success: boolean }> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.spin.devForceUsdt, {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    });
+    return { success: Boolean(raw.success) };
+  },
 };
 
 export const tasksApi = {
@@ -1474,6 +1512,19 @@ export const tasksApi = {
     });
     return { success: Boolean(raw.success) };
   },
+};
+
+export const onboardingApi = {
+  complete: async (): Promise<{ success: boolean }> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.onboarding.complete, { method: 'POST' });
+    return { success: Boolean(raw.success) };
+  },
+
+  devReset: async (mode: 'new_user' | 'existing_user'): Promise<User> =>
+    normalizeUserResponse(await request<RawUserResponse>(API_ENDPOINTS.onboarding.devReset, {
+      method: 'POST',
+      body: JSON.stringify({ mode }),
+    })),
 };
 
 // ============================================

@@ -39,6 +39,14 @@ export interface RawUserResponse {
   starsBalance?: number;
   case_pity_counter?: number;
   casePityCounter?: number;
+  onboarding_shown?: boolean;
+  onboardingShown?: boolean;
+  welcome_offer_opened_at?: string | null;
+  welcomeOfferOpenedAt?: string | null;
+  welcome_offer_purchased?: boolean;
+  welcomeOfferPurchased?: boolean;
+  is_new?: boolean;
+  isNew?: boolean;
 }
 
 export interface RawAuthResponse {
@@ -73,6 +81,10 @@ export function normalizeUserResponse(raw: RawUserResponse): User {
     walletAddress: raw.walletAddress ?? raw.wallet_address ?? null,
     starsBalance: raw.starsBalance ?? raw.stars_balance ?? 0,
     casePityCounter: raw.casePityCounter ?? raw.case_pity_counter ?? 0,
+    onboardingShown: Boolean(raw.onboardingShown ?? raw.onboarding_shown ?? false),
+    welcomeOfferOpenedAt: raw.welcomeOfferOpenedAt ?? raw.welcome_offer_opened_at ?? null,
+    welcomeOfferPurchased: Boolean(raw.welcomeOfferPurchased ?? raw.welcome_offer_purchased ?? false),
+    isNew: Boolean(raw.isNew ?? raw.is_new ?? false),
   };
 }
 

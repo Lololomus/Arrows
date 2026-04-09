@@ -76,6 +76,9 @@ def serialize_user(user: User) -> dict:
         "wallet_address": user.wallet_address,
         "stars_balance": user.stars_balance,
         "case_pity_counter": user.case_pity_counter,
+        "onboarding_shown": bool(getattr(user, "onboarding_shown", False)),
+        "welcome_offer_opened_at": getattr(user, "welcome_offer_opened_at", None) and user.welcome_offer_opened_at.isoformat(),
+        "welcome_offer_purchased": bool(getattr(user, "welcome_offer_purchased", False)),
     }
 
 
@@ -314,7 +317,8 @@ async def auth_telegram(
         select(User).where(User.telegram_id == telegram_id)
     )
     user = result.scalar_one_or_none()
-    
+    is_new_user = user is None
+
     if not user:
         # Создаём нового пользователя
         user = User(
@@ -365,8 +369,11 @@ async def auth_telegram(
             await db.commit()
             print(f"🔄 [Auth] User {user.id} data updated")
     
-    # Создаём JWT токен
-    return build_auth_response(user)
+    # Создаём JWT токен и вставляем is_new в user dict
+    response = build_auth_response(user)
+    user_dict = dict(response.user)
+    user_dict["is_new"] = is_new_user
+    return AuthResponse(token=response.token, expires_at=response.expires_at, user=user_dict)
 
 
 @router.get("/me", response_model=UserResponse)

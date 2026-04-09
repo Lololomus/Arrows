@@ -3,7 +3,8 @@ import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useTonConnectUI } from '@tonconnect/ui-react';
 import { Coins, Diamond, Heart, Lightbulb, Minus, Plus, RefreshCcw, ShoppingBag } from 'lucide-react';
-import { caseApi, handleApiError, shopApi } from '../api/client';
+import { caseApi, handleApiError, shopApi, type WelcomeOfferData } from '../api/client';
+import { WelcomeOfferModal } from '../components/WelcomeOfferModal';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { HeaderBar } from '../components/ui/HeaderBar';
 import type { CaseInfo, CaseOpenResult, ShopDiscountTier, ShopItem } from '../game/types';
@@ -265,6 +266,8 @@ function BoostCard({
   );
 }
 
+const SHOW_DEV_TOOLS = import.meta.env.DEV;
+
 export function ShopScreen() {
   const { t } = useTranslation();
   const user = useAppStore((s) => s.user);
@@ -287,6 +290,35 @@ export function ShopScreen() {
   const [caseModalOpen, setCaseModalOpen] = useState(false);
   const [caseCurrency, setCaseCurrency] = useState<'stars' | 'ton'>('stars');
   const [withdrawalOpen, setWithdrawalOpen] = useState(false);
+
+  // Welcome offer
+  const [welcomeOffer, setWelcomeOffer] = useState<WelcomeOfferData | null>(null);
+  const [showWelcomePopup, setShowWelcomePopup] = useState(false);
+  const [offerTimerExpired, setOfferTimerExpired] = useState(false);
+  const [offerCountdown, setOfferCountdown] = useState('');
+
+  useEffect(() => {
+    if (!welcomeOffer?.expiresAt) return;
+    const tick = () => {
+      const diff = Date.parse(welcomeOffer.expiresAt!) - Date.now();
+      if (diff <= 0) {
+        setOfferTimerExpired(true);
+        setOfferCountdown('00:00:00');
+        return;
+      }
+      const h = Math.floor(diff / 3_600_000);
+      const m = Math.floor((diff % 3_600_000) / 60_000);
+      const s = Math.floor((diff % 60_000) / 1_000);
+      setOfferCountdown(
+        `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
+      );
+    };
+    tick();
+    const id = window.setInterval(tick, 1_000);
+    return () => window.clearInterval(id);
+  }, [welcomeOffer?.expiresAt]);
+
+  const offerDiscounted = (welcomeOffer?.discounted ?? false) && !offerTimerExpired;
 
   const coinBalance = user?.coins ?? 0;
   const hintBalance = user?.hintBalance ?? 0;
@@ -326,6 +358,15 @@ export function ShopScreen() {
   useEffect(() => {
     void loadCatalog();
   }, [loadCatalog]);
+
+  useEffect(() => {
+    shopApi.getWelcomeOffer().then((data) => {
+      setWelcomeOffer(data);
+      if (data.eligible && data.discounted) {
+        setShowWelcomePopup(true);
+      }
+    }).catch(() => undefined);
+  }, []);
 
   const boostMap = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
 
@@ -556,7 +597,7 @@ export function ShopScreen() {
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="rounded-[24px] border border-amber-500/20 bg-gradient-to-br from-[#1a1612]/90 to-[#0f0d0a]/90 p-5 backdrop-blur-md shadow-[0_8px_24px_rgba(0,0,0,0.3)]"
+                  className="rounded-[24px] border border-white/5 bg-[#18181b]/60 p-5 backdrop-blur-md"
                 >
                   <div className="flex items-start gap-4">
                     <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-amber-500/25 bg-amber-500/10 text-3xl">
@@ -626,6 +667,76 @@ export function ShopScreen() {
                     >
                       💎 {caseInfo.priceTon} TON
                     </button>
+                  </div>
+                </motion.div>
+              </section>
+            )}
+
+            {/* ── DEV: reset welcome offer ── */}
+            {SHOW_DEV_TOOLS && (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await shopApi.devResetWelcomeOffer();
+                    const data = await shopApi.getWelcomeOffer();
+                    setWelcomeOffer(data);
+                    setOfferTimerExpired(false);
+                    if (data.eligible && data.discounted) setShowWelcomePopup(true);
+                  } catch { /* ignore */ }
+                }}
+                className="mb-3 w-full py-2 rounded-xl text-xs font-semibold bg-white/10 text-white/60 hover:bg-white/15 active:scale-95 transition-all"
+              >
+                🎁 DEV: Reset Welcome Offer
+              </button>
+            )}
+
+            {/* ── Welcome offer section ── */}
+            {welcomeOffer?.eligible && (
+              <section className="mb-5">
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-[24px] border border-white/5 bg-[#18181b]/60 overflow-hidden backdrop-blur-md"
+                >
+                  {/* Limited banner */}
+                  {offerDiscounted && (
+                    <div className="flex items-center justify-between px-4 py-2.5 bg-amber-500/15 border-b border-amber-500/20">
+                      <span className="text-xs font-bold uppercase tracking-widest text-amber-300">
+                        ⏰ {t('shop:welcomeOffer.limitedBadge')}
+                      </span>
+                      <span className="font-mono text-sm font-bold text-amber-300">{offerCountdown}</span>
+                    </div>
+                  )}
+
+                  <div className="p-5">
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-purple-500/25 bg-purple-500/10 text-3xl">
+                        🎁
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h2 className="text-base font-bold text-[#f7f8fb]">{t('shop:welcomeOffer.title')}</h2>
+                        <p className="text-sm text-[#a7abb8]">{t('shop:welcomeOffer.description')}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex items-center justify-between gap-3">
+                      <div className="flex items-end gap-2">
+                        {offerDiscounted && (
+                          <span className="text-xs text-white/35 line-through mb-0.5">{t('shop:welcomeOffer.fullPrice')}</span>
+                        )}
+                        <span className="text-2xl font-black text-white">
+                          {offerDiscounted ? t('shop:welcomeOffer.discountedPrice') : t('shop:welcomeOffer.fullPrice')}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowWelcomePopup(true)}
+                        className="flex-1 max-w-[160px] py-3 rounded-2xl font-bold text-sm text-white bg-gradient-to-r from-purple-600 to-pink-600 transition-all active:scale-95"
+                      >
+                        {t('shop:welcomeOffer.buyButton', { price: offerDiscounted ? welcomeOffer!.priceStars : 100 })}
+                      </button>
+                    </div>
                   </div>
                 </motion.div>
               </section>
@@ -735,7 +846,7 @@ export function ShopScreen() {
                       initial={{ opacity: 0, y: 12 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 0.06 * index }}
-                      className="rounded-3xl border border-white/10 bg-[#14182b]/78 p-4 shadow-[0_16px_36px_rgba(0,0,0,0.24)] backdrop-blur-xl"
+                      className="rounded-[24px] border border-white/5 bg-[#18181b]/60 p-5 backdrop-blur-md"
                     >
                       <div className="flex items-center gap-4">
                         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-violet-400/20 bg-violet-400/10 text-2xl text-violet-200">
@@ -801,6 +912,17 @@ export function ShopScreen() {
         <WithdrawalModal
           isOpen={withdrawalOpen}
           onClose={() => setWithdrawalOpen(false)}
+        />
+      )}
+
+      {/* Welcome offer popup */}
+      {showWelcomePopup && welcomeOffer && (
+        <WelcomeOfferModal
+          offer={welcomeOffer}
+          onClose={() => setShowWelcomePopup(false)}
+          onPurchased={() => {
+            setWelcomeOffer((prev) => prev ? { ...prev, eligible: false } : prev);
+          }}
         />
       )}
     </div>

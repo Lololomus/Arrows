@@ -8,10 +8,12 @@ import { HeaderBar } from '../components/ui/HeaderBar';
 import { useWalletConnectionController } from '../hooks/useWalletConnectionController';
 import { SpinScreen } from './SpinScreen';
 import { HowToPlayModal } from '../components/HowToPlayModal';
-import { authApi, handleApiError, spinApi } from '../api/client';
+import { OnboardingSlides } from '../components/OnboardingSlides';
+import { authApi, handleApiError, onboardingApi, spinApi } from '../api/client';
 import { setAppLocale, type AppLocale } from '../i18n';
 
 const HOME_BG_STAR_SIZE_PROFILE = { small: 0.8, medium: 0.16, large: 0.04 } as const;
+const SHOW_HOME_DEV_TOOLS = import.meta.env.DEV;
 
 const titleContainer = {
   hidden: {},
@@ -36,10 +38,15 @@ const titleLine = {
 
 export function HomeScreen() {
   const { t } = useTranslation();
-  const { setScreen, user, spinAvailable, loginStreak, setSpinStatus, setDailyMode, locale, setLocaleManually, setUser, spinStreakLostAt, spinStreakLostCount, staticBackground, setStaticBackground } = useAppStore();
-  const [showSpin, setShowSpin] = useState(false);
+  const { setScreen, user, spinAvailable, loginStreak, setSpinStatus, setDailyMode, locale, setLocaleManually, setUser, spinStreakLostAt, spinStreakLostCount, staticBackground, setStaticBackground, onboardingPending, setOnboardingPending } = useAppStore();
+  const isNewUserOnboarding = onboardingPending === 'new_user';
+  const [showSpin, setShowSpin] = useState(isNewUserOnboarding);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState(false);
+  const [showDevLauncher, setShowDevLauncher] = useState(false);
+  const [devLaunchMode, setDevLaunchMode] = useState<'new_user' | 'existing_user' | null>(null);
+  const [devLauncherError, setDevLauncherError] = useState<string | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [savingLocale, setSavingLocale] = useState<AppLocale | null>(null);
   const walletController = useWalletConnectionController();
@@ -111,14 +118,83 @@ export function HomeScreen() {
     };
   }, [setSpinStatus]);
 
+  useEffect(() => {
+    if (onboardingPending === 'new_user') {
+      setShowSpin(true);
+      setShowOnboarding(false);
+      return;
+    }
+
+    if (onboardingPending === 'existing_user') {
+      setShowSpin(false);
+      setShowOnboarding(false);
+    }
+  }, [onboardingPending]);
+
   const handlePlayArcade = () => {
     setDailyMode(false);
     setScreen('game');
   };
 
+  const launchDevOnboarding = async (mode: 'new_user' | 'existing_user') => {
+    if (devLaunchMode) return;
+
+    setDevLauncherError(null);
+    setDevLaunchMode(mode);
+
+    try {
+      const [resetUser] = await Promise.all([
+        onboardingApi.devReset(mode),
+        mode === 'new_user' ? spinApi.devReset() : Promise.resolve({ success: true }),
+      ]);
+
+      const spinStatus = await spinApi.getStatus();
+      setUser(mode === 'new_user' ? { ...resetUser, isNew: true } : { ...resetUser, isNew: false });
+      setSpinStatus(
+        spinStatus.available,
+        spinStatus.streak,
+        spinStatus.retryAvailable,
+        spinStatus.pendingPrize,
+        spinStatus.nextAvailableAt,
+        spinStatus.streakLostAt,
+        spinStatus.streakLostCount,
+      );
+
+      setShowDevLauncher(false);
+      setShowSpin(false);
+      setShowOnboarding(false);
+      setOnboardingPending(null);
+      setOnboardingPending(mode);
+    } catch (error) {
+      setDevLauncherError(handleApiError(error));
+    } finally {
+      setDevLaunchMode(null);
+    }
+  };
+
   return (
     <div className="relative flex flex-col h-full w-full overflow-hidden">
-      {showSpin && <SpinScreen onClose={() => setShowSpin(false)} />}
+      {showSpin && (
+        <SpinScreen
+          isForced={isNewUserOnboarding}
+          onClose={() => {
+            setShowSpin(false);
+            if (isNewUserOnboarding) {
+              setShowOnboarding(true);
+            }
+          }}
+        />
+      )}
+      {showOnboarding && (
+        <OnboardingSlides
+          isNewUser={true}
+          onComplete={(navigateToGame) => {
+            setShowOnboarding(false);
+            setOnboardingPending(null);
+            if (navigateToGame) setScreen('game');
+          }}
+        />
+      )}
 
       <AdaptiveParticles
         variant="bg"
@@ -254,6 +330,23 @@ export function HomeScreen() {
         </motion.button>
       </div>
 
+      {SHOW_HOME_DEV_TOOLS && (
+        <div className="absolute top-6 right-6 z-40">
+          <motion.button
+            type="button"
+            onClick={() => {
+              setDevLauncherError(null);
+              setShowDevLauncher(true);
+            }}
+            className="flex items-center justify-center min-w-[72px] h-11 px-4 rounded-2xl backdrop-blur-xl bg-[#16192d]/75 border border-amber-400/20 text-amber-200 text-sm font-bold tracking-[0.2em] shadow-[0_8px_24px_rgba(0,0,0,0.35)]"
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            DEV
+          </motion.button>
+        </div>
+      )}
+
       <AnimatePresence>
         {showSettings && (
           <>
@@ -326,6 +419,54 @@ export function HomeScreen() {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {SHOW_HOME_DEV_TOOLS && showDevLauncher && (
+          <>
+            <motion.div
+              className="absolute inset-0 z-50 bg-black/40 backdrop-blur-sm"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowDevLauncher(false)}
+            />
+            <motion.div
+              className="absolute top-20 right-6 z-50 w-[240px] bg-[#16192d]/95 backdrop-blur-xl border border-amber-400/20 rounded-2xl p-4 shadow-[0_12px_36px_rgba(0,0,0,0.55)]"
+              initial={{ opacity: 0, y: -12, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -12, scale: 0.96 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+            >
+              <p className="mb-3 px-1 text-[11px] font-bold uppercase tracking-[0.22em] text-amber-200/70">
+                DEV Onboarding
+              </p>
+              {devLauncherError && (
+                <p className="mb-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                  {devLauncherError}
+                </p>
+              )}
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => void launchDevOnboarding('new_user')}
+                  disabled={devLaunchMode !== null}
+                  className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-left text-sm font-semibold text-white transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Новый пользователь
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void launchDevOnboarding('existing_user')}
+                  disabled={devLaunchMode !== null}
+                  className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-left text-sm font-semibold text-white transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Уже играющий пользователь
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       <HowToPlayModal open={showHowToPlay} onClose={() => setShowHowToPlay(false)} />
 
       <div className="absolute bottom-[110px] right-6 z-40">
@@ -359,7 +500,7 @@ export function HomeScreen() {
           <motion.div
             className={`absolute inset-1 rounded-full overflow-hidden ${!spinAvailable && !isStreakFrozen && 'grayscale opacity-60'}`}
             style={{
-              background: 'conic-gradient(#0f766e 0 45deg, #047857 45deg 90deg, #1d4ed8 90deg 135deg, #2563eb 135deg 180deg, #7e22ce 180deg 225deg, #9333ea 225deg 270deg, #b45309 270deg 315deg, #be123c 315deg 360deg)',
+              background: 'conic-gradient(#0f766e 0 40deg, #047857 40deg 80deg, #1d4ed8 80deg 120deg, #2563eb 120deg 160deg, #7e22ce 160deg 200deg, #9333ea 200deg 240deg, #b45309 240deg 280deg, #be123c 280deg 320deg, #15803d 320deg 360deg)',
             }}
             animate={spinAvailable && !isStreakFrozen ? { rotate: 360 } : { rotate: 0 }}
             transition={{ repeat: Infinity, duration: 12, ease: 'linear' }}

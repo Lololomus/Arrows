@@ -437,7 +437,7 @@ function AdsGramTaskCard({ animDelay = 0 }: { animDelay?: number }) {
   const resetHint = resetsAt ? formatResetTime(resetsAt, now) : translate('common:later');
 
   // ── Done state ──────────────────────────────────────────────────────────────
-  const rewardLabel = formatTaskRewardLabel(50, 0, 1);
+  const rewardLabel = formatTaskRewardLabel(0, 0, 1);
   const iconEl = (
     <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-500/20 text-red-400">
       <Heart size={22} />
@@ -1120,7 +1120,7 @@ export function TasksScreen() {
       if (adEligible) i++;
     }
 
-    // 4b. AdsGram task (daily revive, visible from level 1)
+    // 4b. AdsGram task (8h revive cooldown, visible from level 1)
     if (showAdsGramTask) {
       nodes.push(
         <AdsGramTaskCard key="adsgram-task" animDelay={i++ * STAGGER} />

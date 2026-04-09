@@ -247,6 +247,9 @@ export const API_ENDPOINTS = {
     purchaseTon: '/shop/purchase/ton',
     transactionStatus: (txId: number) => `/shop/transaction/${txId}/status`,
     transactionConfirm: (txId: number) => `/shop/transaction/${txId}/confirm`,
+    welcomeOffer: '/shop/welcome-offer',
+    purchaseWelcomeOffer: '/shop/welcome-offer/purchase',
+    devResetWelcomeOffer: '/shop/dev/reset-welcome-offer',
   },
   cases: {
     info: '/shop/cases/info',
@@ -281,6 +284,10 @@ export const API_ENDPOINTS = {
     devState: '/tasks/dev/state',
     devReset: '/tasks/dev/reset',
   },
+  onboarding: {
+    complete: '/onboarding/complete',
+    devReset: '/onboarding/dev/reset',
+  },
   spin: {
     status: '/spin/status',
     roll: '/spin/roll',
@@ -290,6 +297,7 @@ export const API_ENDPOINTS = {
     devReset: '/spin/dev/reset',
     devSetStreak: '/spin/dev/set-streak',
     devSetFrozenStreak: '/spin/dev/set-frozen-streak',
+    devForceUsdt: '/spin/dev/force-usdt',
   },
   fragments: {
     drops: '/fragments/drops',

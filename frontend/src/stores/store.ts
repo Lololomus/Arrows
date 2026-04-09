@@ -114,6 +114,9 @@ interface AppState {
 
   staticBackground: boolean;
   setStaticBackground: (value: boolean) => void;
+
+  onboardingPending: 'new_user' | 'existing_user' | null;
+  setOnboardingPending: (mode: 'new_user' | 'existing_user' | null) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -209,6 +212,9 @@ export const useAppStore = create<AppState>()(
         writeStaticBackgroundPreference(staticBackground);
         set({ staticBackground });
       },
+
+      onboardingPending: null,
+      setOnboardingPending: (onboardingPending) => set({ onboardingPending }),
     }),
     {
       name: 'arrow-puzzle-app',

@@ -172,6 +172,12 @@ export interface User {
   // Кейсы
   starsBalance?: number;
   casePityCounter?: number;
+
+  // Онбординг и welcome offer
+  onboardingShown: boolean;
+  welcomeOfferOpenedAt: string | null;
+  welcomeOfferPurchased: boolean;
+  isNew?: boolean;
 }
 
 /** Статистика пользователя */

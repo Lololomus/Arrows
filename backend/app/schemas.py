@@ -65,6 +65,9 @@ class UserResponse(BaseModel):
     wallet_address: Optional[str] = None
     stars_balance: int = 0
     case_pity_counter: int = 0
+    onboarding_shown: bool = False
+    welcome_offer_opened_at: Optional[str] = None
+    welcome_offer_purchased: bool = False
 
     class Config:
         from_attributes = True
@@ -516,7 +519,7 @@ class DailyCoinsStatus(BaseModel):
     resets_at: str
 
 class TaskReviveStatus(BaseModel):
-    """Статус ежедневного воскрешения за задание AdsGram."""
+    """Статус AdsGram-награды на воскрешение с кулдауном."""
     used: int
     limit: int
     resets_at: str
