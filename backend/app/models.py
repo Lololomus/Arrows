@@ -91,6 +91,9 @@ class User(Base):
     welcome_offer_opened_at = Column(DateTime, nullable=True)   # когда юзер впервые открыл магазин
     welcome_offer_purchased = Column(Boolean, nullable=False, server_default=text("false"))
 
+    # USDT blast уведомление (одноразовая рассылка)
+    usdt_blast_sent = Column(Boolean, nullable=False, server_default=text("false"))
+
     # Ban система (для anti-cheat)
     is_banned = Column(Boolean, default=False)
     ban_reason = Column(String(256), nullable=True)

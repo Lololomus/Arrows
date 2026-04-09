@@ -39,7 +39,15 @@ def upgrade() -> None:
             sa.Column("welcome_offer_purchased", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         )
 
+    if "usdt_blast_sent" not in existing_columns:
+        op.add_column(
+            "users",
+            sa.Column("usdt_blast_sent", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        )
+
+
 def downgrade() -> None:
+    op.drop_column("users", "usdt_blast_sent")
     op.drop_column("users", "welcome_offer_purchased")
     op.drop_column("users", "welcome_offer_opened_at")
     op.drop_column("users", "onboarding_shown")

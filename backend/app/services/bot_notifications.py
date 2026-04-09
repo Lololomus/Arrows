@@ -161,6 +161,33 @@ async def notify_adsgram_task_reward(telegram_id: int, locale: str | None = None
         return "failed"
 
 
+async def notify_usdt_wheel_launch(telegram_id: int, locale: str | None = None) -> NotificationDelivery:
+    """One-time blast: USDT sector added to spin wheel. Sent to each user individually."""
+    locale = normalize_locale(locale)
+    text = bot_text("usdt_wheel_broadcast", locale)
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text=bot_text("spin_button", locale),
+                web_app=WebAppInfo(url=settings.WEBAPP_URL),
+            )
+        ]]
+    )
+    try:
+        await _get_bot().send_message(
+            chat_id=telegram_id,
+            text=text,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+        return "sent"
+    except (TelegramForbiddenError, TelegramBadRequest):
+        return "blocked"
+    except Exception as e:
+        logger.warning("Failed to send USDT wheel launch notification to %s: %s", telegram_id, e)
+        return "failed"
+
+
 async def broadcast_usdt_wheel_launch(channel_id: str) -> None:
     """Send USDT wheel launch announcement to the official channel.
 
