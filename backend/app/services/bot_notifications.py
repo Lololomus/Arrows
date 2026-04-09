@@ -165,20 +165,12 @@ async def notify_usdt_wheel_launch(telegram_id: int, locale: str | None = None) 
     """One-time blast: USDT sector added to spin wheel. Sent to each user individually."""
     locale = normalize_locale(locale)
     text = bot_text("usdt_wheel_broadcast", locale)
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[[
-            InlineKeyboardButton(
-                text=bot_text("spin_button", locale),
-                web_app=WebAppInfo(url=settings.WEBAPP_URL),
-            )
-        ]]
-    )
     try:
         await _get_bot().send_message(
             chat_id=telegram_id,
             text=text,
             parse_mode="HTML",
-            reply_markup=keyboard,
+            reply_markup=_spin_keyboard(locale),
         )
         return "sent"
     except (TelegramForbiddenError, TelegramBadRequest):
