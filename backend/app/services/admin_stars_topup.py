@@ -16,21 +16,33 @@ ADMIN_TOPUP_PAYLOAD_PREFIX = "admin_topup_stars"
 ADMIN_TOPUP_PACKS: tuple[int, ...] = (100, 500, 1000)
 
 
-def get_admin_telegram_id() -> int | None:
+def get_admin_telegram_ids() -> set[int]:
+    """Parse ADMIN_TELEGRAM_ID — supports single ID or comma-separated list."""
     raw = settings.ADMIN_TELEGRAM_ID.strip()
     if not raw:
-        return None
+        return set()
+    ids: set[int] = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            ids.add(int(part))
+        except ValueError:
+            logger.error("ADMIN_TELEGRAM_ID: invalid value %r (expected integer)", part)
+    return ids
 
-    try:
-        return int(raw)
-    except ValueError:
-        logger.error("ADMIN_TELEGRAM_ID must be an integer, got %r", raw)
-        return None
+
+def get_admin_telegram_id() -> int | None:
+    """Return first admin ID (kept for backward compatibility)."""
+    ids = get_admin_telegram_ids()
+    return next(iter(ids), None)
 
 
 def is_admin_telegram_id(user_id: int | None) -> bool:
-    admin_id = get_admin_telegram_id()
-    return admin_id is not None and user_id is not None and int(user_id) == admin_id
+    if user_id is None:
+        return False
+    return int(user_id) in get_admin_telegram_ids()
 
 
 def normalize_topup_amount(
