@@ -26,6 +26,7 @@ telethon>=1.42.0
 # HTTP
 httpx
 aiohttp
+aiohttp-socks
 
 # Validation
 pydantic>=2.0.0
