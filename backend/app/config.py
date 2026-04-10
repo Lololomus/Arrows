@@ -131,6 +131,7 @@ class Settings(BaseSettings):
     ADMIN_API_KEY: str = ""
     ADMIN_ALERT_CHAT_ID: str = ""
     ADMIN_TELEGRAM_ID: str = ""
+    TELEGRAM_PROXY: str = ""  # SOCKS5/HTTP proxy for Telegram API, e.g. socks5://127.0.0.1:40000
 
     # Fragment Drops (Telegram Gifts)
     FRAGMENT_DROPS_ENABLED: bool = False

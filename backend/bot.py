@@ -65,7 +65,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
+_proxy_url = getattr(settings, "TELEGRAM_PROXY", "").strip() or None
+if _proxy_url:
+    from aiogram.client.session.aiohttp import AiohttpSession
+    bot = Bot(token=settings.TELEGRAM_BOT_TOKEN, session=AiohttpSession(proxy=_proxy_url))
+else:
+    bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
 
