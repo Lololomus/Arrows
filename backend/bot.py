@@ -40,6 +40,7 @@ from app.services.case_logic import (
 from app.services.admin_stats import (
     fetch_ads_stats,
     fetch_cases_spins_stats,
+    fetch_device_stats,
     fetch_economy_stats,
     fetch_game_stats,
     fetch_referral_stats,
@@ -606,7 +607,52 @@ def _format_main_menu_text(data: dict) -> str:
     )
 
 
-def _format_users(data: dict, period: str) -> str:
+def _format_device_block(device: dict) -> str:
+    """
+    Format device/platform statistics block.
+    One user can appear in multiple platform groups (cross-device).
+    Counts = unique users who ever used that platform.
+    """
+    from app.services.admin_stats import PLATFORM_LABELS, MOBILE_PLATFORMS
+
+    known = device["users_with_platform"]
+    mobile = device["mobile_ever"]
+    desktop = device["desktop_ever"]
+    cross = device["cross_device"]
+    unknown = device["unknown"]
+    ever = device["ever_by_platform"]
+    r7 = device["recent_7d"]
+    r30 = device["recent_30d"]
+
+    mobile_7d = sum(v for k, v in r7.items() if k in MOBILE_PLATFORMS)
+    desktop_7d = sum(v for k, v in r7.items() if k not in MOBILE_PLATFORMS)
+    mobile_30d = sum(v for k, v in r30.items() if k in MOBILE_PLATFORMS)
+    desktop_30d = sum(v for k, v in r30.items() if k not in MOBILE_PLATFORMS)
+
+    t = "\n📱 <b>Устройства</b> <i>(уник. юзеров; один юзер может быть в обеих группах)</i>\n"
+    t += f"📱 Мобильные (ever): <b>{_fmt(mobile)}</b>\n"
+    t += f"🖥 Десктоп (ever): <b>{_fmt(desktop)}</b>\n"
+    if cross > 0:
+        t += f"🔀 Кросс-девайс (оба): <b>{_fmt(cross)}</b>\n"
+    if unknown > 0:
+        t += f"❓ Без платформы: <b>{_fmt(unknown)}</b>\n"
+
+    if known > 0:
+        t += f"\n  Активных за 7 дней:\n"
+        t += f"  📱 {_fmt(mobile_7d)} | 🖥 {_fmt(desktop_7d)}\n"
+        t += f"  Активных за 30 дней:\n"
+        t += f"  📱 {_fmt(mobile_30d)} | 🖥 {_fmt(desktop_30d)}\n"
+
+    if ever:
+        t += "\n  По платформам (ever):\n"
+        for pname, count in sorted(ever.items(), key=lambda x: -x[1]):
+            label = PLATFORM_LABELS.get(pname, pname)
+            icon = "📱" if pname in MOBILE_PLATFORMS else "🖥"
+            t += f"  {icon} {label}: {_fmt(count)}\n"
+    return t
+
+
+def _format_users(data: dict, period: str, device: dict | None = None) -> str:
     total = data["total"]
     t = _section_header("Пользователи", period)
     t += (
@@ -621,6 +667,8 @@ def _format_users(data: dict, period: str) -> str:
         f"🔗 Пришли по рефералу: <b>{_fmt(data['via_referral'])}</b>"
         f" ({_pct(data['via_referral'], total)})\n"
     )
+    if device is not None:
+        t += _format_device_block(device)
     return t
 
 
@@ -996,6 +1044,13 @@ async def process_admin_stats(callback: types.CallbackQuery):
                 data = await fetch_seasons_stats(db)
             text = _format_seasons(data)
             kb = build_seasons_keyboard()
+
+        elif section == "u":
+            async with AsyncSessionLocal() as db:
+                data = await fetch_users_stats(db, period)
+                device = await fetch_device_stats(db)
+            text = _format_users(data, period, device)
+            kb = build_section_keyboard(section, period)
 
         elif section in SECTION_FETCHERS_MAP:
             async with AsyncSessionLocal() as db:

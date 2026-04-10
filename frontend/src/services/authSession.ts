@@ -11,8 +11,15 @@ function getAuthExpiredMessage(): string {
 
 let reauthPromise: Promise<void> | null = null;
 
+type TelegramGlobal = Window & { Telegram?: { WebApp?: { initData?: string; platform?: string } } };
+
 function getTelegramInitData(): string {
-  return String((window as Window & { Telegram?: { WebApp?: { initData?: string } } }).Telegram?.WebApp?.initData || '').trim();
+  return String((window as TelegramGlobal).Telegram?.WebApp?.initData || '').trim();
+}
+
+function getTelegramPlatform(): string | undefined {
+  const p = (window as TelegramGlobal).Telegram?.WebApp?.platform;
+  return p ? String(p).toLowerCase() : undefined;
 }
 
 function isDevAuthActive(): boolean {
@@ -41,7 +48,7 @@ async function performTelegramAuth(): Promise<void> {
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ init_data: initData }),
+    body: JSON.stringify({ init_data: initData, platform: getTelegramPlatform() }),
   });
 
   const contentType = response.headers.get('content-type');

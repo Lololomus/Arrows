@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 class TelegramAuthRequest(BaseModel):
     """Запрос авторизации через Telegram."""
     init_data: str
+    platform: Optional[str] = None  # Telegram WebApp platform: ios, android, tdesktop, macos, web, weba
 
 
 class UserLocaleUpdateRequest(BaseModel):

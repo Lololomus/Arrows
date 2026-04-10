@@ -21,6 +21,7 @@ from app.models import (
     StarsWithdrawal,
     Transaction,
     User,
+    UserPlatformLogin,
     UserStats,
 )
 
@@ -51,6 +52,112 @@ def _int(v: Any) -> int:
 
 def _float(v: Any, digits: int = 1) -> float:
     return round(float(v), digits) if v is not None else 0.0
+
+
+# Platform groupings
+MOBILE_PLATFORMS = {"ios", "android"}
+DESKTOP_PLATFORMS = {"tdesktop", "macos", "web", "weba"}
+
+PLATFORM_LABELS = {
+    "ios": "iOS",
+    "android": "Android",
+    "tdesktop": "Telegram Desktop",
+    "macos": "macOS",
+    "web": "Web",
+    "weba": "Web (A)",
+}
+
+
+# ---------------------------------------------------------------------------
+# Device Stats
+# ---------------------------------------------------------------------------
+
+async def fetch_device_stats(db: AsyncSession) -> dict:
+    """
+    Device/platform stats using user_platform_logins table.
+
+    Each row = one unique (user, platform) pair with first/last seen timestamps.
+    A user who logged in from both iOS and desktop appears in BOTH groups.
+
+    Returns:
+        - unique users per platform (ever)
+        - unique users per platform active in last 7 / 30 days
+        - cross-device count (used both mobile AND desktop)
+        - users with no known platform at all
+    """
+    now = _utcnow()
+    cutoff_7d = now - timedelta(days=7)
+    cutoff_30d = now - timedelta(days=30)
+
+    total_users = _int(await db.scalar(select(func.count(User.id))))
+
+    # Users who have at least one platform record
+    users_with_platform = _int(await db.scalar(
+        select(func.count(func.distinct(UserPlatformLogin.user_id)))
+    ))
+    unknown = total_users - users_with_platform
+
+    # Unique users per platform (ever)
+    ever_rows = (await db.execute(
+        select(UserPlatformLogin.platform, func.count(func.distinct(UserPlatformLogin.user_id)))
+        .group_by(UserPlatformLogin.platform)
+        .order_by(func.count(func.distinct(UserPlatformLogin.user_id)).desc())
+    )).all()
+    ever_by_platform: dict[str, int] = {r[0]: _int(r[1]) for r in ever_rows}
+
+    # Unique users per platform active in last 7d
+    recent_7d_rows = (await db.execute(
+        select(UserPlatformLogin.platform, func.count(func.distinct(UserPlatformLogin.user_id)))
+        .where(UserPlatformLogin.last_seen_at >= cutoff_7d)
+        .group_by(UserPlatformLogin.platform)
+    )).all()
+    recent_7d: dict[str, int] = {r[0]: _int(r[1]) for r in recent_7d_rows}
+
+    # Unique users per platform active in last 30d
+    recent_30d_rows = (await db.execute(
+        select(UserPlatformLogin.platform, func.count(func.distinct(UserPlatformLogin.user_id)))
+        .where(UserPlatformLogin.last_seen_at >= cutoff_30d)
+        .group_by(UserPlatformLogin.platform)
+    )).all()
+    recent_30d: dict[str, int] = {r[0]: _int(r[1]) for r in recent_30d_rows}
+
+    # Aggregate mobile / desktop (ever)
+    mobile_ever = sum(v for k, v in ever_by_platform.items() if k in MOBILE_PLATFORMS)
+    desktop_ever = sum(v for k, v in ever_by_platform.items() if k in DESKTOP_PLATFORMS)
+
+    # Cross-device users: have at least one mobile AND at least one desktop platform
+    # Subquery: user_ids with mobile
+    mobile_users_sq = (
+        select(UserPlatformLogin.user_id)
+        .where(UserPlatformLogin.platform.in_(list(MOBILE_PLATFORMS)))
+        .distinct()
+        .scalar_subquery()
+    )
+    desktop_users_sq = (
+        select(UserPlatformLogin.user_id)
+        .where(UserPlatformLogin.platform.in_(list(DESKTOP_PLATFORMS)))
+        .distinct()
+        .scalar_subquery()
+    )
+    cross_device = _int(await db.scalar(
+        select(func.count(func.distinct(UserPlatformLogin.user_id)))
+        .where(
+            UserPlatformLogin.user_id.in_(mobile_users_sq),
+            UserPlatformLogin.user_id.in_(desktop_users_sq),
+        )
+    ))
+
+    return {
+        "total_users": total_users,
+        "users_with_platform": users_with_platform,
+        "unknown": unknown,
+        "mobile_ever": mobile_ever,
+        "desktop_ever": desktop_ever,
+        "cross_device": cross_device,
+        "ever_by_platform": ever_by_platform,
+        "recent_7d": recent_7d,
+        "recent_30d": recent_30d,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ import jwt
 
 from ..config import settings
 from ..database import get_db, get_redis
-from ..models import User, UserStats, Referral
+from ..models import User, UserStats, Referral, UserPlatformLogin
 from ..schemas import (
     TelegramAuthRequest,
     AuthResponse,
@@ -309,9 +309,10 @@ async def auth_telegram(
     locale = normalize_locale(telegram_user.get("language_code"))
     photo_url = telegram_user.get("photo_url")
     is_premium = telegram_user.get("is_premium", False)
-    
+    platform = request.platform.strip().lower() if request.platform else None
+
     print(f"✅ [Auth] Telegram user {telegram_id} authenticated")
-    
+
     # Ищем или создаём пользователя
     result = await db.execute(
         select(User).where(User.telegram_id == telegram_id)
@@ -331,6 +332,7 @@ async def auth_telegram(
             coins=settings.INITIAL_COINS,
             energy=settings.MAX_ENERGY,
             is_premium=is_premium,
+            platform=platform,
         )
         db.add(user)
         
@@ -364,11 +366,33 @@ async def auth_telegram(
         if user.is_premium != is_premium:
             user.is_premium = is_premium
             updated = True
-        
+        if platform and getattr(user, "platform", None) != platform:
+            user.platform = platform
+            updated = True
+
         if updated:
             await db.commit()
             print(f"🔄 [Auth] User {user.id} data updated")
     
+    # Фиксируем платформу (upsert: одна строка на пару user + platform)
+    if platform:
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        existing_plat = await db.execute(
+            select(UserPlatformLogin)
+            .where(UserPlatformLogin.user_id == user.id, UserPlatformLogin.platform == platform)
+        )
+        plat_row = existing_plat.scalar_one_or_none()
+        if plat_row is None:
+            db.add(UserPlatformLogin(
+                user_id=user.id,
+                platform=platform,
+                first_seen_at=now_utc,
+                last_seen_at=now_utc,
+            ))
+        else:
+            plat_row.last_seen_at = now_utc
+        await db.commit()
+
     # Создаём JWT токен и вставляем is_new в user dict
     response = build_auth_response(user)
     user_dict = dict(response.user)

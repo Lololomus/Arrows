@@ -99,6 +99,9 @@ class User(Base):
     ban_reason = Column(String(256), nullable=True)
     banned_at = Column(DateTime, nullable=True)
     
+    # Устройство (платформа Telegram: ios, android, tdesktop, macos, web, weba)
+    platform = Column(String(32), nullable=True)
+
     # Метаданные
     created_at = Column(DateTime, default=datetime.utcnow)
     last_active_at = Column(DateTime, default=datetime.utcnow)
@@ -137,6 +140,30 @@ class User(Base):
             "stars_balance": self.stars_balance,
             "case_pity_counter": self.case_pity_counter,
         }
+
+
+# ============================================
+# USER PLATFORM LOGINS
+# ============================================
+
+class UserPlatformLogin(Base):
+    """
+    Уникальная платформа, с которой заходил пользователь.
+    Одна строка на пару (user_id, platform).
+    first_seen_at — когда впервые, last_seen_at — когда последний раз.
+    """
+
+    __tablename__ = "user_platform_logins"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    platform = Column(String(32), nullable=False)
+    first_seen_at = Column(DateTime, nullable=False)
+    last_seen_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "platform", name="uq_user_platform"),
+    )
 
 
 # ============================================
