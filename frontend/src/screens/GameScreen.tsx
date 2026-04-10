@@ -381,11 +381,16 @@ export function GameScreen() {
     () => getBoardRenderMode({ width: gridSize.width, height: gridSize.height }, arrows.length, renderProfile.isLowEnd),
     [arrows.length, gridSize.height, gridSize.width, renderProfile.isLowEnd],
   );
-  const isHeavyBoard = boardRenderMode !== 'normal';
+  const [forceReducedEffects, setForceReducedEffects] = useState(false);
+  const shouldReduceHeavyBoardEffects = forceReducedEffects || (renderProfile.isLowEnd && boardRenderMode === 'huge');
   const [containerSize, setContainerSize] = useState({
     w: window.innerWidth,
     h: window.innerHeight,
   });
+
+  useEffect(() => {
+    setForceReducedEffects(false);
+  }, [currentLevel]);
 
   // === FRAMER MOTION CAMERA PHYSICS ===
   const cameraX = useMotionValue(0);
@@ -1200,7 +1205,7 @@ export function GameScreen() {
     applyScaleImmediate(fitAllScale);
 
     const maxGridDim = Math.max(gridSize.width, gridSize.height);
-    const shouldLockInputForIntro = !isHeavyBoard && maxGridDim >= INTRO_MIN_DIM_FOR_BLOCK;
+    const shouldLockInputForIntro = !shouldReduceHeavyBoardEffects && maxGridDim >= INTRO_MIN_DIM_FOR_BLOCK;
     setIsIntroAnimating(shouldLockInputForIntro);
 
     // вљЎ FIX: input lock РјР°СЃС€С‚Р°Р±РёСЂСѓРµС‚СЃСЏ РІРјРµСЃС‚Рµ СЃРѕ sweep РґР»РёС‚РµР»СЊРЅРѕСЃС‚СЊСЋ
@@ -1229,7 +1234,7 @@ export function GameScreen() {
   }, [
     status, gridSize.width, gridSize.height, baseCellSize,
     zoomBounds.fitScale, zoomBounds.minScale, zoomBounds.maxScale, viewW, viewH,
-    cameraX, cameraY, cameraScale, applyScaleImmediate, cancelPanTween, isHeavyBoard,
+    cameraX, cameraY, cameraScale, applyScaleImmediate, cancelPanTween, shouldReduceHeavyBoardEffects,
   ]);
 
   useEffect(() => {
@@ -1933,6 +1938,7 @@ export function GameScreen() {
               gridSize={gridSize}
               cellSize={baseCellSize}
               boardRenderMode={boardRenderMode}
+              onRequireReducedEffects={() => setForceReducedEffects(true)}
               hintedArrowId={hintedArrowId}
               onArrowClick={handleArrowClick}
               springX={cameraX}
@@ -1943,7 +1949,7 @@ export function GameScreen() {
           )}
 
           {/* ===== FX СЃР»РѕР№ РїРѕРґ HUD (fly-out) ===== */}
-          {renderProfile.enableFxOverlay && !isHeavyBoard && (
+          {renderProfile.enableFxOverlay && !shouldReduceHeavyBoardEffects && (
             <FXOverlay
               containerRef={containerRef}
               gridSize={gridSize}

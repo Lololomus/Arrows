@@ -22,7 +22,7 @@
  * 7. [Legacy] Специальные стрелки закомментированы
  */
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import type { Arrow, Cell } from '../game/types';
 import { DIRECTIONS } from '../config/constants';
 import { useGameStore } from '../stores/store';
@@ -81,6 +81,7 @@ export interface CanvasBoardProps {
   gridSize: { width: number; height: number };
   cellSize: number;
   boardRenderMode: BoardRenderMode;
+  onRequireReducedEffects?: () => void;
   hintedArrowId: string | null;
   onArrowClick: (arrowId: string) => void;
   springX: MotionValue<number>;
@@ -154,6 +155,7 @@ export function CanvasBoard({
   gridSize,
   cellSize,
   boardRenderMode,
+  onRequireReducedEffects,
   hintedArrowId,
   onArrowClick,
   springX,
@@ -188,8 +190,12 @@ export function CanvasBoard({
   const bounceRef = useRef<BounceAnim | null>(null);
 
   const containerSizeRef = useRef({ w: window.innerWidth, h: window.innerHeight });
-  const isHeavyBoard = boardRenderMode !== 'normal';
-  const effectiveBoardDprCap = isHeavyBoard ? 1 : renderProfile.boardDprCap;
+  const shouldPreferReducedEffects = renderProfile.isLowEnd && boardRenderMode === 'huge';
+  const [runtimeRenderMode, setRuntimeRenderMode] = useState<'default' | 'reduced'>('default');
+  const runtimeRenderModeRef = useRef<'default' | 'reduced'>('default');
+  const perfStatsRef = useRef({ lastTs: 0, sampled: 0, slow: 0 });
+  const hasReducedEffects = shouldPreferReducedEffects || runtimeRenderMode === 'reduced';
+  const effectiveBoardDprCap = hasReducedEffects ? 1 : renderProfile.boardDprCap;
   const dpr = Math.min(window.devicePixelRatio || 1, effectiveBoardDprCap);
 
   const totalBoardW = (gridSize.width + GRID_PADDING_CELLS) * cellSize;
@@ -234,11 +240,22 @@ export function CanvasBoard({
   const staticDirtyRef = useRef(true);
   const staticFallbackRef = useRef(false);
 
+  const requestReducedEffects = useCallback((reason: string) => {
+    if (runtimeRenderModeRef.current === 'reduced') return;
+    runtimeRenderModeRef.current = 'reduced';
+    setRuntimeRenderMode('reduced');
+    onRequireReducedEffects?.();
+    console.warn(`[CanvasBoard] Reduced render mode enabled: ${reason}`);
+  }, [onRequireReducedEffects]);
+
   useEffect(() => {
     if (!renderProfile.useStaticCanvas) {
       staticLayerRef.current = null;
     }
     staticFallbackRef.current = false;
+    perfStatsRef.current = { lastTs: 0, sampled: 0, slow: 0 };
+    runtimeRenderModeRef.current = 'default';
+    setRuntimeRenderMode('default');
     staticDirtyRef.current = true;
   }, [renderProfile.useStaticCanvas, boardRenderMode]);
 
@@ -246,6 +263,9 @@ export function CanvasBoard({
   // НЕ при каждом удалении стрелки
   useEffect(() => {
     staticFallbackRef.current = false;
+    perfStatsRef.current = { lastTs: 0, sampled: 0, slow: 0 };
+    runtimeRenderModeRef.current = 'default';
+    setRuntimeRenderMode('default');
     staticDirtyRef.current = true;
   }, [skin, cellSize, gridSize.width, gridSize.height, boardRenderMode]);
 
@@ -480,6 +500,30 @@ export function CanvasBoard({
     function render(now: number) {
       if (!isRunning || !ctx || !canvas) return;
 
+      if (boardRenderMode !== 'normal' && runtimeRenderModeRef.current !== 'reduced' && document.visibilityState === 'visible') {
+        const perfStats = perfStatsRef.current;
+        if (perfStats.lastTs > 0) {
+          const dt = now - perfStats.lastTs;
+          if (dt > 90) {
+            requestReducedEffects('slow_frame_spike');
+          } else if (dt > 0 && dt < 200) {
+            perfStats.sampled += 1;
+            if (dt > 34) {
+              perfStats.slow += 1;
+            } else if (dt < 24 && perfStats.slow > 0) {
+              perfStats.slow -= 1;
+            }
+
+            if (perfStats.sampled >= 18 && perfStats.slow >= 10) {
+              requestReducedEffects('consistent_slow_frames');
+            }
+          }
+        }
+        perfStats.lastTs = now;
+      } else {
+        perfStatsRef.current.lastTs = now;
+      }
+
       const { w: cw, h: ch } = containerSizeRef.current;
       if (cw === 0 || ch === 0) { animFrameRef.current = requestAnimationFrame(render); return; }
 
@@ -512,7 +556,7 @@ export function CanvasBoard({
       }
       const elapsedSinceStart = now - levelStartTimeRef.current;
       const maxGridDim = Math.max(gridSize.width, gridSize.height);
-      const shouldRunIntroSweep = !isHeavyBoard
+      const shouldRunIntroSweep = !hasReducedEffects
         && skin.effects.enableAppearAnimation
         && maxGridDim >= INTRO_MIN_DIM_FOR_SWEEP;
 
@@ -558,7 +602,7 @@ export function CanvasBoard({
       // Static layers (background + grid dots)
       const gridW = gridSize.width * cellSize;
       const gridH = gridSize.height * cellSize;
-      const staticLayerScale = getStaticLayerScale(gridW, gridH, boardRenderMode);
+      const staticLayerScale = getStaticLayerScale(gridW, gridH, boardRenderMode, hasReducedEffects);
       const canUseStaticLayer = renderProfile.useStaticCanvas && !staticFallbackRef.current;
 
       if (canUseStaticLayer && (staticDirtyRef.current || !staticLayerRef.current)) {
@@ -586,12 +630,13 @@ export function CanvasBoard({
           offCtx.setTransform(1, 0, 0, 1, 0, 0);
           offCtx.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
           offCtx.setTransform(layer.scale, 0, 0, layer.scale, 0, 0);
-          drawStaticDecor(offCtx, cellSize, initialCellsParsed.current, skin, boardRenderMode);
+          drawStaticDecor(offCtx, cellSize, initialCellsParsed.current, skin, boardRenderMode, hasReducedEffects);
           staticDirtyRef.current = false;
         } else {
           staticLayerRef.current = null;
           staticFallbackRef.current = true;
           staticDirtyRef.current = true;
+          requestReducedEffects('static_context_unavailable');
           console.warn('[CanvasBoard] Static layer disabled: 2D context unavailable');
         }
       }
@@ -629,7 +674,7 @@ export function CanvasBoard({
           }
         }
       } else {
-        drawStaticDecor(ctx, cellSize, initialCellsParsed.current, skin, boardRenderMode);
+        drawStaticDecor(ctx, cellSize, initialCellsParsed.current, skin, boardRenderMode, hasReducedEffects);
       }
 
       // Arrows
@@ -703,7 +748,7 @@ export function CanvasBoard({
   }, [
     // ⚡ ТОЛЬКО структурные зависимости (меняются при смене уровня)
     cellSize, gridSize.width, gridSize.height,
-    totalBoardW, totalBoardH, boardPadding, dpr, skin, boardRenderMode, renderProfile.useStaticCanvas,
+    totalBoardW, totalBoardH, boardPadding, dpr, skin, boardRenderMode, hasReducedEffects, requestReducedEffects, renderProfile.useStaticCanvas,
     springX, springY, springScale,
   ]);
 
@@ -817,13 +862,24 @@ function traceRoundedRectPath(
   ctx.closePath();
 }
 
-function getStaticLayerScale(gridW: number, gridH: number, boardRenderMode: BoardRenderMode): number {
+function getStaticLayerScale(
+  gridW: number,
+  gridH: number,
+  boardRenderMode: BoardRenderMode,
+  reducedEffects: boolean,
+): number {
   const totalPixels = Math.max(1, gridW * gridH);
-  const maxPixels = boardRenderMode === 'huge'
-    ? HUGE_BOARD_STATIC_MAX_PIXELS
-    : boardRenderMode === 'large'
-      ? LARGE_BOARD_STATIC_MAX_PIXELS
-      : totalPixels;
+  const maxPixels = reducedEffects
+    ? (boardRenderMode === 'huge'
+        ? HUGE_BOARD_STATIC_MAX_PIXELS
+        : boardRenderMode === 'large'
+          ? LARGE_BOARD_STATIC_MAX_PIXELS
+          : totalPixels)
+    : (boardRenderMode === 'huge'
+        ? 1_600_000
+        : boardRenderMode === 'large'
+          ? 2_400_000
+          : totalPixels);
 
   if (totalPixels <= maxPixels) return 1;
 
@@ -908,15 +964,16 @@ function drawStaticDecor(
   cells: { x: number; y: number }[],
   skin: GameSkin,
   boardRenderMode: BoardRenderMode,
+  reducedEffects: boolean,
 ) {
-  if (boardRenderMode === 'huge') {
+  if (reducedEffects && boardRenderMode === 'huge') {
     drawSimplifiedBoardBackdrop(ctx, cellSize, cells);
     return;
   }
 
   drawBoardBackground(ctx, cellSize, cells);
 
-  if (boardRenderMode === 'normal') {
+  if (!reducedEffects) {
     drawGridDotsAll(ctx, cellSize, cells, skin);
   }
 }
