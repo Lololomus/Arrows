@@ -31,6 +31,7 @@ import type { MotionValue } from 'framer-motion';
 import { globalIndex } from '../game/spatialIndex';
 import { getArrowPath, findCollision } from '../game/engine';
 import type { GameRenderProfile } from '../utils/deviceProfile';
+import type { BoardRenderMode } from '../utils/boardRenderMode';
 
 // ============================================
 // TYPES
@@ -70,10 +71,16 @@ interface ArrowBBox {
   maxY: number;
 }
 
+interface StaticLayer {
+  canvas: HTMLCanvasElement;
+  scale: number;
+}
+
 export interface CanvasBoardProps {
   arrows: Arrow[];
   gridSize: { width: number; height: number };
   cellSize: number;
+  boardRenderMode: BoardRenderMode;
   hintedArrowId: string | null;
   onArrowClick: (arrowId: string) => void;
   springX: MotionValue<number>;
@@ -106,6 +113,8 @@ const PREVIEW_CROSS_SIZE_RATIO = 0.28;
 const PREVIEW_MARKER_STROKE_MULTIPLIER = 1.15;
 const INTRO_MIN_DIM_FOR_SWEEP = 10;
 const INTRO_SWEEP_DURATION_MS = 650;
+const LARGE_BOARD_STATIC_MAX_PIXELS = 900_000;
+const HUGE_BOARD_STATIC_MAX_PIXELS = 550_000;
 
 // ============================================
 // BBOX CACHE (persists across renders)
@@ -144,6 +153,7 @@ export function CanvasBoard({
   arrows,
   gridSize,
   cellSize,
+  boardRenderMode,
   hintedArrowId,
   onArrowClick,
   springX,
@@ -178,7 +188,9 @@ export function CanvasBoard({
   const bounceRef = useRef<BounceAnim | null>(null);
 
   const containerSizeRef = useRef({ w: window.innerWidth, h: window.innerHeight });
-  const dpr = Math.min(window.devicePixelRatio || 1, renderProfile.boardDprCap);
+  const isHeavyBoard = boardRenderMode !== 'normal';
+  const effectiveBoardDprCap = isHeavyBoard ? 1 : renderProfile.boardDprCap;
+  const dpr = Math.min(window.devicePixelRatio || 1, effectiveBoardDprCap);
 
   const totalBoardW = (gridSize.width + GRID_PADDING_CELLS) * cellSize;
   const totalBoardH = (gridSize.height + GRID_PADDING_CELLS) * cellSize;
@@ -218,19 +230,24 @@ export function CanvasBoard({
   }, [blockedArrowIds]);
 
   // Static canvas
-  const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const staticLayerRef = useRef<StaticLayer | null>(null);
   const staticDirtyRef = useRef(true);
+  const staticFallbackRef = useRef(false);
 
   useEffect(() => {
     if (!renderProfile.useStaticCanvas) {
-      staticCanvasRef.current = null;
+      staticLayerRef.current = null;
     }
+    staticFallbackRef.current = false;
     staticDirtyRef.current = true;
-  }, [renderProfile.useStaticCanvas]);
+  }, [renderProfile.useStaticCanvas, boardRenderMode]);
 
   // ⚡ Static layer dirty ТОЛЬКО при смене уровня (skin или cellSize)
   // НЕ при каждом удалении стрелки
-  useEffect(() => { staticDirtyRef.current = true; }, [skin, cellSize, gridSize.width, gridSize.height]);
+  useEffect(() => {
+    staticFallbackRef.current = false;
+    staticDirtyRef.current = true;
+  }, [skin, cellSize, gridSize.width, gridSize.height, boardRenderMode]);
 
   // ============================================
   // SCREEN → GRID CONVERSION
@@ -495,7 +512,9 @@ export function CanvasBoard({
       }
       const elapsedSinceStart = now - levelStartTimeRef.current;
       const maxGridDim = Math.max(gridSize.width, gridSize.height);
-      const shouldRunIntroSweep = skin.effects.enableAppearAnimation && maxGridDim >= INTRO_MIN_DIM_FOR_SWEEP;
+      const shouldRunIntroSweep = !isHeavyBoard
+        && skin.effects.enableAppearAnimation
+        && maxGridDim >= INTRO_MIN_DIM_FOR_SWEEP;
 
       // ⚡ FIX: длительность масштабируется по размеру уровня
       // Маленькие (10-20): 650ms, средние (30-50): ~850ms, большие (100+): ~1200ms
@@ -539,51 +558,78 @@ export function CanvasBoard({
       // Static layers (background + grid dots)
       const gridW = gridSize.width * cellSize;
       const gridH = gridSize.height * cellSize;
+      const staticLayerScale = getStaticLayerScale(gridW, gridH, boardRenderMode);
+      const canUseStaticLayer = renderProfile.useStaticCanvas && !staticFallbackRef.current;
 
-      if (renderProfile.useStaticCanvas && (staticDirtyRef.current || !staticCanvasRef.current)) {
-        let offscreen = staticCanvasRef.current;
-        if (!offscreen || offscreen.width !== gridW || offscreen.height !== gridH) {
-          offscreen = document.createElement('canvas');
-          offscreen.width = gridW;
-          offscreen.height = gridH;
-          staticCanvasRef.current = offscreen;
+      if (canUseStaticLayer && (staticDirtyRef.current || !staticLayerRef.current)) {
+        const targetStaticW = Math.max(1, Math.round(gridW * staticLayerScale));
+        const targetStaticH = Math.max(1, Math.round(gridH * staticLayerScale));
+
+        let layer = staticLayerRef.current;
+        if (
+          !layer
+          || layer.canvas.width !== targetStaticW
+          || layer.canvas.height !== targetStaticH
+          || Math.abs(layer.scale - staticLayerScale) > 0.001
+        ) {
+          layer = {
+            canvas: document.createElement('canvas'),
+            scale: staticLayerScale,
+          };
+          layer.canvas.width = targetStaticW;
+          layer.canvas.height = targetStaticH;
+          staticLayerRef.current = layer;
         }
-        const offCtx = offscreen.getContext('2d');
+
+        const offCtx = layer.canvas.getContext('2d');
         if (offCtx) {
-          offCtx.clearRect(0, 0, gridW, gridH);
-          drawBoardBackground(offCtx, cellSize, initialCellsParsed.current);
-          // ⚡ Grid dots: рисуем ВСЕ ячейки на static canvas при initLevel.
-          // Dots под существующими стрелками не видны (стрелки сверху).
-          // При удалении стрелки dot "появляется" автоматически.
-          drawGridDotsAll(offCtx, cellSize, initialCellsParsed.current, skin);
+          offCtx.setTransform(1, 0, 0, 1, 0, 0);
+          offCtx.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
+          offCtx.setTransform(layer.scale, 0, 0, layer.scale, 0, 0);
+          drawStaticDecor(offCtx, cellSize, initialCellsParsed.current, skin, boardRenderMode);
+          staticDirtyRef.current = false;
+        } else {
+          staticLayerRef.current = null;
+          staticFallbackRef.current = true;
+          staticDirtyRef.current = true;
+          console.warn('[CanvasBoard] Static layer disabled: 2D context unavailable');
         }
-        staticDirtyRef.current = false;
       }
 
-      if (renderProfile.useStaticCanvas && staticCanvasRef.current) {
+      if (canUseStaticLayer && staticLayerRef.current) {
+        const staticLayer = staticLayerRef.current;
         const halfVpW = cw / 2 / camScale;
         const halfVpH = ch / 2 / camScale;
         const vpCX = -camX / camScale + totalBoardW / 2 - boardPadding;
         const vpCY = -camY / camScale + totalBoardH / 2 - boardPadding;
         const margin = cellSize;
 
-        const sx = Math.max(0, Math.floor(vpCX - halfVpW - margin));
-        const sy = Math.max(0, Math.floor(vpCY - halfVpH - margin));
-        const sx2 = Math.min(gridW, Math.ceil(vpCX + halfVpW + margin));
-        const sy2 = Math.min(gridH, Math.ceil(vpCY + halfVpH + margin));
+        const sx = Math.max(0, Math.floor((vpCX - halfVpW - margin) * staticLayer.scale));
+        const sy = Math.max(0, Math.floor((vpCY - halfVpH - margin) * staticLayer.scale));
+        const sx2 = Math.min(staticLayer.canvas.width, Math.ceil((vpCX + halfVpW + margin) * staticLayer.scale));
+        const sy2 = Math.min(staticLayer.canvas.height, Math.ceil((vpCY + halfVpH + margin) * staticLayer.scale));
         const sw = sx2 - sx;
         const sh = sy2 - sy;
 
         if (sw > 0 && sh > 0) {
-          if (sx === 0 && sy === 0 && sw >= gridW && sh >= gridH) {
-            ctx.drawImage(staticCanvasRef.current, 0, 0);
+          if (sx === 0 && sy === 0 && sw >= staticLayer.canvas.width && sh >= staticLayer.canvas.height) {
+            ctx.drawImage(staticLayer.canvas, 0, 0, staticLayer.canvas.width, staticLayer.canvas.height, 0, 0, gridW, gridH);
           } else {
-            ctx.drawImage(staticCanvasRef.current, sx, sy, sw, sh, sx, sy, sw, sh);
+            ctx.drawImage(
+              staticLayer.canvas,
+              sx,
+              sy,
+              sw,
+              sh,
+              sx / staticLayer.scale,
+              sy / staticLayer.scale,
+              sw / staticLayer.scale,
+              sh / staticLayer.scale,
+            );
           }
         }
       } else {
-        drawBoardBackground(ctx, cellSize, initialCellsParsed.current);
-        drawGridDotsAll(ctx, cellSize, initialCellsParsed.current, skin);
+        drawStaticDecor(ctx, cellSize, initialCellsParsed.current, skin, boardRenderMode);
       }
 
       // Arrows
@@ -657,7 +703,7 @@ export function CanvasBoard({
   }, [
     // ⚡ ТОЛЬКО структурные зависимости (меняются при смене уровня)
     cellSize, gridSize.width, gridSize.height,
-    totalBoardW, totalBoardH, boardPadding, dpr, skin, renderProfile.useStaticCanvas,
+    totalBoardW, totalBoardH, boardPadding, dpr, skin, boardRenderMode, renderProfile.useStaticCanvas,
     springX, springY, springScale,
   ]);
 
@@ -771,6 +817,19 @@ function traceRoundedRectPath(
   ctx.closePath();
 }
 
+function getStaticLayerScale(gridW: number, gridH: number, boardRenderMode: BoardRenderMode): number {
+  const totalPixels = Math.max(1, gridW * gridH);
+  const maxPixels = boardRenderMode === 'huge'
+    ? HUGE_BOARD_STATIC_MAX_PIXELS
+    : boardRenderMode === 'large'
+      ? LARGE_BOARD_STATIC_MAX_PIXELS
+      : totalPixels;
+
+  if (totalPixels <= maxPixels) return 1;
+
+  return Math.max(0.1, Math.sqrt(maxPixels / totalPixels));
+}
+
 // ============================================
 // DRAWING: Background
 // ============================================
@@ -790,6 +849,46 @@ function drawBoardBackground(ctx: CanvasRenderingContext2D, cellSize: number, ce
   ctx.restore();
 }
 
+function drawSimplifiedBoardBackdrop(ctx: CanvasRenderingContext2D, cellSize: number, cells: { x: number; y: number }[]) {
+  if (cells.length === 0) return;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    if (cell.x < minX) minX = cell.x;
+    if (cell.y < minY) minY = cell.y;
+    if (cell.x > maxX) maxX = cell.x;
+    if (cell.y > maxY) maxY = cell.y;
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    return;
+  }
+
+  const pad = cellSize * 0.18;
+  const radius = cellSize * 0.45;
+  const width = (maxX - minX + 1) * cellSize + pad * 2;
+  const height = (maxY - minY + 1) * cellSize + pad * 2;
+
+  ctx.save();
+  ctx.beginPath();
+  traceRoundedRectPath(
+    ctx,
+    minX * cellSize - pad,
+    minY * cellSize - pad,
+    width,
+    height,
+    radius,
+  );
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.74)';
+  ctx.fill();
+  ctx.restore();
+}
+
 // ⚡ Рисуем ВСЕ dots (не проверяем occupied). Стрелки рисуются поверх.
 function drawGridDotsAll(ctx: CanvasRenderingContext2D, cellSize: number, cells: { x: number; y: number }[], skin: GameSkin) {
   const half = cellSize / 2;
@@ -800,6 +899,25 @@ function drawGridDotsAll(ctx: CanvasRenderingContext2D, cellSize: number, cells:
     ctx.beginPath();
     ctx.arc(x * cellSize + half, y * cellSize + half, dotR, 0, Math.PI * 2);
     ctx.fill();
+  }
+}
+
+function drawStaticDecor(
+  ctx: CanvasRenderingContext2D,
+  cellSize: number,
+  cells: { x: number; y: number }[],
+  skin: GameSkin,
+  boardRenderMode: BoardRenderMode,
+) {
+  if (boardRenderMode === 'huge') {
+    drawSimplifiedBoardBackdrop(ctx, cellSize, cells);
+    return;
+  }
+
+  drawBoardBackground(ctx, cellSize, cells);
+
+  if (boardRenderMode === 'normal') {
+    drawGridDotsAll(ctx, cellSize, cells, skin);
   }
 }
 

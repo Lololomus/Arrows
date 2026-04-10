@@ -1,6 +1,8 @@
 export interface GameRenderProfile {
+  isAndroid: boolean;
   isIOS: boolean;
   isLegacyIOS: boolean;
+  isLowEnd: boolean;
   boardDprCap: 1 | 2;
   useStaticCanvas: boolean;
   enableFxOverlay: boolean;
@@ -33,6 +35,17 @@ function isIPhoneLikeDevice(): boolean {
   return /iPhone|iPod/.test(ua);
 }
 
+function isAndroidPlatform(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  if (getTelegramPlatform() === 'android') {
+    return true;
+  }
+
+  const ua = window.navigator.userAgent || '';
+  return /Android/i.test(ua);
+}
+
 export function isIOSPlatform(): boolean {
   if (typeof window === 'undefined') return false;
 
@@ -47,16 +60,25 @@ export function isIOSPlatform(): boolean {
 }
 
 export function getGameRenderProfile(): GameRenderProfile {
+  const isAndroid = isAndroidPlatform();
   const isIOS = isIOSPlatform();
   const screenWidth = typeof window !== 'undefined' ? window.screen?.width ?? window.innerWidth : 0;
   const screenHeight = typeof window !== 'undefined' ? window.screen?.height ?? window.innerHeight : 0;
   const maxScreenSize = Math.max(screenWidth, screenHeight);
   const lacksRoundRectSupport = !supportsCanvasRoundRect();
   const isLegacyIOS = isIOS && ((isIPhoneLikeDevice() && maxScreenSize <= LEGACY_IPHONE_MAX_SCREEN_SIZE) || lacksRoundRectSupport);
+  const hardwareConcurrency = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 8 : 8;
+  const deviceMemory = typeof navigator !== 'undefined' && 'deviceMemory' in navigator
+    ? Number((navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 0)
+    : 0;
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+  const isLowEnd = hardwareConcurrency <= 4 || (deviceMemory > 0 && deviceMemory <= 4) || (isAndroid && dpr >= 3);
 
   return {
+    isAndroid,
     isIOS,
     isLegacyIOS,
+    isLowEnd,
     boardDprCap: isLegacyIOS ? 1 : 2,
     useStaticCanvas: !isLegacyIOS,
     enableFxOverlay: !isLegacyIOS,
