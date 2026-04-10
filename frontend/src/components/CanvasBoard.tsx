@@ -190,13 +190,10 @@ export function CanvasBoard({
   const bounceRef = useRef<BounceAnim | null>(null);
 
   const containerSizeRef = useRef({ w: window.innerWidth, h: window.innerHeight });
-  const shouldPreferBudgetMode = renderProfile.isLowEnd && boardRenderMode === 'huge';
-  const [runtimeRenderMode, setRuntimeRenderMode] = useState<'default' | 'budget' | 'failsafe'>('default');
-  const runtimeRenderModeRef = useRef<'default' | 'budget' | 'failsafe'>('default');
-  const perfStatsRef = useRef({ lastTs: 0, sampled: 0, slow: 0, totalElapsed: 0 });
-  const hasBudgetMode = shouldPreferBudgetMode || runtimeRenderMode === 'budget' || runtimeRenderMode === 'failsafe';
+  const [runtimeRenderMode, setRuntimeRenderMode] = useState<'default' | 'failsafe'>('default');
+  const runtimeRenderModeRef = useRef<'default' | 'failsafe'>('default');
   const hasFailsafeMode = runtimeRenderMode === 'failsafe';
-  const effectiveBoardDprCap = hasBudgetMode ? 1 : renderProfile.boardDprCap;
+  const effectiveBoardDprCap = hasFailsafeMode ? 1 : renderProfile.boardDprCap;
   const dpr = Math.min(window.devicePixelRatio || 1, effectiveBoardDprCap);
 
   const totalBoardW = (gridSize.width + GRID_PADDING_CELLS) * cellSize;
@@ -241,16 +238,14 @@ export function CanvasBoard({
   const staticDirtyRef = useRef(true);
   const staticFallbackRef = useRef(false);
 
-  const requestRenderMode = useCallback((mode: 'budget' | 'failsafe', reason: string) => {
+  const requestRenderMode = useCallback((mode: 'failsafe', reason: string) => {
     const currentMode = runtimeRenderModeRef.current;
-    if (currentMode === 'failsafe' || currentMode === mode) return;
+    if (currentMode === mode) return;
 
     runtimeRenderModeRef.current = mode;
     setRuntimeRenderMode(mode);
 
-    if (mode === 'failsafe') {
-      onRequireReducedEffects?.();
-    }
+    onRequireReducedEffects?.();
 
     console.warn(`[CanvasBoard] ${mode} render mode enabled: ${reason}`);
   }, [onRequireReducedEffects]);
@@ -260,7 +255,6 @@ export function CanvasBoard({
       staticLayerRef.current = null;
     }
     staticFallbackRef.current = false;
-    perfStatsRef.current = { lastTs: 0, sampled: 0, slow: 0, totalElapsed: 0 };
     runtimeRenderModeRef.current = 'default';
     setRuntimeRenderMode('default');
     staticDirtyRef.current = true;
@@ -270,7 +264,6 @@ export function CanvasBoard({
   // НЕ при каждом удалении стрелки
   useEffect(() => {
     staticFallbackRef.current = false;
-    perfStatsRef.current = { lastTs: 0, sampled: 0, slow: 0, totalElapsed: 0 };
     runtimeRenderModeRef.current = 'default';
     setRuntimeRenderMode('default');
     staticDirtyRef.current = true;
@@ -507,33 +500,6 @@ export function CanvasBoard({
     function render(now: number) {
       if (!isRunning || !ctx || !canvas) return;
 
-      if (boardRenderMode !== 'normal' && runtimeRenderModeRef.current !== 'failsafe' && document.visibilityState === 'visible') {
-        const perfStats = perfStatsRef.current;
-        if (perfStats.lastTs > 0) {
-          const dt = now - perfStats.lastTs;
-          if (dt > 0 && dt < 200) {
-            perfStats.totalElapsed += dt;
-            perfStats.sampled += 1;
-            if (dt > 42) {
-              perfStats.slow += 1;
-            } else if (dt < 26 && perfStats.slow > 0) {
-              perfStats.slow -= 1;
-            }
-
-            if (
-              perfStats.totalElapsed >= 2000
-              && perfStats.sampled >= 45
-              && perfStats.slow >= 24
-            ) {
-              requestRenderMode('budget', 'consistent_slow_frames');
-            }
-          }
-        }
-        perfStats.lastTs = now;
-      } else {
-        perfStatsRef.current.lastTs = now;
-      }
-
       const { w: cw, h: ch } = containerSizeRef.current;
       if (cw === 0 || ch === 0) { animFrameRef.current = requestAnimationFrame(render); return; }
 
@@ -612,7 +578,7 @@ export function CanvasBoard({
       // Static layers (background + grid dots)
       const gridW = gridSize.width * cellSize;
       const gridH = gridSize.height * cellSize;
-      const staticLayerScale = getStaticLayerScale(gridW, gridH, boardRenderMode, hasBudgetMode);
+      const staticLayerScale = getStaticLayerScale(gridW, gridH, boardRenderMode, hasFailsafeMode);
       const canUseStaticLayer = renderProfile.useStaticCanvas && !staticFallbackRef.current;
 
       if (canUseStaticLayer && (staticDirtyRef.current || !staticLayerRef.current)) {
@@ -758,7 +724,7 @@ export function CanvasBoard({
   }, [
     // ⚡ ТОЛЬКО структурные зависимости (меняются при смене уровня)
     cellSize, gridSize.width, gridSize.height,
-    totalBoardW, totalBoardH, boardPadding, dpr, skin, boardRenderMode, hasBudgetMode, hasFailsafeMode, requestRenderMode, renderProfile.useStaticCanvas,
+    totalBoardW, totalBoardH, boardPadding, dpr, skin, boardRenderMode, hasFailsafeMode, requestRenderMode, renderProfile.useStaticCanvas,
     springX, springY, springScale,
   ]);
 
