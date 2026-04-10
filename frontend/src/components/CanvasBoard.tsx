@@ -190,12 +190,13 @@ export function CanvasBoard({
   const bounceRef = useRef<BounceAnim | null>(null);
 
   const containerSizeRef = useRef({ w: window.innerWidth, h: window.innerHeight });
-  const shouldPreferReducedEffects = renderProfile.isLowEnd && boardRenderMode === 'huge';
-  const [runtimeRenderMode, setRuntimeRenderMode] = useState<'default' | 'reduced'>('default');
-  const runtimeRenderModeRef = useRef<'default' | 'reduced'>('default');
-  const perfStatsRef = useRef({ lastTs: 0, sampled: 0, slow: 0 });
-  const hasReducedEffects = shouldPreferReducedEffects || runtimeRenderMode === 'reduced';
-  const effectiveBoardDprCap = hasReducedEffects ? 1 : renderProfile.boardDprCap;
+  const shouldPreferBudgetMode = renderProfile.isLowEnd && boardRenderMode === 'huge';
+  const [runtimeRenderMode, setRuntimeRenderMode] = useState<'default' | 'budget' | 'failsafe'>('default');
+  const runtimeRenderModeRef = useRef<'default' | 'budget' | 'failsafe'>('default');
+  const perfStatsRef = useRef({ lastTs: 0, sampled: 0, slow: 0, totalElapsed: 0 });
+  const hasBudgetMode = shouldPreferBudgetMode || runtimeRenderMode === 'budget' || runtimeRenderMode === 'failsafe';
+  const hasFailsafeMode = runtimeRenderMode === 'failsafe';
+  const effectiveBoardDprCap = hasBudgetMode ? 1 : renderProfile.boardDprCap;
   const dpr = Math.min(window.devicePixelRatio || 1, effectiveBoardDprCap);
 
   const totalBoardW = (gridSize.width + GRID_PADDING_CELLS) * cellSize;
@@ -240,12 +241,18 @@ export function CanvasBoard({
   const staticDirtyRef = useRef(true);
   const staticFallbackRef = useRef(false);
 
-  const requestReducedEffects = useCallback((reason: string) => {
-    if (runtimeRenderModeRef.current === 'reduced') return;
-    runtimeRenderModeRef.current = 'reduced';
-    setRuntimeRenderMode('reduced');
-    onRequireReducedEffects?.();
-    console.warn(`[CanvasBoard] Reduced render mode enabled: ${reason}`);
+  const requestRenderMode = useCallback((mode: 'budget' | 'failsafe', reason: string) => {
+    const currentMode = runtimeRenderModeRef.current;
+    if (currentMode === 'failsafe' || currentMode === mode) return;
+
+    runtimeRenderModeRef.current = mode;
+    setRuntimeRenderMode(mode);
+
+    if (mode === 'failsafe') {
+      onRequireReducedEffects?.();
+    }
+
+    console.warn(`[CanvasBoard] ${mode} render mode enabled: ${reason}`);
   }, [onRequireReducedEffects]);
 
   useEffect(() => {
@@ -253,7 +260,7 @@ export function CanvasBoard({
       staticLayerRef.current = null;
     }
     staticFallbackRef.current = false;
-    perfStatsRef.current = { lastTs: 0, sampled: 0, slow: 0 };
+    perfStatsRef.current = { lastTs: 0, sampled: 0, slow: 0, totalElapsed: 0 };
     runtimeRenderModeRef.current = 'default';
     setRuntimeRenderMode('default');
     staticDirtyRef.current = true;
@@ -263,7 +270,7 @@ export function CanvasBoard({
   // НЕ при каждом удалении стрелки
   useEffect(() => {
     staticFallbackRef.current = false;
-    perfStatsRef.current = { lastTs: 0, sampled: 0, slow: 0 };
+    perfStatsRef.current = { lastTs: 0, sampled: 0, slow: 0, totalElapsed: 0 };
     runtimeRenderModeRef.current = 'default';
     setRuntimeRenderMode('default');
     staticDirtyRef.current = true;
@@ -500,22 +507,25 @@ export function CanvasBoard({
     function render(now: number) {
       if (!isRunning || !ctx || !canvas) return;
 
-      if (boardRenderMode !== 'normal' && runtimeRenderModeRef.current !== 'reduced' && document.visibilityState === 'visible') {
+      if (boardRenderMode !== 'normal' && runtimeRenderModeRef.current !== 'failsafe' && document.visibilityState === 'visible') {
         const perfStats = perfStatsRef.current;
         if (perfStats.lastTs > 0) {
           const dt = now - perfStats.lastTs;
-          if (dt > 90) {
-            requestReducedEffects('slow_frame_spike');
-          } else if (dt > 0 && dt < 200) {
+          if (dt > 0 && dt < 200) {
+            perfStats.totalElapsed += dt;
             perfStats.sampled += 1;
-            if (dt > 34) {
+            if (dt > 42) {
               perfStats.slow += 1;
-            } else if (dt < 24 && perfStats.slow > 0) {
+            } else if (dt < 26 && perfStats.slow > 0) {
               perfStats.slow -= 1;
             }
 
-            if (perfStats.sampled >= 18 && perfStats.slow >= 10) {
-              requestReducedEffects('consistent_slow_frames');
+            if (
+              perfStats.totalElapsed >= 2000
+              && perfStats.sampled >= 45
+              && perfStats.slow >= 24
+            ) {
+              requestRenderMode('budget', 'consistent_slow_frames');
             }
           }
         }
@@ -556,7 +566,7 @@ export function CanvasBoard({
       }
       const elapsedSinceStart = now - levelStartTimeRef.current;
       const maxGridDim = Math.max(gridSize.width, gridSize.height);
-      const shouldRunIntroSweep = !hasReducedEffects
+      const shouldRunIntroSweep = !hasFailsafeMode
         && skin.effects.enableAppearAnimation
         && maxGridDim >= INTRO_MIN_DIM_FOR_SWEEP;
 
@@ -602,7 +612,7 @@ export function CanvasBoard({
       // Static layers (background + grid dots)
       const gridW = gridSize.width * cellSize;
       const gridH = gridSize.height * cellSize;
-      const staticLayerScale = getStaticLayerScale(gridW, gridH, boardRenderMode, hasReducedEffects);
+      const staticLayerScale = getStaticLayerScale(gridW, gridH, boardRenderMode, hasBudgetMode);
       const canUseStaticLayer = renderProfile.useStaticCanvas && !staticFallbackRef.current;
 
       if (canUseStaticLayer && (staticDirtyRef.current || !staticLayerRef.current)) {
@@ -630,13 +640,13 @@ export function CanvasBoard({
           offCtx.setTransform(1, 0, 0, 1, 0, 0);
           offCtx.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
           offCtx.setTransform(layer.scale, 0, 0, layer.scale, 0, 0);
-          drawStaticDecor(offCtx, cellSize, initialCellsParsed.current, skin, boardRenderMode, hasReducedEffects);
+          drawStaticDecor(offCtx, cellSize, initialCellsParsed.current, skin, boardRenderMode, hasFailsafeMode);
           staticDirtyRef.current = false;
         } else {
           staticLayerRef.current = null;
           staticFallbackRef.current = true;
           staticDirtyRef.current = true;
-          requestReducedEffects('static_context_unavailable');
+          requestRenderMode('failsafe', 'static_context_unavailable');
           console.warn('[CanvasBoard] Static layer disabled: 2D context unavailable');
         }
       }
@@ -674,7 +684,7 @@ export function CanvasBoard({
           }
         }
       } else {
-        drawStaticDecor(ctx, cellSize, initialCellsParsed.current, skin, boardRenderMode, hasReducedEffects);
+        drawStaticDecor(ctx, cellSize, initialCellsParsed.current, skin, boardRenderMode, hasFailsafeMode);
       }
 
       // Arrows
@@ -748,7 +758,7 @@ export function CanvasBoard({
   }, [
     // ⚡ ТОЛЬКО структурные зависимости (меняются при смене уровня)
     cellSize, gridSize.width, gridSize.height,
-    totalBoardW, totalBoardH, boardPadding, dpr, skin, boardRenderMode, hasReducedEffects, requestReducedEffects, renderProfile.useStaticCanvas,
+    totalBoardW, totalBoardH, boardPadding, dpr, skin, boardRenderMode, hasBudgetMode, hasFailsafeMode, requestRenderMode, renderProfile.useStaticCanvas,
     springX, springY, springScale,
   ]);
 

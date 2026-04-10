@@ -382,7 +382,7 @@ export function GameScreen() {
     [arrows.length, gridSize.height, gridSize.width, renderProfile.isLowEnd],
   );
   const [forceReducedEffects, setForceReducedEffects] = useState(false);
-  const shouldReduceHeavyBoardEffects = forceReducedEffects || (renderProfile.isLowEnd && boardRenderMode === 'huge');
+  const shouldReduceHeavyBoardEffects = forceReducedEffects;
   const [containerSize, setContainerSize] = useState({
     w: window.innerWidth,
     h: window.innerHeight,
