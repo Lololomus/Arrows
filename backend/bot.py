@@ -37,6 +37,16 @@ from app.services.case_logic import (
     create_stars_case_purchase,
     serialize_case_result,
 )
+from app.services.admin_stats import (
+    fetch_ads_stats,
+    fetch_cases_spins_stats,
+    fetch_economy_stats,
+    fetch_game_stats,
+    fetch_referral_stats,
+    fetch_seasons_stats,
+    fetch_user_profile,
+    fetch_users_stats,
+)
 from app.services.bot_notifications import notify_spin_ready, notify_spin_streak_reset, notify_streak_warning
 from app.services.i18n import bot_text, normalize_locale
 from app.services.referrals import extract_referral_code, store_pending_referral_code
@@ -444,6 +454,572 @@ async def process_successful_payment(message: types.Message):
     except Exception:
         logger.exception("Failed to cache case result for user_id=%s", user.id)
 
+
+
+# ============================================
+# ADMIN STATS PANEL
+# ============================================
+
+PERIOD_LABELS = {"1d": "Сегодня", "7d": "7 дней", "30d": "30 дней", "all": "Всё время"}
+SECTION_LABELS = {
+    "u": "👥 Пользователи",
+    "g": "🎮 Игра",
+    "e": "💰 Экономика",
+    "r": "🔗 Рефералы",
+    "c": "🎰 Кейсы & Спины",
+    "a": "📳 Реклама",
+    "s": "⭐ Сезоны",
+}
+SECTION_FETCHERS_MAP = {}   # populated after function definitions
+SECTION_FORMATTERS_MAP = {}
+
+
+def _fmt(n) -> str:
+    """Format integer with narrow-space thousands separator."""
+    if n is None:
+        return "—"
+    return f"{int(n):,}".replace(",", "\u202f")
+
+
+def _fmt_pct(n: float) -> str:
+    return f"{n:.1f}%"
+
+
+def _fmt_time(seconds: int) -> str:
+    """Convert seconds → human-readable Russian duration."""
+    seconds = int(seconds or 0)
+    if seconds <= 0:
+        return "0с"
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    if h > 0:
+        return f"{h}ч {m}м"
+    if m > 0:
+        return f"{m}м {s}с"
+    return f"{s}с"
+
+
+def _fmt_ago(dt) -> str:
+    """Format datetime as 'N time ago' in Russian."""
+    if dt is None:
+        return "—"
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    diff_sec = int((now - dt).total_seconds())
+    if diff_sec < 60:
+        return "только что"
+    if diff_sec < 3600:
+        return f"{diff_sec // 60}м назад"
+    if diff_sec < 86400:
+        return f"{diff_sec // 3600}ч назад"
+    days = diff_sec // 86400
+    if days < 30:
+        return f"{days}дн назад"
+    return dt.strftime("%d.%m.%Y")
+
+
+def _fmt_date(dt) -> str:
+    if dt is None:
+        return "—"
+    if hasattr(dt, "strftime"):
+        return dt.strftime("%d.%m.%Y")
+    return str(dt)
+
+
+def _pct(part: int, total: int) -> str:
+    if total == 0:
+        return "0%"
+    return f"{part / total * 100:.1f}%"
+
+
+def _uname(username, first_name) -> str:
+    if username:
+        return f"@{username}"
+    return first_name or "—"
+
+
+# ---- Keyboard builders ----
+
+def build_admin_main_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="👥 Пользователи", callback_data="adm:u:7d"),
+                InlineKeyboardButton(text="🎮 Игра", callback_data="adm:g:7d"),
+            ],
+            [
+                InlineKeyboardButton(text="💰 Экономика", callback_data="adm:e:7d"),
+                InlineKeyboardButton(text="🔗 Рефералы", callback_data="adm:r:7d"),
+            ],
+            [
+                InlineKeyboardButton(text="🎰 Кейсы & Спины", callback_data="adm:c:7d"),
+                InlineKeyboardButton(text="📳 Реклама", callback_data="adm:a:7d"),
+            ],
+            [
+                InlineKeyboardButton(text="⭐ Сезоны", callback_data="adm:s:all"),
+            ],
+            [
+                InlineKeyboardButton(text="🔄 Обновить", callback_data="adm:menu"),
+            ],
+        ]
+    )
+
+
+def build_section_keyboard(section: str, current_period: str) -> InlineKeyboardMarkup:
+    def _btn(p: str) -> InlineKeyboardButton:
+        label = PERIOD_LABELS[p]
+        if p == current_period:
+            label = f"• {label}"
+        return InlineKeyboardButton(text=label, callback_data=f"adm:{section}:{p}")
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [_btn("1d"), _btn("7d"), _btn("30d"), _btn("all")],
+            [InlineKeyboardButton(text="← Главное меню", callback_data="adm:menu")],
+        ]
+    )
+
+
+def build_seasons_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Обновить", callback_data="adm:s:all")],
+            [InlineKeyboardButton(text="← Главное меню", callback_data="adm:menu")],
+        ]
+    )
+
+
+# ---- Text formatters ----
+
+def _section_header(title: str, period: str) -> str:
+    p_label = PERIOD_LABELS.get(period, period)
+    return f"📊 <b>ADMIN — {title}</b> [{p_label}]\n{'━' * 28}\n\n"
+
+
+def _format_main_menu_text(data: dict) -> str:
+    return (
+        f"📊 <b>ADMIN PANEL — Arrows</b>\n{'━' * 28}\n\n"
+        f"👥 Всего пользователей: <b>{_fmt(data['total'])}</b>\n"
+        f"🟢 Активных (7 дней): <b>{_fmt(data['active'])}</b>\n"
+        f"🆕 Новых (7 дней): <b>{_fmt(data['new'])}</b>\n\n"
+        f"Выберите раздел:"
+    )
+
+
+def _format_users(data: dict, period: str) -> str:
+    total = data["total"]
+    t = _section_header("Пользователи", period)
+    t += (
+        f"👥 Всего зарегистрировано: <b>{_fmt(total)}</b>\n"
+        f"🆕 Новых за период: <b>{_fmt(data['new'])}</b>\n"
+        f"🟢 Активных за период: <b>{_fmt(data['active'])}</b>\n"
+        f"\n📋 <b>Профили</b>\n"
+        f"⭐ Premium: <b>{_fmt(data['premium'])}</b> ({_pct(data['premium'], total)})\n"
+        f"🚫 Забанено: <b>{_fmt(data['banned'])}</b>\n"
+        f"🧪 Бета-тестеры: <b>{_fmt(data['beta'])}</b>\n"
+        f"💎 TON-кошелёк: <b>{_fmt(data['with_wallet'])}</b>\n"
+        f"🔗 Пришли по рефералу: <b>{_fmt(data['via_referral'])}</b>"
+        f" ({_pct(data['via_referral'], total)})\n"
+    )
+    return t
+
+
+def _format_game(data: dict, period: str) -> str:
+    t = _section_header("Игра", period)
+    t += (
+        f"📈 <b>Прогресс (всё время)</b>\n"
+        f"🏆 Макс. уровень: <b>{_fmt(data['max_level'])}</b>\n"
+        f"📊 Ср. уровень на пользователя: <b>{data['avg_level']:.1f}</b>\n"
+        f"✅ Всего уровней пройдено: <b>{_fmt(data['total_levels_completed'])}</b>\n"
+        f"🎯 Всего ходов: <b>{_fmt(data['total_moves'])}</b>\n"
+        f"💡 Хинтов использовано: <b>{_fmt(data['total_hints_used'])}</b>\n"
+        f"⏱ Суммарное время: <b>{_fmt_time(data['total_playtime_seconds'])}</b>\n"
+        f"🔥 Макс. стрик (всё время): <b>{_fmt(data['max_streak_ever'])}</b>\n"
+        f"\n🎮 <b>Попытки за период</b>\n"
+    )
+    total_att = data["total_attempts"]
+    if total_att > 0:
+        t += (
+            f"📋 Попыток: <b>{_fmt(total_att)}</b>"
+            f" (уник. игроков: {_fmt(data['unique_players'])})\n"
+            f"✅ Побед: <b>{_fmt(data['wins'])}</b> ({_fmt_pct(data['win_rate'])})\n"
+            f"❌ Поражений: <b>{_fmt(data['losses'])}</b>"
+            f" | 🏃 Брошено: <b>{_fmt(data['abandons'])}</b>\n"
+            f"⏱ Ср. время: <b>{_fmt_time(data['avg_time_sec'])}</b>"
+            f" | 💔 Ср. ошибок: <b>{data['avg_mistakes']:.1f}</b>\n"
+        )
+    else:
+        t += "Нет данных за период\n"
+    return t
+
+
+def _format_economy(data: dict, period: str) -> str:
+    t = _section_header("Экономика", period)
+    t += (
+        f"💰 <b>В обороте (сейчас)</b>\n"
+        f"🟡 Монет: <b>{_fmt(data['coins_circ'])}</b>\n"
+        f"⭐ Stars: <b>{_fmt(data['stars_circ'])}</b>\n"
+        f"💡 Хинтов: <b>{_fmt(data['hints_circ'])}</b>\n"
+        f"❤️ Ревайвов: <b>{_fmt(data['revives_circ'])}</b>\n"
+        f"\n💳 <b>Транзакции за период (заверш.)</b>\n"
+        f"📦 Всего: <b>{_fmt(data['total_tx'])}</b>\n"
+    )
+    if data["total_tx"] > 0:
+        t += (
+            f"💎 Покупки за Stars: <b>{_fmt(data['purchases_stars'])}</b>\n"
+            f"🔷 Покупки за TON: <b>{_fmt(data['purchases_ton'])}</b>\n"
+            f"🟡 Покупки за монеты: <b>{_fmt(data['purchases_coins'])}</b>\n"
+            f"🎁 Вознаграждения: <b>{_fmt(data['rewards_tx'])}</b>\n"
+            f"🔗 Реферальные выплаты: <b>{_fmt(data['referral_tx'])}</b>\n"
+        )
+    p_cnt = data["withdrawals_pending_count"]
+    d_cnt = data["withdrawals_done_count"]
+    t += f"\n💸 <b>Выводы Stars (всё время)</b>\n"
+    t += f"⏳ Ожидают: <b>{_fmt(p_cnt)}</b>"
+    if p_cnt > 0:
+        t += f" ({_fmt(data['withdrawals_pending_amount'])} ⭐)"
+    t += "\n"
+    t += f"✅ Выполнено: <b>{_fmt(d_cnt)}</b>"
+    if d_cnt > 0:
+        t += f" ({_fmt(data['withdrawals_done_amount'])} ⭐)"
+    t += "\n"
+    return t
+
+
+def _format_referrals(data: dict, period: str) -> str:
+    total = data["total_refs"]
+    t = _section_header("Рефералы", period)
+    t += (
+        f"📊 Всего рефералов: <b>{_fmt(total)}</b>\n"
+        f"✅ Подтверждено: <b>{_fmt(data['total_confirmed'])}</b>"
+        f" ({_fmt_pct(data['confirm_rate'])})\n"
+        f"⏳ Ожидают подтверждения: <b>{_fmt(data['total_pending'])}</b>\n"
+        f"\n🆕 <b>За период</b>\n"
+        f"Новых рефералов: <b>{_fmt(data['new_refs'])}</b>\n"
+        f"Подтверждено: <b>{_fmt(data['confirmed_in_period'])}</b>\n"
+        f"\n💰 Выплачено монет рефererам: <b>{_fmt(data['total_earnings'])}</b> 🟡\n"
+    )
+    top = data.get("top_referrers", [])
+    if top:
+        t += "\n🏆 <b>Топ рефереры</b>\n"
+        for i, r in enumerate(top, 1):
+            name = _uname(r["username"], r["first_name"])
+            t += f"  {i}. {name} — {_fmt(r['count'])} реф. ({_fmt(r['earnings'])} 🟡)\n"
+    return t
+
+
+def _format_cases(data: dict, period: str) -> str:
+    total = data["total_cases"]
+    t = _section_header("Кейсы & Спины", period)
+    t += f"🎰 <b>Кейсы за период</b>\n"
+    t += f"Всего открыто: <b>{_fmt(total)}</b>\n"
+    if total > 0:
+        t += (
+            f"  ⚪ Common: {_fmt(data['cases_common'])} ({_pct(data['cases_common'], total)})\n"
+            f"  🔵 Rare: {_fmt(data['cases_rare'])} ({_pct(data['cases_rare'], total)})\n"
+            f"  🟣 Epic: {_fmt(data['cases_epic'])} ({_pct(data['cases_epic'], total)})\n"
+            f"  🌟 Epic Stars: {_fmt(data['cases_epic_stars'])} ({_pct(data['cases_epic_stars'], total)})\n"
+            f"  💫 Оплата Stars: {_fmt(data['cases_paid_stars'])}"
+            f" | 💎 TON: {_fmt(data['cases_paid_ton'])}\n"
+            f"\n🎁 <b>Выдано из кейсов за период</b>\n"
+            f"  💡 Хинты: {_fmt(data['cases_hints_given'])}"
+            f" | ❤️ Ревайвы: {_fmt(data['cases_revives_given'])}\n"
+            f"  🟡 Монеты: {_fmt(data['cases_coins_given'])}"
+            f" | ⭐ Stars: {_fmt(data['cases_stars_given'])}\n"
+        )
+    t += (
+        f"\n📊 <b>Pity счётчики (сейчас)</b>\n"
+        f"  Средний: {data['avg_pity']:.1f} | Макс: {_fmt(data['max_pity'])}\n"
+    )
+    total_u = data["total_users"]
+    t += (
+        f"\n🌀 <b>Спины & Стрики (сейчас)</b>\n"
+        f"Активных спиннеров: <b>{_fmt(data['active_spinners'])}</b>"
+        f" ({_pct(data['active_spinners'], total_u)})\n"
+        f"Ср. стрик: <b>{data['avg_streak']:.1f}</b> | Макс: <b>{_fmt(data['max_streak'])}</b>\n"
+        f"Непобранных призов: <b>{_fmt(data['unclaimed_prizes'])}</b>\n"
+        f"\n📋 <b>Распределение стриков</b>\n"
+        f"  0 дней: {_fmt(data['tier0'])} ({_pct(data['tier0'], total_u)})\n"
+        f"  1–5 дней: {_fmt(data['tier1'])} ({_pct(data['tier1'], total_u)})\n"
+        f"  6–13 дней: {_fmt(data['tier2'])} ({_pct(data['tier2'], total_u)})\n"
+        f"  14+ дней: {_fmt(data['tier3'])} ({_pct(data['tier3'], total_u)})\n"
+    )
+    return t
+
+
+def _format_ads(data: dict, period: str) -> str:
+    t = _section_header("Реклама", period)
+    PLACEMENT_NAMES = {
+        "reward_daily_coins": ("💰 Ежедн. монеты", "🟡"),
+        "reward_hint": ("💡 Подсказки", "💡"),
+        "reward_revive": ("❤️ Ревайвы", "❤️"),
+        "reward_spin_retry": ("🎰 Рестарт спина", ""),
+        "reward_task": ("📋 Задачи", "🟡"),
+    }
+    t += f"📣 <b>Награды за рекламу (за период)</b>\n"
+    t += f"Всего выдач: <b>{_fmt(data['total_claims'])}</b>\n\n"
+    claims = data.get("claims_by_placement", {})
+    for key, (label, unit) in PLACEMENT_NAMES.items():
+        if key in claims:
+            c = claims[key]
+            amount_str = f" ({_fmt(c['amount'])} {unit})" if unit and c["amount"] else ""
+            t += f"  {label}: <b>{_fmt(c['count'])}</b>{amount_str}\n"
+    intents = data.get("intents_by_status", {})
+    if intents:
+        status_labels = {
+            "pending": "⏳ Ожидают",
+            "fulfilled": "✅ Выполнено",
+            "failed": "❌ Провалено",
+            "expired": "⏰ Истекло",
+        }
+        t += "\n🔄 <b>Интенты за период</b>\n"
+        for status, label in status_labels.items():
+            if status in intents:
+                t += f"  {label}: <b>{_fmt(intents[status])}</b>\n"
+    return t
+
+
+def _format_seasons(data: dict) -> str:
+    season = data["current_season"]
+    t = f"📊 <b>ADMIN — Сезоны</b>\n{'━' * 28}\n\n"
+    t += f"🏆 Текущий сезон: <b>#{season}</b>\n"
+    board = data.get("board_counts", {})
+    t += f"\n📊 <b>Игроки в лидерборде (сезон {season})</b>\n"
+    label_map = {"global": "🌍 Глобальный", "weekly": "📅 Weekly", "arcade": "🎮 Arcade"}
+    if board:
+        for btype, blabel in label_map.items():
+            if btype in board:
+                t += f"  {blabel}: <b>{_fmt(board[btype])}</b>\n"
+    else:
+        t += "  Нет данных\n"
+    history = data.get("season_history", [])
+    if len(history) > 1:
+        t += "\n📜 <b>История сезонов (глобальный)</b>\n"
+        for h in history:
+            marker = " ← текущий" if h["season"] == season else ""
+            t += f"  Сезон #{h['season']}: {_fmt(h['players'])} игроков{marker}\n"
+    top5 = data.get("top5", [])
+    if top5:
+        t += f"\n🥇 <b>Топ-5 глобального (сезон {season})</b>\n"
+        for i, p in enumerate(top5, 1):
+            name = _uname(p["username"], p["first_name"])
+            t += f"  {i}. {name} — ур. {_fmt(p['level'])}\n"
+    t += (
+        f"\n📅 <b>Ежедневный вызов</b>\n"
+        f"  Активных стриков: <b>{_fmt(data['daily_active_streaks'])}</b>\n"
+        f"  Ср. стрик: <b>{data['daily_avg_streak']:.1f}</b>"
+        f" | Макс: <b>{_fmt(data['daily_max_streak'])}</b>\n"
+    )
+    return t
+
+
+def _format_user_profile(p: dict) -> str:
+    name = _uname(p.get("username"), p.get("first_name"))
+    t = f"👤 <b>ПРОФИЛЬ</b> | TG: <code>{p['telegram_id']}</code>\n{'━' * 28}\n\n"
+    flags = []
+    if p.get("is_premium"):
+        flags.append("⭐ Premium")
+    if p.get("is_beta_tester"):
+        flags.append("🧪 Beta")
+    if p.get("is_banned"):
+        flags.append("🚫 БАН")
+    t += f"🆔 {name}"
+    if flags:
+        t += "  " + " | ".join(flags)
+    t += "\n"
+    t += f"📅 Зарегистрирован: <b>{_fmt_date(p.get('created_at'))}</b>\n"
+    t += f"👁 Последняя активность: <b>{_fmt_ago(p.get('last_active_at'))}</b>\n"
+    t += f"🌐 Язык: <b>{p.get('locale', '—')}</b>\n"
+    if p.get("is_banned"):
+        t += f"\n🚫 <b>ЗАБАНЕН</b>: {p.get('ban_reason') or '—'}\n"
+        t += f"   Дата бана: {_fmt_date(p.get('banned_at'))}\n"
+    # Game
+    t += "\n🎮 <b>Игра</b>\n"
+    t += f"  Уровень: <b>{_fmt(p.get('current_level', 1))}</b>"
+    if p.get("level_reached_at"):
+        t += f" (достигнут {_fmt_date(p['level_reached_at'])})"
+    t += "\n"
+    t += (
+        f"  ⭐ Всего звёзд: <b>{_fmt(p.get('total_stars', 0))}</b>\n"
+        f"  ✅ Пройдено уровней: <b>{_fmt(p.get('levels_completed', 0))}</b>\n"
+        f"  ⏱ Время в игре: <b>{_fmt_time(p.get('total_playtime_seconds', 0))}</b>\n"
+        f"  🎯 Ходов: <b>{_fmt(p.get('total_moves', 0))}</b>"
+        f" | 💔 Ошибок: <b>{_fmt(p.get('total_mistakes', 0))}</b>\n"
+        f"  🔥 Стрик: <b>{p.get('current_streak', 0)}</b>"
+        f" | Макс: <b>{p.get('max_streak', 0)}</b>\n"
+        f"  🎨 Скин: {p.get('active_arrow_skin', 'default')}"
+        f" | Тема: {p.get('active_theme', 'light')}\n"
+    )
+    # Economy
+    t += (
+        "\n💰 <b>Экономика</b>\n"
+        f"  🟡 Монеты: <b>{_fmt(p.get('coins', 0))}</b>\n"
+        f"  ⭐ Stars: <b>{_fmt(p.get('stars_balance', 0))}</b>\n"
+        f"  💡 Хинты: <b>{_fmt(p.get('hint_balance', 0))}</b>"
+        f" | ❤️ Ревайвы: <b>{_fmt(p.get('revive_balance', 0))}</b>\n"
+        f"  🧬 Доп. жизни: <b>{p.get('extra_lives', 0)}</b>"
+        f" | ⚡ Энергия: <b>{p.get('energy', 5)}/5</b>\n"
+    )
+    # Referrals
+    ref_name = p.get("referrer_name")
+    t += (
+        "\n🔗 <b>Рефералы</b>\n"
+        f"  Пригласил: <b>{_fmt(p.get('referrals_count', 0))}</b> (подтв.)"
+        f" + <b>{_fmt(p.get('referrals_pending', 0))}</b> в ожидании\n"
+        f"  💰 Заработано: <b>{_fmt(p.get('referrals_earnings', 0))}</b> 🟡\n"
+        f"  Сам пришёл по рефералу: <b>{ref_name or 'нет'}</b>\n"
+    )
+    # Spin
+    streak = p.get("login_streak", 0)
+    last_spin = p.get("last_spin_at") or p.get("last_spin_date")
+    t += "\n🌀 <b>Спин</b>\n"
+    t += f"  Стрик: <b>{streak}</b> дн."
+    if last_spin:
+        t += f" | Последний: <b>{_fmt_date(last_spin)}</b>"
+    t += "\n"
+    pending_type = p.get("pending_spin_prize_type")
+    if pending_type:
+        t += f"  ⏳ Непобранный приз: {pending_type} ×{p.get('pending_spin_prize_amount', 0)}\n"
+    # Case & Wallet
+    pity = p.get("case_pity_counter", 0)
+    t += f"\n🎁 Pity кейса: <b>{pity}/50</b>\n"
+    wallet = p.get("wallet_address")
+    if wallet:
+        short_wallet = wallet[:6] + "…" + wallet[-4:]
+        t += f"💎 Кошелёк: <b>{short_wallet}</b>"
+        if p.get("wallet_connected_at"):
+            t += f" (подключён {_fmt_date(p['wallet_connected_at'])})"
+        t += "\n"
+    else:
+        t += "💎 Кошелёк: <b>не подключён</b>\n"
+    # Misc
+    misc = []
+    if p.get("onboarding_shown"):
+        misc.append("онбординг пройден")
+    if p.get("welcome_offer_purchased"):
+        misc.append("welcome offer куплен")
+    if misc:
+        t += f"📋 {' | '.join(misc)}\n"
+    return t
+
+
+# populate dispatch maps
+SECTION_FETCHERS_MAP = {
+    "u": fetch_users_stats,
+    "g": fetch_game_stats,
+    "e": fetch_economy_stats,
+    "r": fetch_referral_stats,
+    "c": fetch_cases_spins_stats,
+    "a": fetch_ads_stats,
+}
+SECTION_FORMATTERS_MAP = {
+    "u": _format_users,
+    "g": _format_game,
+    "e": _format_economy,
+    "r": _format_referrals,
+    "c": _format_cases,
+    "a": _format_ads,
+}
+
+
+# ---- Command handlers ----
+
+@dp.message(Command("admin"))
+async def cmd_admin(message: types.Message):
+    """Show admin statistics panel main menu."""
+    if not is_admin_telegram_id(message.from_user.id if message.from_user else None):
+        await message.answer("Нет доступа.")
+        return
+    try:
+        async with AsyncSessionLocal() as db:
+            data = await fetch_users_stats(db, "7d")
+    except Exception as exc:
+        logger.error("Admin panel DB error: %s", exc)
+        await message.answer("Ошибка при загрузке статистики.")
+        return
+    await message.answer(
+        _format_main_menu_text(data),
+        reply_markup=build_admin_main_menu(),
+        parse_mode="HTML",
+    )
+
+
+@dp.message(Command("admin_user"))
+async def cmd_admin_user(message: types.Message):
+    """Show detailed profile of a specific user. Usage: /admin_user <telegram_id or @username>"""
+    if not is_admin_telegram_id(message.from_user.id if message.from_user else None):
+        await message.answer("Нет доступа.")
+        return
+    text = message.text or ""
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        await message.answer("Использование: /admin_user &lt;telegram_id или @username&gt;", parse_mode="HTML")
+        return
+    identifier = parts[1].strip()
+    try:
+        async with AsyncSessionLocal() as db:
+            profile = await fetch_user_profile(db, identifier)
+    except Exception as exc:
+        logger.error("Admin user profile DB error: %s", exc)
+        await message.answer("Ошибка при загрузке профиля.")
+        return
+    if profile is None:
+        await message.answer(f"Пользователь <code>{html.escape(identifier)}</code> не найден.", parse_mode="HTML")
+        return
+    await message.answer(_format_user_profile(profile), parse_mode="HTML")
+
+
+# ---- Callback handler ----
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("adm:"))
+async def process_admin_stats(callback: types.CallbackQuery):
+    """Handle all admin panel inline navigation."""
+    if not is_admin_telegram_id(callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+
+    raw = callback.data or ""
+    parts = raw.split(":")
+    # parts[0] == "adm"
+    section = parts[1] if len(parts) > 1 else "menu"
+    period = parts[2] if len(parts) > 2 else "all"
+
+    try:
+        if section == "menu":
+            async with AsyncSessionLocal() as db:
+                data = await fetch_users_stats(db, "7d")
+            text = _format_main_menu_text(data)
+            kb = build_admin_main_menu()
+
+        elif section == "s":
+            async with AsyncSessionLocal() as db:
+                data = await fetch_seasons_stats(db)
+            text = _format_seasons(data)
+            kb = build_seasons_keyboard()
+
+        elif section in SECTION_FETCHERS_MAP:
+            async with AsyncSessionLocal() as db:
+                data = await SECTION_FETCHERS_MAP[section](db, period)
+            text = SECTION_FORMATTERS_MAP[section](data, period)
+            kb = build_section_keyboard(section, period)
+
+        else:
+            await callback.answer("Неизвестный раздел.", show_alert=True)
+            return
+
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+    except Exception as exc:
+        logger.error("Admin stats callback error section=%s period=%s: %s", section, period, exc)
+        await callback.answer("Ошибка при загрузке данных.", show_alert=True)
+        return
+
+    await callback.answer()
+
+
+# ============================================
+# END ADMIN STATS PANEL
+# ============================================
 
 
 def _fallback_last_spin_at(user: User) -> datetime | None:
