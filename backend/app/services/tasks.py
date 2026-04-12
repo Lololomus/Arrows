@@ -49,7 +49,7 @@ CHANNEL_TASK_SETTINGS = {
         "missing_message": "Partner channel is not configured",
     },
 }
-TASK_DEBUG_KEYS = frozenset({"arcade_levels", "daily_levels", "friends_confirmed", *CHANNEL_TASK_IDS})
+TASK_DEBUG_KEYS = frozenset({"arcade_levels", "daily_levels", "friends_confirmed", *CHANNEL_TASK_IDS, *LINK_TASK_IDS})
 
 
 def _is_task_visible_for_user(task: dict, user: User) -> bool:
@@ -71,7 +71,7 @@ def _coerce_debug_state(raw: dict[str, Any] | None) -> dict[str, Any]:
         coerced["daily_levels"] = max(0, int(state["daily_levels"]))
     if "friends_confirmed" in state:
         coerced["friends_confirmed"] = max(0, int(state["friends_confirmed"]))
-    for task_id in CHANNEL_TASK_IDS:
+    for task_id in CHANNEL_TASK_IDS | LINK_TASK_IDS:
         if task_id in state:
             coerced[task_id] = bool(state[task_id])
     return coerced
@@ -242,7 +242,7 @@ def _get_progress(
     overrides = debug_state or {}
     if task_id in overrides:
         override = overrides[task_id]
-        if task_id in CHANNEL_TASK_IDS:
+        if task_id in CHANNEL_TASK_IDS or task_id in LINK_TASK_IDS:
             return 1 if bool(override) else 0
         return max(0, int(override))
 
@@ -313,8 +313,8 @@ def _build_task_dto(
         next_tier = tiers[next_tier_index]
         status = "claimable" if progress >= next_tier.target else "action_required"
     elif task["id"] in LINK_TASK_IDS:
-        # Link tasks: trust-based, always action_required until the user claims
-        status = "action_required"
+        next_tier = tiers[next_tier_index]
+        status = "claimable" if progress >= next_tier.target else "action_required"
     else:
         next_tier = tiers[next_tier_index]
         status = "claimable" if progress >= next_tier.target else "in_progress"

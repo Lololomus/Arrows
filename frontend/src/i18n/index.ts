@@ -314,6 +314,7 @@ const resources = {
         subscribe: 'Подписка',
         check: 'Проверить',
         go: 'Перейти',
+        claim: 'Забрать',
       },
       taskCompleted: 'Задание выполнено',
       loadFailedTitle: 'Не удалось загрузить задания',
@@ -328,6 +329,14 @@ const resources = {
           partner_channel: {
             title: 'Подпишитесь на канал',
             description: '+50 монет за подписку',
+          },
+          partner_zarub: {
+            title: 'Виртуальная карта Visa/MC — ZARUB',
+            description: 'Карта без документов, пополнение СБП или криптой. ChatGPT, Netflix, Spotify и др.',
+          },
+          partner_vpn_ru: {
+            title: 'BlackTemple VPN',
+            description: 'Дешёвый, быстрый и удобный VPN. 700+ серверов, iOS и Android',
           },
           daily_levels: {
             title: 'Пройти 10 уровней',
@@ -345,6 +354,8 @@ const resources = {
         tiers: {
           official_channel_subscribe: 'Подпишись на канал',
           partner_channel_subscribe: 'Подпишитесь на канал',
+          partner_zarub_visit: 'Виртуальная карта Visa/MC — ZARUB',
+          partner_vpn_ru_visit: 'BlackTemple VPN',
           daily_levels_10: 'Пройди 10 уровней',
           arcade_levels_5: 'Пройди 5 уровней',
           arcade_levels_10: 'Пройди 10 уровней',
@@ -979,6 +990,7 @@ const resources = {
         subscribe: 'Subscribe',
         check: 'Check',
         go: 'Go',
+        claim: 'Claim',
       },
       taskCompleted: 'Task completed',
       loadFailedTitle: 'Failed to load tasks',
@@ -993,6 +1005,14 @@ const resources = {
           partner_channel: {
             title: 'Subscribe to channel',
             description: '+50 coins for subscribing',
+          },
+          partner_zarub: {
+            title: 'Virtual Visa/MC Card — ZARUB',
+            description: 'Card without documents, top up via crypto. ChatGPT, Netflix, Spotify & more.',
+          },
+          partner_vpn_ru: {
+            title: 'BlackTemple VPN',
+            description: 'Fast, cheap & easy VPN. 700+ servers, iOS & Android',
           },
           daily_levels: {
             title: 'Clear 10 levels',
@@ -1010,6 +1030,8 @@ const resources = {
         tiers: {
           official_channel_subscribe: 'Join the channel',
           partner_channel_subscribe: 'Subscribe to channel',
+          partner_zarub_visit: 'Virtual Visa/MC Card — ZARUB',
+          partner_vpn_ru_visit: 'BlackTemple VPN',
           daily_levels_10: 'Clear 10 levels',
           arcade_levels_5: 'Clear 5 levels',
           arcade_levels_10: 'Clear 10 levels',

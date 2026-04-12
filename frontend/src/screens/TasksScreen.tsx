@@ -40,6 +40,8 @@ type TaskDevState = {
   friendsConfirmed: number;
   officialChannel: boolean;
   partnerChannel: boolean;
+  partnerZarub: boolean;
+  partnerVpnRu: boolean;
 };
 
 const STAGGER = 0.07;
@@ -565,6 +567,8 @@ const DEFAULT_TASK_DEV_STATE: TaskDevState = {
   friendsConfirmed: 0,
   officialChannel: false,
   partnerChannel: false,
+  partnerZarub: false,
+  partnerVpnRu: false,
 };
 
 function DevPresetButton({
@@ -712,6 +716,46 @@ function TaskDevPanel({
             </button>
           </div>
         </div>
+
+        <div className="rounded-xl border border-white/8 bg-black/15 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-bold text-white">ZARUB link</div>
+              <div className="mt-1 text-[11px] text-white/55">Makes the link task claimable without opening the link</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onChange({ partnerZarub: !value.partnerZarub })}
+              className={`rounded-full px-3 py-2 text-[11px] font-bold uppercase tracking-[0.14em] transition ${
+                value.partnerZarub
+                  ? 'bg-orange-500/20 text-orange-300'
+                  : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              {value.partnerZarub ? 'Enabled' : 'Disabled'}
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-white/8 bg-black/15 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-bold text-white">BlackTemple VPN</div>
+              <div className="mt-1 text-[11px] text-white/55">Makes the link task claimable without opening the link</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onChange({ partnerVpnRu: !value.partnerVpnRu })}
+              className={`rounded-full px-3 py-2 text-[11px] font-bold uppercase tracking-[0.14em] transition ${
+                value.partnerVpnRu
+                  ? 'bg-violet-500/20 text-violet-300'
+                  : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              {value.partnerVpnRu ? 'Enabled' : 'Disabled'}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="mt-4 flex items-center justify-between gap-3">
@@ -844,6 +888,8 @@ export function TasksScreen() {
           friendsConfirmed: state.friendsConfirmed ?? 0,
           officialChannel: state.officialChannel ?? false,
           partnerChannel: state.partnerChannel ?? false,
+          partnerZarub: state.partnerZarub ?? false,
+          partnerVpnRu: state.partnerVpnRu ?? false,
         });
         setTaskDevLoaded(true);
       } catch {
@@ -975,7 +1021,7 @@ export function TasksScreen() {
     const pct      = Math.min(100, (progress / target) * 100);
     const isLoadingTask = loadingTaskIds.has(task.id);
     const isCompleted   = task.status === 'completed';
-    const hasAction     = !isCompleted && (task.kind === 'single' || task.status === 'claimable');
+    const hasAction     = !isCompleted && (task.kind === 'single' || task.kind === 'link' || task.status === 'claimable');
     const displayTitle  = nextTier?.title ?? task.baseTitle;
     const taskError     = taskErrors[task.id];
 
@@ -983,7 +1029,11 @@ export function TasksScreen() {
     if (task.kind === 'single') {
       actionLabel = isLoadingTask ? '...' : task.status === 'claimable' ? rewardLabel : openedChannelIds.has(task.id) ? translate('tasks:action.check') : translate('tasks:action.subscribe');
     } else if (task.kind === 'link') {
-      actionLabel = isLoadingTask ? '...' : openedChannelIds.has(task.id) ? rewardLabel : translate('tasks:action.go');
+      actionLabel = isLoadingTask
+        ? '...'
+        : (task.status === 'claimable' || openedChannelIds.has(task.id))
+          ? `${translate('tasks:action.claim')} ${rewardLabel}`
+          : translate('tasks:action.go');
     } else if (task.status === 'claimable') {
       actionLabel = isLoadingTask ? '...' : rewardLabel;
     }
@@ -1008,11 +1058,11 @@ export function TasksScreen() {
 
           {/* Контент */}
           <div className="min-w-0 flex-1">
-            {/* Заголовок + кнопка */}
-            <div className="mb-1 flex items-center gap-2">
-              <h3 className={`min-w-0 flex-1 truncate text-[14px] font-bold leading-tight ${
+            {/* Заголовок + награда/кнопка */}
+            <div className="mb-1 flex items-start gap-2">
+              <h3 className={`min-w-0 flex-1 text-[14px] font-bold leading-tight ${
                 isCompleted ? 'text-white/60' : 'text-white'
-              }`}>
+              } ${task.kind === 'link' ? 'line-clamp-2' : 'truncate'}`}>
                 {displayTitle}
               </h3>
 
@@ -1024,12 +1074,12 @@ export function TasksScreen() {
                   disabled={isLoadingTask}
                   onClick={(e) => void handleTaskAction(task, e)}
                   className={`shrink-0 flex items-center gap-1 rounded-xl px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white disabled:opacity-70 ${
-                    (task.kind === 'single' || task.kind === 'link') && task.status !== 'claimable'
+                    (task.kind === 'single' || task.kind === 'link') && task.status !== 'claimable' && !openedChannelIds.has(task.id)
                       ? 'bg-white/10 active:bg-white/20'
                       : 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-[0_4px_15px_rgba(245,158,11,0.3)]'
                   }`}
                 >
-                  {(task.kind === 'single' || task.kind === 'link') ? <Send size={13} /> : <Sparkles size={13} />}
+                  <Send size={13} />
                   {actionLabel}
                 </motion.button>
               ) : (
@@ -1045,7 +1095,7 @@ export function TasksScreen() {
               <p className="text-[11px] leading-tight text-white/35">{translate('tasks:taskCompleted')}</p>
             ) : (
               <>
-                <p className="text-[11px] leading-tight text-white/50 line-clamp-1">
+                <p className={`text-[11px] leading-tight text-white/50 ${task.kind === 'link' ? 'line-clamp-2' : 'line-clamp-1'}`}>
                   {taskError ?? task.baseDescription}
                 </p>
                 {task.kind === 'stepped' && (
@@ -1180,6 +1230,8 @@ export function TasksScreen() {
         friendsConfirmed: next.friendsConfirmed ?? 0,
         officialChannel: next.officialChannel ?? false,
         partnerChannel: next.partnerChannel ?? false,
+        partnerZarub: next.partnerZarub ?? false,
+        partnerVpnRu: next.partnerVpnRu ?? false,
       });
       setTaskDevLoaded(true);
       setOpenedChannelIds(new Set());

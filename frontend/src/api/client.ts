@@ -139,6 +139,8 @@ interface RawTaskDto {
   nextTierIndex?: number | null;
   tiers: RawTaskTier[];
   channel?: RawTaskChannelMeta | null;
+  link_url?: string | null;
+  linkUrl?: string | null;
 }
 
 interface RawTasksResponse {
@@ -224,6 +226,7 @@ function normalizeTask(raw: RawTaskDto): TaskDto {
           url: raw.channel.url,
         }
       : undefined,
+    linkUrl: raw.linkUrl ?? raw.link_url ?? null,
   };
 }
 
@@ -1461,6 +1464,8 @@ export const tasksApi = {
     friendsConfirmed?: number;
     officialChannel?: boolean;
     partnerChannel?: boolean;
+    partnerZarub?: boolean;
+    partnerVpnRu?: boolean;
   }> => {
     const raw = await request<Record<string, unknown>>(API_ENDPOINTS.tasks.devState);
     const state = (raw.state ?? {}) as Record<string, unknown>;
@@ -1470,6 +1475,8 @@ export const tasksApi = {
       friendsConfirmed: state.friends_confirmed != null ? Number(state.friends_confirmed) : undefined,
       officialChannel: state.official_channel != null ? Boolean(state.official_channel) : undefined,
       partnerChannel: state.partner_channel != null ? Boolean(state.partner_channel) : undefined,
+      partnerZarub: state.partner_zarub != null ? Boolean(state.partner_zarub) : undefined,
+      partnerVpnRu: state.partner_vpn_ru != null ? Boolean(state.partner_vpn_ru) : undefined,
     };
   },
 
@@ -1479,12 +1486,16 @@ export const tasksApi = {
     friendsConfirmed?: number;
     officialChannel?: boolean;
     partnerChannel?: boolean;
+    partnerZarub?: boolean;
+    partnerVpnRu?: boolean;
   }): Promise<{
     arcadeLevels?: number;
     dailyLevels?: number;
     friendsConfirmed?: number;
     officialChannel?: boolean;
     partnerChannel?: boolean;
+    partnerZarub?: boolean;
+    partnerVpnRu?: boolean;
   }> => {
     const raw = await request<Record<string, unknown>>(API_ENDPOINTS.tasks.devState, {
       method: 'POST',
@@ -1494,6 +1505,8 @@ export const tasksApi = {
         friends_confirmed: payload.friendsConfirmed,
         official_channel: payload.officialChannel,
         partner_channel: payload.partnerChannel,
+        partner_zarub: payload.partnerZarub,
+        partner_vpn_ru: payload.partnerVpnRu,
       }),
     });
     const state = (raw.state ?? {}) as Record<string, unknown>;
@@ -1503,6 +1516,8 @@ export const tasksApi = {
       friendsConfirmed: state.friends_confirmed != null ? Number(state.friends_confirmed) : undefined,
       officialChannel: state.official_channel != null ? Boolean(state.official_channel) : undefined,
       partnerChannel: state.partner_channel != null ? Boolean(state.partner_channel) : undefined,
+      partnerZarub: state.partner_zarub != null ? Boolean(state.partner_zarub) : undefined,
+      partnerVpnRu: state.partner_vpn_ru != null ? Boolean(state.partner_vpn_ru) : undefined,
     };
   },
 

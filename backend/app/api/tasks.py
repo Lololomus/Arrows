@@ -28,6 +28,8 @@ class TaskDebugStateRequest(BaseModel):
     friends_confirmed: int | None = None
     official_channel: bool | None = None
     partner_channel: bool | None = None
+    partner_zarub: bool | None = None
+    partner_vpn_ru: bool | None = None
 
 
 def _ensure_dev() -> None:
