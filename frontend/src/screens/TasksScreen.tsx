@@ -62,6 +62,109 @@ const TASK_UI: Record<TaskDto['id'], TaskUiConfig> = {
 
 const isDailyTask = (task: TaskDto) => task.id.startsWith('daily_');
 const isPartnerTask = (task: TaskDto) => task.id.startsWith('partner_');
+const OPENED_TASKS_STORAGE_KEY = 'arrows_opened_tasks';
+const TELEGRAM_LINK_KEEP_APP_MIN_VERSION = '7.1';
+
+type TelegramWebAppLinkApi = {
+  version?: string;
+  openLink?: (url: string) => void;
+  openTelegramLink?: (url: string) => void;
+};
+
+function getOpenedTasksStorageKeys(userId: number | null | undefined): string[] {
+  const scopedKey = userId != null ? `${OPENED_TASKS_STORAGE_KEY}:${userId}` : OPENED_TASKS_STORAGE_KEY;
+  return scopedKey === OPENED_TASKS_STORAGE_KEY ? [scopedKey] : [scopedKey, OPENED_TASKS_STORAGE_KEY];
+}
+
+function getBrowserStorage(name: 'localStorage' | 'sessionStorage'): Storage | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window[name] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function parseOpenedTaskIds(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function readOpenedTaskIds(userId: number | null | undefined): Set<string> {
+  const ids = new Set<string>();
+  const keys = getOpenedTasksStorageKeys(userId);
+  for (const storageName of ['localStorage', 'sessionStorage'] as const) {
+    const storage = getBrowserStorage(storageName);
+    if (!storage) continue;
+    for (const key of keys) {
+      let raw: string | null = null;
+      try {
+        raw = storage.getItem(key);
+      } catch {
+        continue;
+      }
+      for (const id of parseOpenedTaskIds(raw)) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+function persistOpenedTaskIds(userId: number | null | undefined, ids: Set<string>): void {
+  const [scopedKey, legacyKey] = getOpenedTasksStorageKeys(userId);
+  const encoded = JSON.stringify([...ids]);
+  for (const storageName of ['localStorage', 'sessionStorage'] as const) {
+    const storage = getBrowserStorage(storageName);
+    if (!storage) continue;
+    try {
+      storage.setItem(scopedKey, encoded);
+      if (legacyKey) storage.removeItem(legacyKey);
+    } catch {
+      // Storage can be blocked in some mobile WebViews.
+    }
+  }
+}
+
+function clearOpenedTaskIds(userId: number | null | undefined): void {
+  const keys = getOpenedTasksStorageKeys(userId);
+  for (const storageName of ['localStorage', 'sessionStorage'] as const) {
+    const storage = getBrowserStorage(storageName);
+    if (!storage) continue;
+    for (const key of keys) {
+      try {
+        storage.removeItem(key);
+      } catch {
+        // Storage can be blocked in some mobile WebViews.
+      }
+    }
+  }
+}
+
+function compareVersion(current: string | undefined, target: string): number | null {
+  if (!current) return null;
+  const currentParts = current.split('.').map((part) => Number.parseInt(part, 10));
+  const targetParts = target.split('.').map((part) => Number.parseInt(part, 10));
+  if (currentParts.some((part) => Number.isNaN(part)) || targetParts.some((part) => Number.isNaN(part))) {
+    return null;
+  }
+
+  const maxLength = Math.max(currentParts.length, targetParts.length);
+  for (let i = 0; i < maxLength; i += 1) {
+    const currentPart = currentParts[i] ?? 0;
+    const targetPart = targetParts[i] ?? 0;
+    if (currentPart !== targetPart) return currentPart > targetPart ? 1 : -1;
+  }
+  return 0;
+}
+
+function shouldUseTelegramLinkInPlace(tg: TelegramWebAppLinkApi | undefined): boolean {
+  const compared = compareVersion(tg?.version, TELEGRAM_LINK_KEEP_APP_MIN_VERSION);
+  return compared != null && compared >= 0;
+}
 
 function formatTaskRewardLabel(rewardCoins: number, rewardHints = 0, rewardRevives = 0): string {
   const parts: string[] = [];
@@ -840,6 +943,7 @@ export function TasksScreen() {
   const containerRef       = useRef<HTMLDivElement>(null);
   const coinTargetAnchorRef = useRef<HTMLDivElement>(null);
   const stashHideTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openedTasksUserId = user?.id ?? null;
 
   const [activeTab,          setActiveTab]          = useState<TaskScreenTab>('tasks');
   const [tasks,              setTasks]              = useState<TaskDto[]>([]);
@@ -847,12 +951,7 @@ export function TasksScreen() {
   const [screenError,        setScreenError]        = useState<string | null>(null);
   const [taskErrors,         setTaskErrors]         = useState<Record<string, string>>({});
   const [loadingTaskIds,     setLoadingTaskIds]     = useState<Set<string>>(new Set());
-  const [openedChannelIds,   setOpenedChannelIds]   = useState<Set<string>>(() => {
-    try {
-      const raw = sessionStorage.getItem('arrows_opened_tasks');
-      return raw ? new Set<string>(JSON.parse(raw)) : new Set<string>();
-    } catch { return new Set<string>(); }
-  });
+  const [openedChannelIds,   setOpenedChannelIds]   = useState<Set<string>>(() => readOpenedTaskIds(openedTasksUserId));
   const [flyingCoins,        setFlyingCoins]        = useState<FlyingCoin[]>([]);
   const [isStashVisible,     setIsStashVisible]     = useState(false);
   const [isStashPulsing,     setIsStashPulsing]     = useState(false);
@@ -877,6 +976,9 @@ export function TasksScreen() {
 
   useEffect(() => { void fetchTasks(true); }, [fetchTasks]);
   useEffect(() => () => { if (stashHideTimerRef.current) clearTimeout(stashHideTimerRef.current); }, []);
+  useEffect(() => {
+    setOpenedChannelIds(readOpenedTaskIds(openedTasksUserId));
+  }, [openedTasksUserId]);
 
   useEffect(() => {
     if (!DEV_TASKS_ENABLED || !isTaskDevOpen || taskDevLoaded) return;
@@ -962,20 +1064,47 @@ export function TasksScreen() {
     setTaskErrors((p) => { if (!(id in p)) return p; const n = { ...p }; delete n[id]; return n; });
   }, []);
 
+  const rememberOpenedTask = useCallback((id: string) => {
+    setOpenedChannelIds((p) => {
+      const next = new Set(p).add(id);
+      persistOpenedTaskIds(openedTasksUserId, next);
+      return next;
+    });
+  }, [openedTasksUserId]);
+
   const handleOpenChannel = useCallback((task: TaskDto) => {
     const url = task.linkUrl ?? task.channel?.url ?? (task.channel?.username ? `https://t.me/${task.channel.username}` : null);
     if (!url) { setTaskErrors((p) => ({ ...p, [task.id]: translate('tasks:channelNotConfigured') })); return; }
     triggerHaptic('light');
     clearTaskError(task.id);
-    const tg = (window as Window & { Telegram?: any }).Telegram?.WebApp;
-    if (tg?.openTelegramLink) tg.openTelegramLink(url);
-    else window.open(url, '_blank', 'noopener,noreferrer');
-    setOpenedChannelIds((p) => {
-      const next = new Set(p).add(task.id);
-      try { sessionStorage.setItem('arrows_opened_tasks', JSON.stringify([...next])); } catch { /* ignore */ }
-      return next;
-    });
-  }, [clearTaskError]);
+    rememberOpenedTask(task.id);
+    const tg = (window as Window & { Telegram?: { WebApp?: TelegramWebAppLinkApi } }).Telegram?.WebApp;
+    const isTelegramUrl = /^https?:\/\/t\.me\//i.test(url) || /^tg:\/\//i.test(url);
+    const canOpenInBrowser = /^https?:\/\//i.test(url);
+    try {
+      if (isTelegramUrl) {
+        if (tg?.openTelegramLink && shouldUseTelegramLinkInPlace(tg)) {
+          tg.openTelegramLink(url);
+          return;
+        }
+        if (tg?.openLink && canOpenInBrowser) {
+          tg.openLink(url);
+          return;
+        }
+        if (tg?.openTelegramLink) {
+          tg.openTelegramLink(url);
+          return;
+        }
+      }
+      if (tg?.openLink && canOpenInBrowser) {
+        tg.openLink(url);
+        return;
+      }
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      window.location.href = url;
+    }
+  }, [clearTaskError, rememberOpenedTask]);
 
   const handleClaim = useCallback(async (task: TaskDto, el: HTMLElement) => {
     const tier = task.nextTierIndex != null ? task.tiers[task.nextTierIndex] : null;
@@ -1246,14 +1375,14 @@ export function TasksScreen() {
       });
       setTaskDevLoaded(true);
       setOpenedChannelIds(new Set());
-      try { sessionStorage.removeItem('arrows_opened_tasks'); } catch { /* ignore */ }
+      clearOpenedTaskIds(openedTasksUserId);
       await fetchTasks(false);
     } catch (err) {
       setTaskDevError(handleApiError(err));
     } finally {
       setTaskDevLoading(false);
     }
-  }, [fetchTasks, taskDevState]);
+  }, [fetchTasks, openedTasksUserId, taskDevState]);
 
   const resetTaskDevState = useCallback(async () => {
     if (!DEV_TASKS_ENABLED) return;
@@ -1264,14 +1393,14 @@ export function TasksScreen() {
       setTaskDevState(DEFAULT_TASK_DEV_STATE);
       setTaskDevLoaded(true);
       setOpenedChannelIds(new Set());
-      try { sessionStorage.removeItem('arrows_opened_tasks'); } catch { /* ignore */ }
+      clearOpenedTaskIds(openedTasksUserId);
       await fetchTasks(false);
     } catch (err) {
       setTaskDevError(handleApiError(err));
     } finally {
       setTaskDevLoading(false);
     }
-  }, [fetchTasks]);
+  }, [fetchTasks, openedTasksUserId]);
 
   // ─── Render ──────────────────────────────────────────────────────────────────
 
