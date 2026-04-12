@@ -67,11 +67,18 @@ logger = logging.getLogger(__name__)
 
 _proxy_url = getattr(settings, "TELEGRAM_PROXY", "").strip() or None
 if _proxy_url:
+    from urllib.parse import urlparse
     from aiogram.client.session.aiohttp import AiohttpSession
-    from aiohttp_socks import ProxyConnector
+    from aiohttp_socks import ProxyConnector, ProxyType
+    _parsed = urlparse(_proxy_url)
     _session = AiohttpSession()
     _session._connector_type = ProxyConnector
-    _session._connector_init = {"proxy_url": _proxy_url, "rdns": True}
+    _session._connector_init = {
+        "proxy_type": ProxyType.SOCKS5,
+        "host": _parsed.hostname,
+        "port": _parsed.port or 1080,
+        "rdns": True,
+    }
     bot = Bot(token=settings.TELEGRAM_BOT_TOKEN, session=_session)
 else:
     bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
