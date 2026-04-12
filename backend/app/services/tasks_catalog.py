@@ -41,7 +41,7 @@ TASKS_CATALOG = [
     {
         "id": "partner_zarub",
         "kind": "link",
-        "audience": [],
+        "audience": ["ru"],
         "link_url": "https://t.me/zarub_robot?start=ref_KEay8n",
         "base_title": "Виртуальная карта Visa/MC — ZARUB",
         "base_description": "Карта без документов, пополнение СБП или криптой. ChatGPT, Netflix, Spotify и др.",

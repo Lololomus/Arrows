@@ -847,7 +847,12 @@ export function TasksScreen() {
   const [screenError,        setScreenError]        = useState<string | null>(null);
   const [taskErrors,         setTaskErrors]         = useState<Record<string, string>>({});
   const [loadingTaskIds,     setLoadingTaskIds]     = useState<Set<string>>(new Set());
-  const [openedChannelIds,   setOpenedChannelIds]   = useState<Set<string>>(new Set());
+  const [openedChannelIds,   setOpenedChannelIds]   = useState<Set<string>>(() => {
+    try {
+      const raw = sessionStorage.getItem('arrows_opened_tasks');
+      return raw ? new Set<string>(JSON.parse(raw)) : new Set<string>();
+    } catch { return new Set<string>(); }
+  });
   const [flyingCoins,        setFlyingCoins]        = useState<FlyingCoin[]>([]);
   const [isStashVisible,     setIsStashVisible]     = useState(false);
   const [isStashPulsing,     setIsStashPulsing]     = useState(false);
@@ -965,7 +970,11 @@ export function TasksScreen() {
     const tg = (window as Window & { Telegram?: any }).Telegram?.WebApp;
     if (tg?.openTelegramLink) tg.openTelegramLink(url);
     else window.open(url, '_blank', 'noopener,noreferrer');
-    setOpenedChannelIds((p) => new Set(p).add(task.id));
+    setOpenedChannelIds((p) => {
+      const next = new Set(p).add(task.id);
+      try { sessionStorage.setItem('arrows_opened_tasks', JSON.stringify([...next])); } catch { /* ignore */ }
+      return next;
+    });
   }, [clearTaskError]);
 
   const handleClaim = useCallback(async (task: TaskDto, el: HTMLElement) => {
@@ -1005,8 +1014,10 @@ export function TasksScreen() {
 
   // ─── Task card ───────────────────────────────────────────────────────────────
 
+  const TASK_UI_FALLBACK: TaskUiConfig = { icon: Send, iconColor: 'text-white/60', iconBg: 'bg-white/10' };
+
   const renderTaskCard = (task: TaskDto, delay = 0) => {
-    const ui       = TASK_UI[task.id];
+    const ui       = TASK_UI[task.id] ?? TASK_UI_FALLBACK;
     const nextTier = task.nextTierIndex != null ? task.tiers[task.nextTierIndex] : null;
     const lastTier = task.tiers.length > 0 ? task.tiers[task.tiers.length - 1] : null;
     const target   = nextTier?.target ?? 1;
@@ -1235,6 +1246,7 @@ export function TasksScreen() {
       });
       setTaskDevLoaded(true);
       setOpenedChannelIds(new Set());
+      try { sessionStorage.removeItem('arrows_opened_tasks'); } catch { /* ignore */ }
       await fetchTasks(false);
     } catch (err) {
       setTaskDevError(handleApiError(err));
@@ -1252,6 +1264,7 @@ export function TasksScreen() {
       setTaskDevState(DEFAULT_TASK_DEV_STATE);
       setTaskDevLoaded(true);
       setOpenedChannelIds(new Set());
+      try { sessionStorage.removeItem('arrows_opened_tasks'); } catch { /* ignore */ }
       await fetchTasks(false);
     } catch (err) {
       setTaskDevError(handleApiError(err));
