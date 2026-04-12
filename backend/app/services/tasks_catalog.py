@@ -39,6 +39,38 @@ TASKS_CATALOG = [
         ],
     },
     {
+        "id": "partner_zarub",
+        "kind": "link",
+        "audience": [],
+        "link_url": "https://t.me/zarub_robot?start=ref_KEay8n",
+        "base_title": "Виртуальная карта Visa/MC — ZARUB",
+        "base_description": "Карта без документов, пополнение СБП или криптой. ChatGPT, Netflix, Spotify и др.",
+        "tiers": [
+            {
+                "claim_id": "partner_zarub_visit",
+                "target": 1,
+                "reward_coins": 100,
+                "title": "Виртуальная карта Visa/MC — ZARUB",
+            }
+        ],
+    },
+    {
+        "id": "partner_vpn_ru",
+        "kind": "link",
+        "audience": ["ru"],
+        "link_url": "https://t.me/blacktemple_space_bot?start=ref852738218",
+        "base_title": "BlackTemple VPN",
+        "base_description": "Дешёвый, быстрый и удобный VPN. 700+ серверов, iOS и Android",
+        "tiers": [
+            {
+                "claim_id": "partner_vpn_ru_visit",
+                "target": 1,
+                "reward_coins": 100,
+                "title": "BlackTemple VPN",
+            }
+        ],
+    },
+    {
         "id": "arcade_levels",
         "kind": "stepped",
         "base_title": "Пройти уровни",

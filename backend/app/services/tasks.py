@@ -28,6 +28,7 @@ TASK_STATUSES = {"member", "administrator", "creator"}
 DAILY_TASK_PREFIX = "daily_"
 DAILY_CLAIM_SEPARATOR = ":"
 CHANNEL_TASK_IDS = frozenset({"official_channel", "partner_channel"})
+LINK_TASK_IDS = frozenset({"partner_zarub", "partner_vpn_ru"})
 CHANNEL_TASK_SETTINGS = {
     "official_channel": {
         "channel_id_attr": "OFFICIAL_CHANNEL_ID",
@@ -49,6 +50,15 @@ CHANNEL_TASK_SETTINGS = {
     },
 }
 TASK_DEBUG_KEYS = frozenset({"arcade_levels", "daily_levels", "friends_confirmed", *CHANNEL_TASK_IDS})
+
+
+def _is_task_visible_for_user(task: dict, user: User) -> bool:
+    """Return True if the task should be shown to this user based on audience."""
+    audience: list[str] = task.get("audience", [])
+    if not audience:
+        return True
+    user_locale = (user.locale or "en").split("-")[0].lower()
+    return user_locale in audience
 TASK_DEBUG_STATE: dict[int, dict[str, Any]] = {}
 
 
@@ -240,7 +250,7 @@ def _get_progress(
         return max(0, user.current_level - 1)
     if task_id == "friends_confirmed":
         return max(0, season_referrals_count if season_referrals_count is not None else user.referrals_count)
-    if task_id in CHANNEL_TASK_IDS:
+    if task_id in CHANNEL_TASK_IDS or task_id in LINK_TASK_IDS:
         return 0
     if task_id == "daily_levels":
         return max(0, daily_levels_completed or 0)
@@ -302,6 +312,9 @@ def _build_task_dto(
     elif task["id"] in CHANNEL_TASK_IDS:
         next_tier = tiers[next_tier_index]
         status = "claimable" if progress >= next_tier.target else "action_required"
+    elif task["id"] in LINK_TASK_IDS:
+        # Link tasks: trust-based, always action_required until the user claims
+        status = "action_required"
     else:
         next_tier = tiers[next_tier_index]
         status = "claimable" if progress >= next_tier.target else "in_progress"
@@ -316,6 +329,7 @@ def _build_task_dto(
         next_tier_index=next_tier_index,
         tiers=tiers,
         channel=_build_channel_meta(task["id"]) if task["id"] in CHANNEL_TASK_IDS else None,
+        link_url=task.get("link_url") if task["id"] in LINK_TASK_IDS else None,
     )
 
 
@@ -343,6 +357,7 @@ async def build_tasks_for_user(
             debug_state=debug_state,
         )
         for task in TASKS_CATALOG
+        if _is_task_visible_for_user(task, user)
     ]
     return TasksResponse(tasks=tasks)
 
@@ -467,6 +482,9 @@ async def claim_task(
         else:
             channel = await verify_channel_subscription(user, task["id"])
             await _ensure_channel_subscription(user, db, channel)
+    elif task["id"] in LINK_TASK_IDS:
+        # Trust-based: user clicked the link on the client, no server verification needed
+        pass
     elif progress < tier["target"]:
         raise HTTPException(
             status_code=409,

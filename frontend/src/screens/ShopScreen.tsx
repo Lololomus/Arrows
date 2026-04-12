@@ -97,14 +97,14 @@ const BOOST_UI: Record<BoostId, {
   buttonClass: string;
 }> = {
   hints_1: {
-    priceFallback: 50,
+    priceFallback: 100,
     discountTiersFallback: [{ minQuantity: 3, percent: 5 }, { minQuantity: 5, percent: 10 }],
     iconWrapClass: 'border-cyan-500/20 bg-cyan-500/10',
     iconClass: 'text-cyan-400',
     buttonClass: 'bg-cyan-500 hover:bg-cyan-400',
   },
   revive_1: {
-    priceFallback: 100,
+    priceFallback: 500,
     discountTiersFallback: [{ minQuantity: 3, percent: 5 }, { minQuantity: 5, percent: 10 }],
     iconWrapClass: 'border-rose-500/20 bg-rose-500/10',
     iconClass: 'text-rose-400',

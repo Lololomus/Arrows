@@ -84,14 +84,14 @@ BOOSTS = [
     {
         "id": "hints_1",
         "name": "+1 подсказка",
-        "price_coins": 50,
+        "price_coins": 100,
         "discount_tiers": BULK_DISCOUNT_TIERS,
         "preview": "💡",
     },
     {
         "id": "revive_1",
         "name": "+1 возрождение",
-        "price_coins": 100,
+        "price_coins": 500,
         "discount_tiers": BULK_DISCOUNT_TIERS,
         "preview": "❤️",
     },

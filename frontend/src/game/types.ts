@@ -293,8 +293,8 @@ export interface TaskChannelMeta {
 }
 
 export interface TaskDto {
-  id: 'arcade_levels' | 'daily_levels' | 'friends_confirmed' | 'official_channel' | 'partner_channel';
-  kind: 'stepped' | 'single';
+  id: 'arcade_levels' | 'daily_levels' | 'friends_confirmed' | 'official_channel' | 'partner_channel' | 'partner_zarub' | 'partner_vpn_ru';
+  kind: 'stepped' | 'single' | 'link';
   baseTitle: string;
   baseDescription: string;
   progress: number;
@@ -302,6 +302,7 @@ export interface TaskDto {
   nextTierIndex: number | null;
   tiers: TaskTier[];
   channel?: TaskChannelMeta;
+  linkUrl?: string | null;
 }
 
 export interface TasksResponse {

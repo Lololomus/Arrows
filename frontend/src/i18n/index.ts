@@ -313,6 +313,7 @@ const resources = {
       action: {
         subscribe: 'Подписка',
         check: 'Проверить',
+        go: 'Перейти',
       },
       taskCompleted: 'Задание выполнено',
       loadFailedTitle: 'Не удалось загрузить задания',
@@ -977,6 +978,7 @@ const resources = {
       action: {
         subscribe: 'Subscribe',
         check: 'Check',
+        go: 'Go',
       },
       taskCompleted: 'Task completed',
       loadFailedTitle: 'Failed to load tasks',

@@ -92,10 +92,10 @@ class Settings(BaseSettings):
     COINS_PER_LEVEL: int = 10
     COINS_PER_STAR: int = 5
     COINS_REWARD_EASY: int = 1
-    COINS_REWARD_NORMAL: int = 3
-    COINS_REWARD_HARD: int = 5
-    COINS_REWARD_EXTREME: int = 25
-    COINS_REWARD_IMPOSSIBLE: int = 50
+    COINS_REWARD_NORMAL: int = 2
+    COINS_REWARD_HARD: int = 3
+    COINS_REWARD_EXTREME: int = 4
+    COINS_REWARD_IMPOSSIBLE: int = 5
     # Rewards
     BASE_COINS_PER_LEVEL: int = 10
     REFERRAL_REWARD_INVITER: int = 50     # inviter получает, когда invitee достигнет уровня подтверждения

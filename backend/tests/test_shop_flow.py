@@ -68,15 +68,15 @@ async def test_catalog_exposes_updated_boost_prices_and_discount_tiers(db_sessio
     catalog = await shop.get_catalog(user=user, db=db_session)
     boosts = {item.id: item for item in catalog.boosts}
 
-    assert boosts["hints_1"].price_coins == 50
-    assert boosts["revive_1"].price_coins == 100
+    assert boosts["hints_1"].price_coins == 100
+    assert boosts["revive_1"].price_coins == 500
     assert extract_discount_tiers(boosts["hints_1"]) == [(3, 5), (5, 10)]
     assert extract_discount_tiers(boosts["revive_1"]) == [(3, 5), (5, 10)]
 
 
 @pytest.mark.asyncio
 async def test_purchase_item_uses_discounted_total_for_three_hints(db_session: AsyncSession) -> None:
-    user = await create_user(db_session, telegram_id=1202, coins=142)
+    user = await create_user(db_session, telegram_id=1202, coins=285)
     initial_hints = user.hint_balance
 
     response = await shop.purchase_item(
@@ -93,12 +93,12 @@ async def test_purchase_item_uses_discounted_total_for_three_hints(db_session: A
     assert response.hint_balance == initial_hints + 3
     assert user.coins == 0
     assert user.hint_balance == initial_hints + 3
-    assert tx.amount == Decimal("-142")
+    assert tx.amount == Decimal("-285")
 
 
 @pytest.mark.asyncio
 async def test_purchase_item_applies_ten_percent_discount_for_five_revives(db_session: AsyncSession) -> None:
-    user = await create_user(db_session, telegram_id=1203, coins=450)
+    user = await create_user(db_session, telegram_id=1203, coins=2250)
     initial_revives = user.revive_balance
 
     response = await shop.purchase_item(
@@ -115,7 +115,7 @@ async def test_purchase_item_applies_ten_percent_discount_for_five_revives(db_se
     assert response.revive_balance == initial_revives + 5
     assert user.coins == 0
     assert user.revive_balance == initial_revives + 5
-    assert tx.amount == Decimal("-450")
+    assert tx.amount == Decimal("-2250")
 
 
 @pytest.mark.asyncio

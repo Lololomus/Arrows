@@ -51,13 +51,15 @@ const DEV_TASKS_ENABLED = import.meta.env.DEV || (
 const TASK_UI: Record<TaskDto['id'], TaskUiConfig> = {
   official_channel: { icon: Send,   iconColor: 'text-green-400',  iconBg: 'bg-green-500/20'  },
   partner_channel:  { icon: Send,   iconColor: 'text-cyan-400',   iconBg: 'bg-cyan-500/20'   },
+  partner_zarub:    { icon: Send,   iconColor: 'text-orange-400', iconBg: 'bg-orange-500/20' },
+  partner_vpn_ru:   { icon: Send,   iconColor: 'text-violet-400', iconBg: 'bg-violet-500/20' },
   daily_levels:     { icon: Trophy, iconColor: 'text-amber-400',  iconBg: 'bg-amber-500/20'  },
   arcade_levels:    { icon: Trophy, iconColor: 'text-blue-400',   iconBg: 'bg-blue-500/20'   },
   friends_confirmed:{ icon: Users,  iconColor: 'text-purple-400', iconBg: 'bg-purple-500/20' },
 };
 
 const isDailyTask = (task: TaskDto) => task.id.startsWith('daily_');
-const isPartnerTask = (task: TaskDto) => task.id === 'partner_channel';
+const isPartnerTask = (task: TaskDto) => task.id.startsWith('partner_');
 
 function formatTaskRewardLabel(rewardCoins: number, rewardHints = 0, rewardRevives = 0): string {
   const parts: string[] = [];
@@ -910,7 +912,7 @@ export function TasksScreen() {
   }, []);
 
   const handleOpenChannel = useCallback((task: TaskDto) => {
-    const url = task.channel?.url ?? (task.channel?.username ? `https://t.me/${task.channel.username}` : null);
+    const url = task.linkUrl ?? task.channel?.url ?? (task.channel?.username ? `https://t.me/${task.channel.username}` : null);
     if (!url) { setTaskErrors((p) => ({ ...p, [task.id]: translate('tasks:channelNotConfigured') })); return; }
     triggerHaptic('light');
     clearTaskError(task.id);
@@ -941,7 +943,7 @@ export function TasksScreen() {
 
   const handleTaskAction = useCallback(async (task: TaskDto, event?: MouseEvent<HTMLElement>) => {
     const el = event?.currentTarget as HTMLElement | undefined;
-    if (task.kind === 'single') {
+    if (task.kind === 'single' || task.kind === 'link') {
       if (task.status === 'completed') return;
       if (task.status === 'claimable' && el) {
         await handleClaim(task, el);
@@ -980,6 +982,8 @@ export function TasksScreen() {
     let actionLabel = '';
     if (task.kind === 'single') {
       actionLabel = isLoadingTask ? '...' : task.status === 'claimable' ? rewardLabel : openedChannelIds.has(task.id) ? translate('tasks:action.check') : translate('tasks:action.subscribe');
+    } else if (task.kind === 'link') {
+      actionLabel = isLoadingTask ? '...' : openedChannelIds.has(task.id) ? rewardLabel : translate('tasks:action.go');
     } else if (task.status === 'claimable') {
       actionLabel = isLoadingTask ? '...' : rewardLabel;
     }
@@ -1020,12 +1024,12 @@ export function TasksScreen() {
                   disabled={isLoadingTask}
                   onClick={(e) => void handleTaskAction(task, e)}
                   className={`shrink-0 flex items-center gap-1 rounded-xl px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white disabled:opacity-70 ${
-                    task.kind === 'single' && task.status !== 'claimable'
+                    (task.kind === 'single' || task.kind === 'link') && task.status !== 'claimable'
                       ? 'bg-white/10 active:bg-white/20'
                       : 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-[0_4px_15px_rgba(245,158,11,0.3)]'
                   }`}
                 >
-                  {task.kind === 'single' ? <Send size={13} /> : <Sparkles size={13} />}
+                  {(task.kind === 'single' || task.kind === 'link') ? <Send size={13} /> : <Sparkles size={13} />}
                   {actionLabel}
                 </motion.button>
               ) : (

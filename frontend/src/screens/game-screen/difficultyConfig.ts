@@ -93,7 +93,7 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     secondary: '#fef08a',
     scale: 1.1,
     bounce: 0.5,
-    reward: 3,
+    reward: 2,
   },
   hard: {
     label: 'Hard',
@@ -112,7 +112,7 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     secondary: '#fbbf24',
     scale: 1.3,
     bounce: 0.7,
-    reward: 5,
+    reward: 3,
   },
   extreme: {
     label: 'Extreme',
@@ -131,7 +131,7 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     secondary: '#c084fc',
     scale: 1.4,
     bounce: 0.8,
-    reward: 25,
+    reward: 4,
   },
   impossible: {
     label: 'Impossible',
@@ -150,7 +150,7 @@ export const DIFFICULTY_CONFIG: Record<DifficultyTier, DifficultyVisualConfig> =
     secondary: '#ff5252',
     scale: 1.4,
     bounce: 0.8,
-    reward: 50,
+    reward: 5,
   },
 };
 

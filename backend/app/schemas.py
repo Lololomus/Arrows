@@ -452,8 +452,8 @@ class ChannelMetaDto(BaseModel):
 
 
 class TaskDto(BaseModel):
-    id: Literal["arcade_levels", "daily_levels", "friends_confirmed", "official_channel", "partner_channel"]
-    kind: Literal["stepped", "single"]
+    id: Literal["arcade_levels", "daily_levels", "friends_confirmed", "official_channel", "partner_channel", "partner_zarub", "partner_vpn_ru"]
+    kind: Literal["stepped", "single", "link"]
     base_title: str
     base_description: str
     progress: int
@@ -461,6 +461,7 @@ class TaskDto(BaseModel):
     next_tier_index: Optional[int] = None
     tiers: List[TaskTierDto]
     channel: Optional[ChannelMetaDto] = None
+    link_url: Optional[str] = None
 
 
 class TasksResponse(BaseModel):

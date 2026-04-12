@@ -501,7 +501,7 @@ const SeasonInfoModal = memo(({ isOpen, onClose }: { isOpen: boolean; onClose: (
                         <img
                           src={row.giftImageSrc}
                           alt={row.giftName}
-                          className="h-full w-full object-contain drop-shadow-[0_8px_12px_rgba(0,0,0,0.35)]"
+                          className="h-full w-full object-contain sm:drop-shadow-[0_8px_12px_rgba(0,0,0,0.35)]"
                         />
                       </motion.div>
                       <span className={`font-black flex-1 ${row.rank <= 3 ? 'text-base' : 'text-sm'} ${row.nameClass}`}>
