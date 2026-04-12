@@ -67,7 +67,7 @@ const TELEGRAM_LINK_KEEP_APP_MIN_VERSION = '7.1';
 
 type TelegramWebAppLinkApi = {
   version?: string;
-  openLink?: (url: string) => void;
+  openLink?: (url: string, options?: { try_instant_view?: boolean }) => void;
   openTelegramLink?: (url: string) => void;
 };
 
@@ -1082,13 +1082,17 @@ export function TasksScreen() {
     const isTelegramUrl = /^https?:\/\/t\.me\//i.test(url) || /^tg:\/\//i.test(url);
     const canOpenInBrowser = /^https?:\/\//i.test(url);
     try {
+      if (task.kind === 'link' && tg?.openLink && canOpenInBrowser) {
+        tg.openLink(url, { try_instant_view: false });
+        return;
+      }
       if (isTelegramUrl) {
         if (tg?.openTelegramLink && shouldUseTelegramLinkInPlace(tg)) {
           tg.openTelegramLink(url);
           return;
         }
         if (tg?.openLink && canOpenInBrowser) {
-          tg.openLink(url);
+          tg.openLink(url, { try_instant_view: false });
           return;
         }
         if (tg?.openTelegramLink) {
@@ -1097,7 +1101,7 @@ export function TasksScreen() {
         }
       }
       if (tg?.openLink && canOpenInBrowser) {
-        tg.openLink(url);
+        tg.openLink(url, { try_instant_view: false });
         return;
       }
       window.open(url, '_blank', 'noopener,noreferrer');

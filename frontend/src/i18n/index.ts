@@ -21,7 +21,7 @@ const resources = {
       processing: 'Обработка...',
       max: 'Максимум',
       later: 'Позже',
-      connectWallet: 'Подключить кошелёк',
+      connectWallet: 'Подкл. кошелёк',
       reconnectWallet: 'Переподключить кошелёк',
       confirming: 'Подтверждение...',
       connected: 'Подключено',
