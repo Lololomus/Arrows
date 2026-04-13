@@ -299,14 +299,20 @@ export function HintEmptyModal({
                   transition={{ type: 'spring', stiffness: 380, damping: 22 }}
                   className="p-8 flex flex-col items-center text-center"
                 >
-                  {/* Burst ring */}
+                  {/* Icon + rings (без filter — избегаем квадратов на мобилке) */}
                   <div className="relative flex items-center justify-center mb-5">
+                    {/* Expanding pulse ring */}
                     <motion.div
-                      initial={{ scale: 0.5, opacity: 0.7 }}
-                      animate={{ scale: 2.4, opacity: 0 }}
+                      initial={{ scale: 0.5, opacity: 0.65 }}
+                      animate={{ scale: 2.6, opacity: 0 }}
                       transition={{ duration: 0.85, ease: 'easeOut' }}
                       className="absolute rounded-full"
-                      style={{ width: 64, height: 64, background: 'radial-gradient(circle, rgba(250,204,21,0.55) 0%, transparent 70%)' }}
+                      style={{ width: 64, height: 64, backgroundColor: 'rgba(250,204,21,0.35)' }}
+                    />
+                    {/* Static glow circle */}
+                    <div
+                      className="absolute rounded-full"
+                      style={{ width: 88, height: 88, top: -12, left: -12, backgroundColor: 'rgba(250,204,21,0.12)' }}
                     />
                     {/* Floating particles */}
                     {[0, 72, 144, 216, 288].map((deg, i) => {
@@ -319,25 +325,19 @@ export function HintEmptyModal({
                           initial={{ opacity: 0, x: 0, y: 0, scale: 0 }}
                           animate={{ opacity: [0, 1, 0], x: tx, y: ty, scale: [0, 1.1, 0.6] }}
                           transition={{ duration: 0.7, delay: 0.08 + i * 0.06, ease: 'easeOut' }}
-                          className="absolute"
+                          className="absolute flex items-center justify-center"
+                          style={{ width: 16, height: 16 }}
                         >
-                          <Lightbulb
-                            size={14}
-                            className="text-yellow-300"
-                            style={{ filter: 'drop-shadow(0 0 5px #fde047)' }}
-                          />
+                          <Lightbulb size={12} className="text-yellow-300" />
                         </motion.div>
                       );
                     })}
                     <motion.div
                       animate={{ scale: [1, 1.15, 1, 1.08, 1] }}
                       transition={{ duration: 0.7, delay: 0.1, ease: 'easeInOut' }}
+                      className="relative z-10 flex items-center justify-center"
                     >
-                      <Lightbulb
-                        size={64}
-                        className="text-yellow-300 relative z-10"
-                        style={{ filter: 'drop-shadow(0 0 20px rgba(250,204,21,0.8))' }}
-                      />
+                      <Lightbulb size={64} className="text-yellow-300" />
                     </motion.div>
                   </div>
 
@@ -346,7 +346,6 @@ export function HintEmptyModal({
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
                     className="font-black text-xl uppercase tracking-widest text-white mb-2"
-                    style={{ textShadow: '0 0 20px rgba(250,204,21,0.6)' }}
                   >
                     {translate('shop:purchaseSuccess.title')}
                   </motion.p>
