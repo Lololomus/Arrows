@@ -1052,23 +1052,48 @@ async def purchase_bundle(
     if bundle.get("extra_lives"):
         description += f" + {bundle['extra_lives']} extra lives"
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.post(
-            f"https://api.telegram.org/bot{bot_token}/createInvoiceLink",
-            json={
-                "title": title,
-                "description": description,
-                "payload": f"bundle:{bundle_id}:{user.id}:{user.telegram_id}:{price_stars}",
-                "currency": "XTR",
-                "prices": [{"label": title, "amount": price_stars}],
-            },
-        )
+    redis_client = await get_redis()
+    pending_key = f"bundle_pending_v1:{user.id}:{bundle_id}"
+    if redis_client:
+        cached = await redis_client.get(pending_key)
+        if cached:
+            try:
+                cached_data = json.loads(cached)
+                if cached_data.get("price_stars") == price_stars:
+                    return {"invoice_url": cached_data["invoice_url"], "price_stars": cached_data["price_stars"]}
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                pass
+            await redis_client.delete(pending_key)
 
-    data = resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"https://api.telegram.org/bot{bot_token}/createInvoiceLink",
+                json={
+                    "title": title,
+                    "description": description,
+                    "payload": f"bundle:{bundle_id}:{user.id}:{user.telegram_id}:{price_stars}",
+                    "currency": "XTR",
+                    "prices": [{"label": title, "amount": price_stars}],
+                },
+            )
+        data = resp.json()
+    except (httpx.HTTPError, ValueError):
+        logger.exception("purchase_bundle: failed to create invoice for user=%s bundle=%s", user.id, bundle_id)
+        raise api_error(502, "INVOICE_CREATION_FAILED", "Could not create invoice")
+
     if not data.get("ok"):
         raise api_error(502, "INVOICE_CREATION_FAILED", str(data.get("description", "Unknown error")))
 
-    return {"invoice_url": data["result"], "price_stars": price_stars}
+    invoice_url = data.get("result")
+    if not invoice_url:
+        logger.error("purchase_bundle: Telegram response missing invoice result: %r", data)
+        raise api_error(502, "INVOICE_CREATION_FAILED", "Could not create invoice")
+
+    if redis_client:
+        await redis_client.setex(pending_key, 1800, json.dumps({"invoice_url": invoice_url, "price_stars": price_stars}))
+
+    return {"invoice_url": invoice_url, "price_stars": price_stars}
 
 
 @router.post("/equip/{item_type}/{item_id}")

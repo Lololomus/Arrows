@@ -294,6 +294,13 @@ async def _process_bundle_successful_payment(
     ))
     await db.commit()
 
+    try:
+        redis = await get_redis()
+        if redis is not None:
+            await redis.delete(f"bundle_pending_v1:{user.id}:{bundle_id}")
+    except Exception:
+        logger.exception("Failed to clear bundle invoice cache for user_id=%s bundle_id=%s", user.id, bundle_id)
+
 
 async def _process_welcome_bundle_successful_payment(
     db,

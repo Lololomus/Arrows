@@ -242,6 +242,9 @@ async def handle_telegram_payment(
                     ton_tx_hash=charge_id,
                 ))
                 await db.commit()
+                redis_client = await get_redis()
+                if redis_client:
+                    await redis_client.delete(f"bundle_pending_v1:{bundle_user.id}:{bundle_id}")
             return {"ok": True}
 
         if payload_str.startswith("welcome_bundle:"):

@@ -432,6 +432,14 @@ function UltraBundleIcon({ size = 28, className, strokeWidth = 1.75 }: BundleIco
 // ── Bundle tiers config ──────────────────────────────────────────────────────
 
 type BundleId = 'starter' | 'standard' | 'advanced' | 'ultra';
+type ExtraBundleId = Exclude<BundleId, 'starter'>;
+type BundleConfig = {
+  bundleId: BundleId;
+  hints: number;
+  revives: number;
+  extraLives?: number;
+  priceStars: number;
+};
 
 const BUNDLE_THEME: Record<BundleId, {
   iconBorder: string;
@@ -484,6 +492,12 @@ const BUNDLE_THEME: Record<BundleId, {
     Icon: UltraBundleIcon,
   },
 };
+
+const EXTRA_BUNDLE_CONFIGS: Array<BundleConfig & { bundleId: ExtraBundleId }> = [
+  { bundleId: 'standard', hints: 50, revives: 25, priceStars: 150 },
+  { bundleId: 'advanced', hints: 150, revives: 100, priceStars: 500 },
+  { bundleId: 'ultra', hints: 300, revives: 150, extraLives: 2, priceStars: 1000 },
+];
 
 function useBundleCountdown(expiresAt: string | null): { display: string; expired: boolean } {
   const [display, setDisplay] = useState('');
@@ -623,6 +637,93 @@ function BundleCard({
   );
 }
 
+function BundlePurchaseModal({
+  bundle,
+  isPurchasing,
+  onBuy,
+  onClose,
+}: {
+  bundle: BundleConfig & { bundleId: ExtraBundleId };
+  isPurchasing: boolean;
+  onBuy: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const theme = BUNDLE_THEME[bundle.bundleId];
+  const Icon = theme.Icon;
+
+  return (
+    <div className="fixed inset-0 z-[9998] flex items-center justify-center px-4">
+      <motion.div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={isPurchasing ? undefined : onClose}
+      />
+
+      <motion.div
+        className="relative z-10 w-full max-w-sm"
+        initial={{ opacity: 0, scale: 0.92, y: 16 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.92, y: 16 }}
+        transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+      >
+        <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#0f1225] px-6 py-6 shadow-[0_20px_60px_rgba(0,0,0,0.6)]">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isPurchasing}
+            className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-white/40 transition-colors hover:text-white/80 disabled:opacity-40"
+          >
+            x
+          </button>
+
+          <div className={`mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border ${theme.iconBorder} ${theme.iconBg}`}>
+            <Icon size={50} className={theme.iconColor} strokeWidth={1.85} />
+          </div>
+
+          <h2 className="text-xl font-bold text-white">{t(`shop:bundles.${bundle.bundleId}.title`)}</h2>
+          <p className="mt-1 text-sm text-white/60">{t(`shop:bundles.${bundle.bundleId}.subtitle`)}</p>
+
+          <div className="my-5 space-y-2.5">
+            <div className="flex items-center gap-2.5 text-sm text-[#d2d7e5]">
+              <Heart size={18} className="shrink-0 text-rose-400" />
+              <span className="font-medium">{t('shop:bundles.revives', { count: bundle.revives })}</span>
+            </div>
+            <div className="flex items-center gap-2.5 text-sm text-[#d2d7e5]">
+              <Lightbulb size={18} className="shrink-0 text-cyan-400" />
+              <span className="font-medium">{t('shop:bundles.hints', { count: bundle.hints })}</span>
+            </div>
+            {!!bundle.extraLives && (
+              <div className="flex items-center gap-2.5 text-sm text-rose-300">
+                <Heart size={18} className="shrink-0 text-rose-300" strokeWidth={1.5} />
+                <span className="font-medium">{t('shop:bundles.extraLives', { count: bundle.extraLives })}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="mb-5 flex items-end gap-1.5">
+            <span className="text-2xl font-black text-white">{bundle.priceStars} ⭐</span>
+          </div>
+
+          <motion.button
+            type="button"
+            onClick={onBuy}
+            disabled={isPurchasing}
+            className={`w-full py-4 rounded-2xl font-bold text-base text-white bg-gradient-to-r ${theme.btnFrom} ${theme.btnTo} disabled:opacity-60`}
+            whileTap={{ scale: 0.97 }}
+          >
+            {isPurchasing
+              ? t('shop:bundles.buying')
+              : t('shop:bundles.buyButton', { price: bundle.priceStars })}
+          </motion.button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 export function ShopScreen() {
   const { t } = useTranslation();
   const user = useAppStore((s) => s.user);
@@ -650,6 +751,7 @@ export function ShopScreen() {
   // Welcome offer
   const [welcomeOffer, setWelcomeOffer] = useState<WelcomeOfferData | null>(null);
   const [showWelcomePopup, setShowWelcomePopup] = useState(false);
+  const [confirmBundle, setConfirmBundle] = useState<(BundleConfig & { bundleId: ExtraBundleId }) | null>(null);
   const [offerTimerExpired, setOfferTimerExpired] = useState(false);
 
   useEffect(() => {
@@ -784,6 +886,8 @@ export function ShopScreen() {
             });
             if (bundleId === 'starter') {
               setWelcomeOffer((prev) => prev ? { ...prev, eligible: false } : prev);
+            } else {
+              setConfirmBundle(null);
             }
           } catch {
             // non-critical
@@ -1103,41 +1207,22 @@ export function ShopScreen() {
                     expiresAt={welcomeOffer.expiresAt}
                     eligible={welcomeOffer.eligible}
                     isPurchasing={purchasingBundle === 'starter'}
-                    onBuy={() => {
-                      if (offerDiscounted) {
-                        void handleBundlePurchase('starter');
-                      } else {
-                        setShowWelcomePopup(true);
-                      }
-                    }}
+                    onBuy={() => setShowWelcomePopup(true)}
                   />
                 )}
 
-                <BundleCard
-                  bundleId="standard"
-                  hints={50}
-                  revives={25}
-                  priceStars={150}
-                  isPurchasing={purchasingBundle === 'standard'}
-                  onBuy={() => void handleBundlePurchase('standard')}
-                />
-                <BundleCard
-                  bundleId="advanced"
-                  hints={150}
-                  revives={100}
-                  priceStars={500}
-                  isPurchasing={purchasingBundle === 'advanced'}
-                  onBuy={() => void handleBundlePurchase('advanced')}
-                />
-                <BundleCard
-                  bundleId="ultra"
-                  hints={300}
-                  revives={150}
-                  extraLives={2}
-                  priceStars={1000}
-                  isPurchasing={purchasingBundle === 'ultra'}
-                  onBuy={() => void handleBundlePurchase('ultra')}
-                />
+                {EXTRA_BUNDLE_CONFIGS.map((bundle) => (
+                  <BundleCard
+                    key={bundle.bundleId}
+                    bundleId={bundle.bundleId}
+                    hints={bundle.hints}
+                    revives={bundle.revives}
+                    extraLives={bundle.extraLives}
+                    priceStars={bundle.priceStars}
+                    isPurchasing={purchasingBundle === bundle.bundleId}
+                    onBuy={() => setConfirmBundle(bundle)}
+                  />
+                ))}
               </section>
             )}
 
@@ -1322,6 +1407,17 @@ export function ShopScreen() {
           onPurchased={() => {
             setWelcomeOffer((prev) => prev ? { ...prev, eligible: false } : prev);
           }}
+        />
+      )}
+
+      {confirmBundle && (
+        <BundlePurchaseModal
+          bundle={confirmBundle}
+          isPurchasing={purchasingBundle === confirmBundle.bundleId}
+          onClose={() => {
+            if (!purchasingBundle) setConfirmBundle(null);
+          }}
+          onBuy={() => void handleBundlePurchase(confirmBundle.bundleId)}
         />
       )}
     </div>
