@@ -63,11 +63,10 @@ const TASK_UI: Record<TaskDto['id'], TaskUiConfig> = {
 const isDailyTask = (task: TaskDto) => task.id.startsWith('daily_');
 const isPartnerTask = (task: TaskDto) => task.id.startsWith('partner_');
 const OPENED_TASKS_STORAGE_KEY = 'arrows_opened_tasks';
-const TELEGRAM_LINK_KEEP_APP_MIN_VERSION = '7.1';
 
 type TelegramWebAppLinkApi = {
   version?: string;
-  openLink?: (url: string, options?: { try_instant_view?: boolean }) => void;
+  openLink?: (url: string) => void;
   openTelegramLink?: (url: string) => void;
 };
 
@@ -142,28 +141,6 @@ function clearOpenedTaskIds(userId: number | null | undefined): void {
       }
     }
   }
-}
-
-function compareVersion(current: string | undefined, target: string): number | null {
-  if (!current) return null;
-  const currentParts = current.split('.').map((part) => Number.parseInt(part, 10));
-  const targetParts = target.split('.').map((part) => Number.parseInt(part, 10));
-  if (currentParts.some((part) => Number.isNaN(part)) || targetParts.some((part) => Number.isNaN(part))) {
-    return null;
-  }
-
-  const maxLength = Math.max(currentParts.length, targetParts.length);
-  for (let i = 0; i < maxLength; i += 1) {
-    const currentPart = currentParts[i] ?? 0;
-    const targetPart = targetParts[i] ?? 0;
-    if (currentPart !== targetPart) return currentPart > targetPart ? 1 : -1;
-  }
-  return 0;
-}
-
-function shouldUseTelegramLinkInPlace(tg: TelegramWebAppLinkApi | undefined): boolean {
-  const compared = compareVersion(tg?.version, TELEGRAM_LINK_KEEP_APP_MIN_VERSION);
-  return compared != null && compared >= 0;
 }
 
 function formatTaskRewardLabel(rewardCoins: number, rewardHints = 0, rewardRevives = 0): string {
@@ -1082,26 +1059,14 @@ export function TasksScreen() {
     const isTelegramUrl = /^https?:\/\/t\.me\//i.test(url) || /^tg:\/\//i.test(url);
     const canOpenInBrowser = /^https?:\/\//i.test(url);
     try {
-      if (task.kind === 'link' && tg?.openLink && canOpenInBrowser) {
-        tg.openLink(url, { try_instant_view: false });
-        return;
-      }
       if (isTelegramUrl) {
-        if (tg?.openTelegramLink && shouldUseTelegramLinkInPlace(tg)) {
-          tg.openTelegramLink(url);
-          return;
-        }
-        if (tg?.openLink && canOpenInBrowser) {
-          tg.openLink(url, { try_instant_view: false });
-          return;
-        }
         if (tg?.openTelegramLink) {
           tg.openTelegramLink(url);
           return;
         }
       }
       if (tg?.openLink && canOpenInBrowser) {
-        tg.openLink(url, { try_instant_view: false });
+        tg.openLink(url);
         return;
       }
       window.open(url, '_blank', 'noopener,noreferrer');

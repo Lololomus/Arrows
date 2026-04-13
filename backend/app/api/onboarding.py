@@ -76,5 +76,6 @@ async def dev_reset_onboarding_state(
         redis_client = await get_redis()
         if redis_client is not None:
             await redis_client.delete(f"welcome_offer_pending:{locked.id}")
+            await redis_client.delete(f"welcome_offer_pending_v2:{locked.id}")
 
     return UserResponse.model_validate(serialize_user(locked))

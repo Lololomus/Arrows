@@ -108,10 +108,34 @@ BOOSTS = [
 WELCOME_BUNDLE = {
     "hints": 20,
     "revives": 10,
-    "price_full": 100,
-    "price_discounted": 25,
+    "price_full": 50,
+    "price_discounted": 15,
     "discount_hours": 24,
 }
+
+EXTRA_BUNDLES = [
+    {
+        "id": "standard",
+        "hints": 50,
+        "revives": 25,
+        "price_stars": 150,
+        "extra_lives": 0,
+    },
+    {
+        "id": "advanced",
+        "hints": 150,
+        "revives": 100,
+        "price_stars": 500,
+        "extra_lives": 0,
+    },
+    {
+        "id": "ultra",
+        "hints": 300,
+        "revives": 150,
+        "price_stars": 1000,
+        "extra_lives": 2,
+    },
+]
 
 
 def ton_payments_enabled() -> bool:
@@ -203,7 +227,7 @@ async def get_catalog(
         for b in BOOSTS:
             if b["id"] in TON_VISIBLE_UPGRADE_IDS and b.get("max_purchases") is not None:
                 max_p = b["max_purchases"]
-                purchased = user.extra_lives if b["id"] == "extra_life" else 0
+                purchased = user.ton_extra_lives if b["id"] == "extra_life" else 0
                 upgrade_items.append(ShopItem(
                     id=b["id"],
                     name=b["name"],
@@ -355,8 +379,8 @@ async def purchase_with_ton(
     if request.item_type != "boosts" or request.item_id not in TON_VISIBLE_UPGRADE_IDS:
         raise api_error(403, "TON_ITEM_NOT_ALLOWED", "Only extra_life is available for TON purchases")
 
-    if user.extra_lives >= 2:
-        raise api_error(409, "EXTRA_LIVES_LIMIT_REACHED", "Maximum extra lives already purchased")
+    if user.ton_extra_lives >= 2:
+        raise api_error(409, "EXTRA_LIVES_LIMIT_REACHED", "Maximum extra lives already purchased via TON")
 
     # Reuse existing pending transaction (take most recent to avoid MultipleResultsFound)
     pending = await db.execute(
@@ -1004,7 +1028,47 @@ async def dev_reset_welcome_offer(
     redis_client = await get_redis()
     if redis_client:
         await redis_client.delete(f"welcome_offer_pending:{user.id}")
+        await redis_client.delete(f"welcome_offer_pending_v2:{user.id}")
     return {"success": True}
+
+
+@router.post("/bundles/{bundle_id}/purchase")
+async def purchase_bundle(
+    bundle_id: str,
+    user: User = Depends(get_current_user),
+):
+    """Create a Telegram Stars invoice for a standard or advanced bundle."""
+    bundle = next((b for b in EXTRA_BUNDLES if b["id"] == bundle_id), None)
+    if not bundle:
+        raise api_error(404, "BUNDLE_NOT_FOUND", f"Bundle '{bundle_id}' not found")
+
+    bot_token = settings.BOT_TOKEN or settings.TELEGRAM_BOT_TOKEN
+    if not bot_token:
+        raise api_error(503, "BOT_NOT_CONFIGURED", "Bot token is not configured")
+
+    price_stars = bundle["price_stars"]
+    title = bundle_id.title() + " Bundle"
+    description = f"+{bundle['revives']} revives + {bundle['hints']} hints"
+    if bundle.get("extra_lives"):
+        description += f" + {bundle['extra_lives']} extra lives"
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            f"https://api.telegram.org/bot{bot_token}/createInvoiceLink",
+            json={
+                "title": title,
+                "description": description,
+                "payload": f"bundle:{bundle_id}:{user.id}:{user.telegram_id}:{price_stars}",
+                "currency": "XTR",
+                "prices": [{"label": title, "amount": price_stars}],
+            },
+        )
+
+    data = resp.json()
+    if not data.get("ok"):
+        raise api_error(502, "INVOICE_CREATION_FAILED", str(data.get("description", "Unknown error")))
+
+    return {"invoice_url": data["result"], "price_stars": price_stars}
 
 
 @router.post("/equip/{item_type}/{item_id}")
@@ -1057,10 +1121,11 @@ async def apply_boost(user: User, boost_id: str, db: AsyncSession, quantity: int
     elif boost_id == "life_1":
         pass  # lives client-side only
     elif boost_id == "extra_life":
-        if user.extra_lives < 2:
+        if user.ton_extra_lives < 2:
             user.extra_lives += 1
+            user.ton_extra_lives += 1
         else:
-            logger.warning("User %s: extra_lives already at max, TON accepted", user.id)
+            logger.warning("User %s: ton_extra_lives already at max, TON accepted", user.id)
     elif boost_id == "energy_5":
         user.energy = min(user.energy + 5, settings.MAX_ENERGY + 5)
     elif boost_id == "energy_full":

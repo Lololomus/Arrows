@@ -249,6 +249,7 @@ export const API_ENDPOINTS = {
     transactionConfirm: (txId: number) => `/shop/transaction/${txId}/confirm`,
     welcomeOffer: '/shop/welcome-offer',
     purchaseWelcomeOffer: '/shop/welcome-offer/purchase',
+    purchaseBundle: (id: string) => `/shop/bundles/${id}/purchase`,
     devResetWelcomeOffer: '/shop/dev/reset-welcome-offer',
   },
   cases: {

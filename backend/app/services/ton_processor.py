@@ -218,11 +218,12 @@ async def _grant_and_complete(tx_id: int, user_id: int, item_id: str, tx_hash: s
                 rarity = determine_rarity(user.case_pity_counter)
                 await grant_case_rewards(user, rarity, "ton", db, transaction_id=tx.id)
             elif item_id == "extra_life":
-                if user.extra_lives < 2:
+                if user.ton_extra_lives < 2:
                     user.extra_lives += 1
+                    user.ton_extra_lives += 1
                 else:
                     logger.warning(
-                        "ton_processor: user %d extra_lives already at max (tx %d accepted)",
+                        "ton_processor: user %d ton_extra_lives already at max (tx %d accepted)",
                         user_id, tx_id,
                     )
 

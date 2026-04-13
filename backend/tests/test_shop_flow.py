@@ -5,11 +5,19 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.api import auth, shop
+from app.api import auth, shop, webhooks
 from app.database import Base
 from app.models import CaseOpening, StarsWithdrawal, Transaction, User
 from app.schemas import PurchaseRequest, WithdrawStarsRequest
 from app.services import case_logic, ton_processor
+
+
+class FakeRequest:
+    def __init__(self, body: dict) -> None:
+        self._body = body
+
+    async def json(self) -> dict:
+        return self._body
 
 
 @pytest.fixture
@@ -116,6 +124,82 @@ async def test_purchase_item_applies_ten_percent_discount_for_five_revives(db_se
     assert user.coins == 0
     assert user.revive_balance == initial_revives + 5
     assert tx.amount == Decimal("-2250")
+
+
+@pytest.mark.asyncio
+async def test_bundle_successful_payment_grants_rewards_and_is_idempotent(db_session: AsyncSession) -> None:
+    user = await create_user(db_session, telegram_id=1251)
+    initial_hints = user.hint_balance
+    initial_revives = user.revive_balance
+    initial_extra_lives = user.extra_lives
+
+    body = {
+        "message": {
+            "from": {"id": user.telegram_id},
+            "successful_payment": {
+                "invoice_payload": f"bundle:ultra:{user.id}:{user.telegram_id}:1000",
+                "total_amount": 1000,
+                "telegram_payment_charge_id": "bundle-charge-1",
+            },
+        },
+    }
+
+    first_response = await webhooks.handle_telegram_payment(FakeRequest(body), db=db_session)
+    repeated_response = await webhooks.handle_telegram_payment(FakeRequest(body), db=db_session)
+
+    await db_session.refresh(user)
+    transactions = (
+        await db_session.execute(
+            select(Transaction).where(
+                Transaction.user_id == user.id,
+                Transaction.item_type == "bundle_ultra",
+                Transaction.ton_tx_hash == "bundle-charge-1",
+            )
+        )
+    ).scalars().all()
+
+    assert first_response == {"ok": True}
+    assert repeated_response == {"ok": True}
+    assert user.hint_balance == initial_hints + 300
+    assert user.revive_balance == initial_revives + 150
+    assert user.extra_lives == initial_extra_lives + 2
+    assert user.ton_extra_lives == 0
+    assert len(transactions) == 1
+    assert transactions[0].amount == Decimal("1000")
+
+
+@pytest.mark.asyncio
+async def test_bundle_successful_payment_rejects_wrong_payer(db_session: AsyncSession) -> None:
+    user = await create_user(db_session, telegram_id=1252)
+    initial_hints = user.hint_balance
+    initial_revives = user.revive_balance
+    initial_extra_lives = user.extra_lives
+
+    body = {
+        "message": {
+            "from": {"id": 999999},
+            "successful_payment": {
+                "invoice_payload": f"bundle:ultra:{user.id}:{user.telegram_id}:1000",
+                "total_amount": 1000,
+                "telegram_payment_charge_id": "bundle-charge-wrong-payer",
+            },
+        },
+    }
+
+    response = await webhooks.handle_telegram_payment(FakeRequest(body), db=db_session)
+
+    await db_session.refresh(user)
+    transactions = (
+        await db_session.execute(
+            select(Transaction).where(Transaction.ton_tx_hash == "bundle-charge-wrong-payer")
+        )
+    ).scalars().all()
+
+    assert response == {"ok": False, "error": "Not your bundle"}
+    assert user.hint_balance == initial_hints
+    assert user.revive_balance == initial_revives
+    assert user.extra_lives == initial_extra_lives
+    assert transactions == []
 
 
 @pytest.mark.asyncio

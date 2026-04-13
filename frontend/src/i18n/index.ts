@@ -406,11 +406,38 @@ const resources = {
         title: 'Стартовый набор',
         description: '10 ❤️ воскрешений + 20 💡 подсказок',
         timerLabel: 'Истекает через',
-        discountedPrice: '25 ⭐',
-        fullPrice: '100 ⭐',
+        discountedPrice: '15 ⭐',
+        fullPrice: '50 ⭐',
         buyButton: 'Купить за {{price}} ⭐',
         buying: 'Открываем оплату...',
         limitedBadge: 'Лимитированное',
+      },
+      bundles: {
+        sectionTitle: 'Наборы',
+        buying: 'Открываем оплату...',
+        buyButton: 'Купить за {{price}} ⭐',
+        newUserBadge: 'Для новых игроков',
+        limitedBadge: 'Лимитированное',
+        timerLabel: 'Истекает через',
+        revives: '{{count}} возрождений',
+        hints: '{{count}} подсказок',
+        extraLives: '{{count}} доп. жизни',
+        starter: {
+          title: 'Стартовый набор',
+          subtitle: 'Всё необходимое для начала',
+        },
+        standard: {
+          title: 'Нормальный набор',
+          subtitle: 'Для уверенного прохождения',
+        },
+        advanced: {
+          title: 'Продвинутый набор',
+          subtitle: 'Максимум для хардкора',
+        },
+        ultra: {
+          title: 'Ультра набор',
+          subtitle: 'Абсолютный максимум',
+        },
       },
       items: {
         hints_1: {
@@ -1082,11 +1109,38 @@ const resources = {
         title: 'Starter Bundle',
         description: '10 ❤️ revives + 20 💡 hints',
         timerLabel: 'Expires in',
-        discountedPrice: '25 ⭐',
-        fullPrice: '100 ⭐',
+        discountedPrice: '15 ⭐',
+        fullPrice: '50 ⭐',
         buyButton: 'Buy for {{price}} ⭐',
         buying: 'Opening payment...',
         limitedBadge: 'Limited',
+      },
+      bundles: {
+        sectionTitle: 'Bundles',
+        buying: 'Opening payment...',
+        buyButton: 'Buy for {{price}} ⭐',
+        newUserBadge: 'New players',
+        limitedBadge: 'Limited',
+        timerLabel: 'Expires in',
+        revives: '{{count}} revives',
+        hints: '{{count}} hints',
+        extraLives: '{{count}} extra lives',
+        starter: {
+          title: 'Starter Bundle',
+          subtitle: 'Everything to get started',
+        },
+        standard: {
+          title: 'Standard Bundle',
+          subtitle: 'For steady progress',
+        },
+        advanced: {
+          title: 'Advanced Bundle',
+          subtitle: 'Maximum for hardcore players',
+        },
+        ultra: {
+          title: 'Ultra Bundle',
+          subtitle: 'Absolute maximum',
+        },
       },
       items: {
         hints_1: {

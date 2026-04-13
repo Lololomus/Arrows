@@ -130,6 +130,243 @@ def build_info_keyboard(locale: str | None) -> InlineKeyboardMarkup:
     )
 
 
+async def _validate_bundle_checkout_payload(
+    db,
+    *,
+    payload: str,
+    payer_tg_id: int | None,
+    total_amount: int,
+) -> tuple[bool, str | None]:
+    from app.api.shop import EXTRA_BUNDLES
+
+    try:
+        parts = payload.split(":")
+        if len(parts) != 5:
+            raise ValueError("Invalid bundle payload")
+        bundle_id = parts[1]
+        bundle_user_id = int(parts[2])
+        expected_tg_id = int(parts[3])
+        expected_price = int(parts[4])
+    except (IndexError, ValueError):
+        logger.warning("Invalid bundle pre_checkout payload %r", payload)
+        return False, "Invalid payment payload"
+
+    bundle = next((b for b in EXTRA_BUNDLES if b["id"] == bundle_id), None)
+    if bundle is None:
+        return False, "Bundle not found"
+    if payer_tg_id != expected_tg_id:
+        return False, "Not your bundle"
+    if total_amount != expected_price:
+        return False, "Price mismatch"
+    if expected_price != bundle["price_stars"]:
+        return False, "Price has changed"
+
+    result = await db.execute(
+        select(User.id).where(
+            User.id == bundle_user_id,
+            User.telegram_id == expected_tg_id,
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        return False, "User not found"
+
+    return True, None
+
+
+async def _validate_welcome_bundle_checkout_payload(
+    db,
+    *,
+    payload: str,
+    payer_tg_id: int | None,
+    total_amount: int,
+) -> tuple[bool, str | None]:
+    from app.api.shop import WELCOME_BUNDLE, _discount_until
+
+    try:
+        parts = payload.split(":")
+        if len(parts) != 4:
+            raise ValueError("Invalid welcome bundle payload")
+        bundle_user_id = int(parts[1])
+        expected_tg_id = int(parts[2])
+        expected_price = int(parts[3])
+    except (IndexError, ValueError):
+        logger.warning("Invalid welcome_bundle pre_checkout payload %r", payload)
+        return False, "Invalid payment payload"
+
+    if payer_tg_id != expected_tg_id:
+        return False, "Not your offer"
+    if total_amount != expected_price:
+        return False, "Price has changed"
+    if expected_price not in (WELCOME_BUNDLE["price_full"], WELCOME_BUNDLE["price_discounted"]):
+        return False, "Price has changed"
+
+    result = await db.execute(
+        select(User.welcome_offer_purchased, User.created_at)
+        .where(User.id == bundle_user_id, User.telegram_id == expected_tg_id)
+    )
+    row = result.one_or_none()
+    if row is None:
+        return False, "User not found"
+
+    already_purchased, created_at = row
+    if already_purchased:
+        return False, "Already purchased"
+    if (
+        expected_price == WELCOME_BUNDLE["price_discounted"]
+        and settings.ENVIRONMENT != "development"
+    ):
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        deadline = _discount_until(created_at)
+        if deadline is None or now >= deadline:
+            return False, "Discount expired"
+
+    return True, None
+
+
+async def _process_bundle_successful_payment(
+    db,
+    *,
+    payload: str,
+    payer_tg_id: int | None,
+    total_amount: int,
+    charge_id: str,
+) -> None:
+    from app.api.shop import EXTRA_BUNDLES
+
+    try:
+        parts = payload.split(":")
+        if len(parts) != 5:
+            raise ValueError("Invalid bundle payload")
+        bundle_id = parts[1]
+        bundle_user_id = int(parts[2])
+        expected_tg_id = int(parts[3])
+        expected_price = int(parts[4])
+    except (IndexError, ValueError):
+        logger.warning("Ignoring bundle payment with invalid payload %r", payload)
+        return
+
+    bundle = next((b for b in EXTRA_BUNDLES if b["id"] == bundle_id), None)
+    if bundle is None:
+        logger.warning("Ignoring bundle payment for unknown bundle_id=%s", bundle_id)
+        return
+    if payer_tg_id != expected_tg_id:
+        logger.warning("Ignoring bundle payment from wrong payer tg_id=%s expected=%s", payer_tg_id, expected_tg_id)
+        return
+    if total_amount != expected_price or expected_price != bundle["price_stars"]:
+        logger.warning("Ignoring bundle payment with price mismatch payload=%r total=%s", payload, total_amount)
+        return
+
+    result = await db.execute(
+        select(User)
+        .where(User.id == bundle_user_id, User.telegram_id == expected_tg_id)
+        .with_for_update()
+    )
+    user = result.scalar_one_or_none()
+    if user is None:
+        logger.warning("Ignoring bundle payment for missing user_id=%s", bundle_user_id)
+        return
+
+    if charge_id:
+        existing = await db.execute(
+            select(Transaction.id).where(
+                Transaction.currency == "stars",
+                Transaction.ton_tx_hash == charge_id,
+                Transaction.status == "completed",
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            return
+
+    user.hint_balance += bundle["hints"]
+    user.revive_balance += bundle["revives"]
+    if bundle.get("extra_lives"):
+        user.extra_lives += bundle["extra_lives"]
+
+    db.add(Transaction(
+        user_id=user.id,
+        type="purchase",
+        currency="stars",
+        amount=total_amount,
+        item_type=f"bundle_{bundle_id}",
+        item_id=bundle_id,
+        status="completed",
+        ton_tx_hash=charge_id,
+    ))
+    await db.commit()
+
+
+async def _process_welcome_bundle_successful_payment(
+    db,
+    *,
+    payload: str,
+    payer_tg_id: int | None,
+    total_amount: int,
+    charge_id: str,
+) -> None:
+    from app.api.shop import WELCOME_BUNDLE
+
+    try:
+        parts = payload.split(":")
+        if len(parts) != 4:
+            raise ValueError("Invalid welcome bundle payload")
+        bundle_user_id = int(parts[1])
+        expected_tg_id = int(parts[2])
+        expected_price = int(parts[3])
+    except (IndexError, ValueError):
+        logger.warning("Ignoring welcome_bundle payment with invalid payload %r", payload)
+        return
+
+    if payer_tg_id != expected_tg_id:
+        logger.warning("Ignoring welcome_bundle payment from wrong payer tg_id=%s expected=%s", payer_tg_id, expected_tg_id)
+        return
+    if total_amount != expected_price or expected_price not in (WELCOME_BUNDLE["price_full"], WELCOME_BUNDLE["price_discounted"]):
+        logger.warning("Ignoring welcome_bundle payment with price mismatch payload=%r total=%s", payload, total_amount)
+        return
+
+    result = await db.execute(
+        select(User)
+        .where(User.id == bundle_user_id, User.telegram_id == expected_tg_id)
+        .with_for_update()
+    )
+    user = result.scalar_one_or_none()
+    if user is None or user.welcome_offer_purchased:
+        return
+
+    if charge_id:
+        existing = await db.execute(
+            select(Transaction.id).where(
+                Transaction.currency == "stars",
+                Transaction.ton_tx_hash == charge_id,
+                Transaction.status == "completed",
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            return
+
+    user.hint_balance += WELCOME_BUNDLE["hints"]
+    user.revive_balance += WELCOME_BUNDLE["revives"]
+    user.welcome_offer_purchased = True
+    db.add(Transaction(
+        user_id=user.id,
+        type="purchase",
+        currency="stars",
+        amount=total_amount,
+        item_type="welcome_bundle",
+        item_id="bundle",
+        status="completed",
+        ton_tx_hash=charge_id,
+    ))
+    await db.commit()
+
+    try:
+        redis = await get_redis()
+        if redis is not None:
+            await redis.delete(f"welcome_offer_pending:{bundle_user_id}")
+            await redis.delete(f"welcome_offer_pending_v2:{bundle_user_id}")
+    except Exception:
+        logger.exception("Failed to clear welcome offer invoice cache for user_id=%s", bundle_user_id)
+
+
 def build_admin_topup_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -372,11 +609,32 @@ async def process_withdrawal_reject(callback: types.CallbackQuery):
 
 @dp.pre_checkout_query()
 async def process_pre_checkout_query(pre_checkout_query: types.PreCheckoutQuery):
-    """Allow checkout only for the configured admin on admin top-up invoices."""
-    ok, error_message = validate_admin_topup_checkout(
-        pre_checkout_query.from_user.id,
-        pre_checkout_query.invoice_payload,
-    )
+    """Validate Telegram Stars checkout before Telegram charges the user."""
+    payload = pre_checkout_query.invoice_payload
+    payer_tg_id = pre_checkout_query.from_user.id if pre_checkout_query.from_user else None
+
+    if payload.startswith("bundle:"):
+        async with AsyncSessionLocal() as db:
+            ok, error_message = await _validate_bundle_checkout_payload(
+                db,
+                payload=payload,
+                payer_tg_id=payer_tg_id,
+                total_amount=pre_checkout_query.total_amount,
+            )
+    elif payload.startswith("welcome_bundle:"):
+        async with AsyncSessionLocal() as db:
+            ok, error_message = await _validate_welcome_bundle_checkout_payload(
+                db,
+                payload=payload,
+                payer_tg_id=payer_tg_id,
+                total_amount=pre_checkout_query.total_amount,
+            )
+    else:
+        ok, error_message = validate_admin_topup_checkout(
+            payer_tg_id,
+            payload,
+        )
+
     await bot.answer_pre_checkout_query(
         pre_checkout_query.id,
         ok=ok,
@@ -391,7 +649,12 @@ async def process_successful_payment(message: types.Message):
     if payment is None:
         return
 
-    amount = parse_admin_topup_payload(payment.invoice_payload)
+    payload = payment.invoice_payload
+    telegram_user = message.from_user
+    payer_tg_id = telegram_user.id if telegram_user else None
+    charge_id = payment.telegram_payment_charge_id or payment.provider_payment_charge_id or ""
+
+    amount = parse_admin_topup_payload(payload)
     if amount is not None:
         if not is_admin_telegram_id(message.from_user.id if message.from_user else None):
             logger.warning(
@@ -407,7 +670,7 @@ async def process_successful_payment(message: types.Message):
                 username=message.from_user.username,
                 first_name=message.from_user.first_name,
                 amount=amount,
-                charge_id=payment.telegram_payment_charge_id or payment.provider_payment_charge_id or "",
+                charge_id=charge_id,
             )
 
         if processed:
@@ -420,15 +683,34 @@ async def process_successful_payment(message: types.Message):
             )
         return
 
-    if payment.invoice_payload != "case:standard":
+    if payload.startswith("bundle:"):
+        async with AsyncSessionLocal() as db:
+            await _process_bundle_successful_payment(
+                db,
+                payload=payload,
+                payer_tg_id=payer_tg_id,
+                total_amount=payment.total_amount,
+                charge_id=charge_id,
+            )
         return
 
-    telegram_user = message.from_user
+    if payload.startswith("welcome_bundle:"):
+        async with AsyncSessionLocal() as db:
+            await _process_welcome_bundle_successful_payment(
+                db,
+                payload=payload,
+                payer_tg_id=payer_tg_id,
+                total_amount=payment.total_amount,
+                charge_id=charge_id,
+            )
+        return
+
+    if payload != "case:standard":
+        return
+
     if telegram_user is None:
         logger.warning("Ignoring case payment without from_user payload")
         return
-
-    charge_id = payment.telegram_payment_charge_id or payment.provider_payment_charge_id or ""
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(

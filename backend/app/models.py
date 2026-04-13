@@ -44,6 +44,7 @@ class User(Base):
     hint_balance = Column(Integer, nullable=False, server_default="5")
     revive_balance = Column(Integer, nullable=False, server_default="0")
     extra_lives = Column(Integer, nullable=False, server_default="0")
+    ton_extra_lives = Column(Integer, nullable=False, server_default="0")
     energy = Column(Integer, default=5)
     energy_updated_at = Column(DateTime, default=datetime.utcnow)
     

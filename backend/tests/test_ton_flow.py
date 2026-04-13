@@ -220,6 +220,7 @@ async def test_confirm_ton_transaction_grants_extra_life_and_is_idempotent(
     assert tx.status == "completed"
     assert tx.ton_tx_hash == "tx-hash-123"
     assert user.extra_lives == 1
+    assert user.ton_extra_lives == 1
 
 
 @pytest.mark.asyncio

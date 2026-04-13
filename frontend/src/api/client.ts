@@ -1091,6 +1091,14 @@ export const shopApi = {
       priceStars: Number(raw.price_stars ?? raw.priceStars ?? 100),
     };
   },
+  purchaseBundle: async (bundleId: string): Promise<{ invoiceUrl: string; priceStars: number }> => {
+    const raw = await request<Record<string, unknown>>(API_ENDPOINTS.shop.purchaseBundle(bundleId), { method: 'POST' });
+    return {
+      invoiceUrl: String(raw.invoice_url ?? raw.invoiceUrl ?? ''),
+      priceStars: Number(raw.price_stars ?? raw.priceStars ?? 0),
+    };
+  },
+
   devResetWelcomeOffer: () => request(API_ENDPOINTS.shop.devResetWelcomeOffer, { method: 'POST' }),
 };
 

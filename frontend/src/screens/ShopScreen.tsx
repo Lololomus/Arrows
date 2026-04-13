@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useTonConnectUI } from '@tonconnect/ui-react';
 import { Coins, Diamond, Heart, Lightbulb, Minus, Plus, RefreshCcw, ShoppingBag } from 'lucide-react';
-import { caseApi, handleApiError, shopApi, type WelcomeOfferData } from '../api/client';
+import { authApi, caseApi, handleApiError, shopApi, type WelcomeOfferData } from '../api/client';
 import { WelcomeOfferModal } from '../components/WelcomeOfferModal';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { HeaderBar } from '../components/ui/HeaderBar';
@@ -268,6 +268,361 @@ function BoostCard({
 
 const SHOW_DEV_TOOLS = import.meta.env.DEV;
 
+type BundleIconProps = {
+  size?: number;
+  className?: string;
+  strokeWidth?: number;
+};
+
+function StarterBundleIcon({ size = 28, className, strokeWidth = 1.75 }: BundleIconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 32 32"
+      fill="none"
+      className={className}
+      aria-hidden="true"
+    >
+      <path
+        d="M7.5 13.5h17v11a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11Z"
+        fill="currentColor"
+        opacity="0.16"
+      />
+      <path
+        d="M5.5 10.5h21v4h-21v-4ZM16 10.5v16M7.5 14.5v10a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-10"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M13.4 10.5c-2.3-3.3-5.8-2.8-5.8-.7 0 1.8 2.5 2.4 5.8.7ZM18.6 10.5c2.3-3.3 5.8-2.8 5.8-.7 0 1.8-2.5 2.4-5.8.7Z"
+        fill="currentColor"
+        opacity="0.28"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12.2 20.8c0-1.1.8-1.9 1.8-1.9.7 0 1.3.4 1.6 1 .3-.6.9-1 1.6-1 1 0 1.8.8 1.8 1.9 0 1.8-3.4 3.9-3.4 3.9s-3.4-2.1-3.4-3.9Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function StandardBundleIcon({ size = 28, className, strokeWidth = 1.75 }: BundleIconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 32 32"
+      fill="none"
+      className={className}
+      aria-hidden="true"
+    >
+      <path
+        d="M6.5 11.2 16 6l9.5 5.2v10.6L16 27l-9.5-5.2V11.2Z"
+        fill="currentColor"
+        opacity="0.14"
+      />
+      <path
+        d="M6.5 11.2 16 16.4l9.5-5.2M16 16.4V27M6.5 11.2 16 6l9.5 5.2v10.6L16 27l-9.5-5.2V11.2Z"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m10.5 8.8 9.2 5.3M21.5 8.8l-9.2 5.3"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        opacity="0.45"
+      />
+      <path d="M10.5 19.5h3.2M18.3 19.5h3.2" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
+      <circle cx="12.1" cy="22.5" r="1.4" fill="currentColor" />
+      <circle cx="19.9" cy="22.5" r="1.4" fill="currentColor" opacity="0.6" />
+    </svg>
+  );
+}
+
+function AdvancedBundleIcon({ size = 28, className, strokeWidth = 1.75 }: BundleIconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 32 32"
+      fill="none"
+      className={className}
+      aria-hidden="true"
+    >
+      <path
+        d="M16 5.5 25 11v10l-9 5.5L7 21V11l9-5.5Z"
+        fill="currentColor"
+        opacity="0.14"
+      />
+      <path
+        d="M16 5.5 25 11v10l-9 5.5L7 21V11l9-5.5Z"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+      <path
+        d="M17.6 8.8 12.4 17h4.2l-2.2 6.2 5.6-8.5h-4.1l1.7-5.9Z"
+        fill="currentColor"
+      />
+      <path
+        d="M8.8 16H5.6M26.4 16h-3.2M16 4.6V2.8M16 29.2v-1.8"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        opacity="0.6"
+      />
+      <path d="M10.2 11.7 16 8.2l5.8 3.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" opacity="0.35" />
+    </svg>
+  );
+}
+
+function UltraBundleIcon({ size = 28, className, strokeWidth = 1.75 }: BundleIconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 32 32"
+      fill="none"
+      className={className}
+      aria-hidden="true"
+    >
+      <path
+        d="M9.5 9.5h13l3 5.2L16 27 6.5 14.7l3-5.2Z"
+        fill="currentColor"
+        opacity="0.16"
+      />
+      <path
+        d="M9.5 9.5h13l3 5.2L16 27 6.5 14.7l3-5.2Z"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6.8 14.7h18.4M12.2 9.5l-1.8 5.2L16 27M19.8 9.5l1.8 5.2L16 27"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity="0.55"
+      />
+      <path
+        d="M12.4 5.7c0-.9.7-1.6 1.5-1.6.6 0 1.1.3 1.4.8.3-.5.8-.8 1.4-.8.8 0 1.5.7 1.5 1.6 0 1.5-2.9 3.1-2.9 3.1s-2.9-1.6-2.9-3.1Z"
+        fill="currentColor"
+      />
+      <path
+        d="M22.3 23.7c0-.8.6-1.4 1.4-1.4.5 0 1 .3 1.2.7.2-.4.7-.7 1.2-.7.8 0 1.4.6 1.4 1.4 0 1.3-2.6 2.8-2.6 2.8s-2.6-1.5-2.6-2.8Z"
+        fill="currentColor"
+        opacity="0.75"
+      />
+    </svg>
+  );
+}
+
+// ── Bundle tiers config ──────────────────────────────────────────────────────
+
+type BundleId = 'starter' | 'standard' | 'advanced' | 'ultra';
+
+const BUNDLE_THEME: Record<BundleId, {
+  iconBorder: string;
+  iconBg: string;
+  iconColor: string;
+  btnFrom: string;
+  btnTo: string;
+  badgeBg: string;
+  badgeText: string;
+  Icon: React.FC<BundleIconProps>;
+}> = {
+  starter: {
+    iconBorder: 'border-purple-500/30',
+    iconBg: 'bg-purple-500/10',
+    iconColor: 'text-purple-400',
+    btnFrom: 'from-purple-600',
+    btnTo: 'to-pink-600',
+    badgeBg: 'bg-amber-500/15 border-amber-500/20',
+    badgeText: 'text-amber-300',
+    Icon: StarterBundleIcon,
+  },
+  standard: {
+    iconBorder: 'border-blue-500/30',
+    iconBg: 'bg-blue-500/10',
+    iconColor: 'text-blue-400',
+    btnFrom: 'from-blue-600',
+    btnTo: 'to-cyan-500',
+    badgeBg: '',
+    badgeText: '',
+    Icon: StandardBundleIcon,
+  },
+  advanced: {
+    iconBorder: 'border-amber-500/30',
+    iconBg: 'bg-amber-500/10',
+    iconColor: 'text-amber-400',
+    btnFrom: 'from-amber-500',
+    btnTo: 'to-orange-500',
+    badgeBg: '',
+    badgeText: '',
+    Icon: AdvancedBundleIcon,
+  },
+  ultra: {
+    iconBorder: 'border-rose-500/30',
+    iconBg: 'bg-rose-500/10',
+    iconColor: 'text-rose-400',
+    btnFrom: 'from-rose-600',
+    btnTo: 'to-pink-500',
+    badgeBg: '',
+    badgeText: '',
+    Icon: UltraBundleIcon,
+  },
+};
+
+function useBundleCountdown(expiresAt: string | null): { display: string; expired: boolean } {
+  const [display, setDisplay] = useState('');
+  const [expired, setExpired] = useState(false);
+  useEffect(() => {
+    if (!expiresAt) {
+      setDisplay('');
+      setExpired(false);
+      return;
+    }
+    const tick = () => {
+      const diff = Date.parse(expiresAt) - Date.now();
+      if (diff <= 0) { setDisplay('00:00:00'); setExpired(true); return; }
+      setExpired(false);
+      const h = Math.floor(diff / 3_600_000);
+      const m = Math.floor((diff % 3_600_000) / 60_000);
+      const s = Math.floor((diff % 60_000) / 1_000);
+      setDisplay(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
+    };
+    tick();
+    const id = window.setInterval(tick, 1_000);
+    return () => window.clearInterval(id);
+  }, [expiresAt]);
+  return { display, expired };
+}
+
+function BundleCard({
+  bundleId,
+  hints,
+  revives,
+  extraLives,
+  priceStars,
+  discounted,
+  discountedPrice,
+  expiresAt,
+  eligible,
+  isPurchasing,
+  onBuy,
+}: {
+  bundleId: BundleId;
+  hints: number;
+  revives: number;
+  extraLives?: number;
+  priceStars: number;
+  discounted?: boolean;
+  discountedPrice?: number;
+  expiresAt?: string | null;
+  eligible?: boolean;
+  isPurchasing: boolean;
+  onBuy: () => void;
+}) {
+  const { t } = useTranslation();
+  const theme = BUNDLE_THEME[bundleId];
+  const { display: countdown, expired: timerExpired } = useBundleCountdown(
+    discounted && expiresAt ? expiresAt : null,
+  );
+  const showDiscount = discounted && !timerExpired;
+  const effectivePrice = showDiscount && discountedPrice ? discountedPrice : priceStars;
+  const isStarter = bundleId === 'starter';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="rounded-[24px] border border-white/5 bg-[#18181b]/60 overflow-hidden backdrop-blur-md"
+    >
+      {/* Limited / new-user banner */}
+      {isStarter && showDiscount && countdown && (
+        <div className={`flex items-center justify-between px-4 py-2 border-b ${theme.badgeBg}`}>
+          <span className={`text-[11px] font-bold uppercase tracking-widest ${theme.badgeText}`}>
+            ⏰ {t('shop:bundles.limitedBadge')}
+          </span>
+          <span className={`font-mono text-sm font-bold ${theme.badgeText}`}>{countdown}</span>
+        </div>
+      )}
+      {isStarter && !showDiscount && eligible && (
+        <div className="flex items-center px-4 py-2 border-b border-purple-500/20 bg-purple-500/10">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-purple-300">
+            {t('shop:bundles.newUserBadge')}
+          </span>
+        </div>
+      )}
+
+      <div className="p-5">
+        <div className="flex items-center gap-3 mb-4">
+          <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border ${theme.iconBorder} ${theme.iconBg}`}>
+            <theme.Icon size={44} className={theme.iconColor} strokeWidth={1.85} />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-[#f7f8fb]">{t(`shop:bundles.${bundleId}.title`)}</h3>
+            <p className="text-xs text-[#8d93a3] mt-0.5">{t(`shop:bundles.${bundleId}.subtitle`)}</p>
+          </div>
+        </div>
+
+        {/* Contents */}
+        <div className="mb-4 space-y-2">
+          <div className="flex items-center gap-2.5 text-sm text-[#d2d7e5]">
+            <Heart size={18} className="text-rose-400 shrink-0" />
+            <span className="font-medium">{t('shop:bundles.revives', { count: revives })}</span>
+          </div>
+          <div className="flex items-center gap-2.5 text-sm text-[#d2d7e5]">
+            <Lightbulb size={18} className="text-cyan-400 shrink-0" />
+            <span className="font-medium">{t('shop:bundles.hints', { count: hints })}</span>
+          </div>
+          {!!extraLives && (
+            <div className="flex items-center gap-2.5 text-sm text-rose-300">
+              <Heart size={18} className="text-rose-300 shrink-0" strokeWidth={1.5} />
+              <span className="font-medium">{t('shop:bundles.extraLives', { count: extraLives })}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Price + button */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-end gap-1.5">
+            {showDiscount && (
+              <span className="text-xs text-white/35 line-through mb-0.5">{priceStars} ⭐</span>
+            )}
+            <span className="text-2xl font-black text-white">{effectivePrice} ⭐</span>
+          </div>
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.96 }}
+            onClick={onBuy}
+            disabled={isPurchasing || (isStarter && eligible === false)}
+            className={`flex-1 max-w-[160px] py-3 rounded-2xl font-bold text-sm text-white bg-gradient-to-r ${theme.btnFrom} ${theme.btnTo} transition-all active:scale-95 disabled:pointer-events-none disabled:opacity-50`}
+          >
+            {isPurchasing
+              ? t('shop:bundles.buying')
+              : isStarter && eligible === false
+                ? '✓'
+                : t('shop:bundles.buyButton', { price: effectivePrice })}
+          </motion.button>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 export function ShopScreen() {
   const { t } = useTranslation();
   const user = useAppStore((s) => s.user);
@@ -282,6 +637,7 @@ export function ShopScreen() {
   const [error, setError] = useState<string | null>(null);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
   const [purchasingId, setPurchasingId] = useState<string | null>(null);
+  const [purchasingBundle, setPurchasingBundle] = useState<string | null>(null);
   const [tonStatus, setTonStatus] = useState<string | null>(null);
   const [quantities, setQuantities] = useState<QuantityState>({ hints_1: 1, revive_1: 1 });
 
@@ -295,23 +651,18 @@ export function ShopScreen() {
   const [welcomeOffer, setWelcomeOffer] = useState<WelcomeOfferData | null>(null);
   const [showWelcomePopup, setShowWelcomePopup] = useState(false);
   const [offerTimerExpired, setOfferTimerExpired] = useState(false);
-  const [offerCountdown, setOfferCountdown] = useState('');
 
   useEffect(() => {
-    if (!welcomeOffer?.expiresAt) return;
+    if (!welcomeOffer?.expiresAt) {
+      setOfferTimerExpired(false);
+      return;
+    }
     const tick = () => {
-      const diff = Date.parse(welcomeOffer.expiresAt!) - Date.now();
-      if (diff <= 0) {
+      if (Date.parse(welcomeOffer.expiresAt!) - Date.now() <= 0) {
         setOfferTimerExpired(true);
-        setOfferCountdown('00:00:00');
-        return;
+      } else {
+        setOfferTimerExpired(false);
       }
-      const h = Math.floor(diff / 3_600_000);
-      const m = Math.floor((diff % 3_600_000) / 60_000);
-      const s = Math.floor((diff % 60_000) / 1_000);
-      setOfferCountdown(
-        `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
-      );
     };
     tick();
     const id = window.setInterval(tick, 1_000);
@@ -403,6 +754,48 @@ export function ShopScreen() {
       setPurchasingId(null);
     }
   }, [coinBalance, hintBalance, purchasingId, reviveBalance, updateUser]);
+
+  const handleBundlePurchase = useCallback(async (bundleId: BundleId) => {
+    if (purchasingBundle) return;
+    setPurchasingBundle(bundleId);
+    setPurchaseError(null);
+
+    try {
+      const { invoiceUrl } = bundleId === 'starter'
+        ? await shopApi.purchaseWelcomeOffer()
+        : await shopApi.purchaseBundle(bundleId);
+
+      const tg = (window as Window & { Telegram?: { WebApp?: { openInvoice?: (url: string, cb: (status: string) => void) => void } } }).Telegram?.WebApp;
+      if (!tg?.openInvoice) {
+        setPurchaseError('Telegram WebApp not available');
+        setPurchasingBundle(null);
+        return;
+      }
+
+      tg.openInvoice(invoiceUrl, async (status) => {
+        if (status === 'paid') {
+          try {
+            const freshUser = await authApi.getMe();
+            updateUser({
+              hintBalance: freshUser.hintBalance,
+              reviveBalance: freshUser.reviveBalance,
+              extraLives: freshUser.extraLives,
+              ...(bundleId === 'starter' ? { welcomeOfferPurchased: freshUser.welcomeOfferPurchased } : {}),
+            });
+            if (bundleId === 'starter') {
+              setWelcomeOffer((prev) => prev ? { ...prev, eligible: false } : prev);
+            }
+          } catch {
+            // non-critical
+          }
+        }
+        setPurchasingBundle(null);
+      });
+    } catch (err) {
+      setPurchaseError(handleApiError(err));
+      setPurchasingBundle(null);
+    }
+  }, [purchasingBundle, updateUser]);
 
   const handleTonPurchase = useCallback(async (item: ShopItem) => {
     if (purchasingId) return;
@@ -691,54 +1084,60 @@ export function ShopScreen() {
               </button>
             )}
 
-            {/* ── Welcome offer section ── */}
-            {welcomeOffer?.eligible && (
-              <section className="mb-5">
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="rounded-[24px] border border-white/5 bg-[#18181b]/60 overflow-hidden backdrop-blur-md"
-                >
-                  {/* Limited banner */}
-                  {offerDiscounted && (
-                    <div className="flex items-center justify-between px-4 py-2.5 bg-amber-500/15 border-b border-amber-500/20">
-                      <span className="text-xs font-bold uppercase tracking-widest text-amber-300">
-                        ⏰ {t('shop:welcomeOffer.limitedBadge')}
-                      </span>
-                      <span className="font-mono text-sm font-bold text-amber-300">{offerCountdown}</span>
-                    </div>
-                  )}
+            {/* ── Bundles section ── */}
+            {welcomeOffer !== null && (
+              <section className="mb-5 space-y-3">
+                <div className="pl-1 text-sm font-bold uppercase tracking-[0.18em] text-[#677086]">
+                  {t('shop:bundles.sectionTitle')}
+                </div>
 
-                  <div className="p-5">
-                    <div className="flex items-center gap-4">
-                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-purple-500/25 bg-purple-500/10 text-3xl">
-                        🎁
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <h2 className="text-base font-bold text-[#f7f8fb]">{t('shop:welcomeOffer.title')}</h2>
-                        <p className="text-sm text-[#a7abb8]">{t('shop:welcomeOffer.description')}</p>
-                      </div>
-                    </div>
+                {/* Starter — only while eligible (new user offer) */}
+                {welcomeOffer.eligible && (
+                  <BundleCard
+                    bundleId="starter"
+                    hints={welcomeOffer.hints}
+                    revives={welcomeOffer.revives}
+                    priceStars={50}
+                    discounted={offerDiscounted}
+                    discountedPrice={15}
+                    expiresAt={welcomeOffer.expiresAt}
+                    eligible={welcomeOffer.eligible}
+                    isPurchasing={purchasingBundle === 'starter'}
+                    onBuy={() => {
+                      if (offerDiscounted) {
+                        void handleBundlePurchase('starter');
+                      } else {
+                        setShowWelcomePopup(true);
+                      }
+                    }}
+                  />
+                )}
 
-                    <div className="mt-4 flex items-center justify-between gap-3">
-                      <div className="flex items-end gap-2">
-                        {offerDiscounted && (
-                          <span className="text-xs text-white/35 line-through mb-0.5">{t('shop:welcomeOffer.fullPrice')}</span>
-                        )}
-                        <span className="text-2xl font-black text-white">
-                          {offerDiscounted ? t('shop:welcomeOffer.discountedPrice') : t('shop:welcomeOffer.fullPrice')}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowWelcomePopup(true)}
-                        className="flex-1 max-w-[160px] py-3 rounded-2xl font-bold text-sm text-white bg-gradient-to-r from-purple-600 to-pink-600 transition-all active:scale-95"
-                      >
-                        {t('shop:welcomeOffer.buyButton', { price: offerDiscounted ? welcomeOffer!.priceStars : 100 })}
-                      </button>
-                    </div>
-                  </div>
-                </motion.div>
+                <BundleCard
+                  bundleId="standard"
+                  hints={50}
+                  revives={25}
+                  priceStars={150}
+                  isPurchasing={purchasingBundle === 'standard'}
+                  onBuy={() => void handleBundlePurchase('standard')}
+                />
+                <BundleCard
+                  bundleId="advanced"
+                  hints={150}
+                  revives={100}
+                  priceStars={500}
+                  isPurchasing={purchasingBundle === 'advanced'}
+                  onBuy={() => void handleBundlePurchase('advanced')}
+                />
+                <BundleCard
+                  bundleId="ultra"
+                  hints={300}
+                  revives={150}
+                  extraLives={2}
+                  priceStars={1000}
+                  isPurchasing={purchasingBundle === 'ultra'}
+                  onBuy={() => void handleBundlePurchase('ultra')}
+                />
               </section>
             )}
 

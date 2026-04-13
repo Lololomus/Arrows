@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { shopApi, type WelcomeOfferData } from '../api/client';
 import { authApi } from '../api/client';
@@ -17,7 +17,11 @@ function useCountdown(expiresAt: string | null): { display: string; expired: boo
   const [expired, setExpired] = useState(false);
 
   useEffect(() => {
-    if (!expiresAt) return;
+    if (!expiresAt) {
+      setDisplay('');
+      setExpired(false);
+      return;
+    }
 
     const tick = () => {
       const diff = Date.parse(expiresAt) - Date.now();
@@ -26,6 +30,7 @@ function useCountdown(expiresAt: string | null): { display: string; expired: boo
         setExpired(true);
         return;
       }
+      setExpired(false);
       const h = Math.floor(diff / 3_600_000);
       const m = Math.floor((diff % 3_600_000) / 60_000);
       const s = Math.floor((diff % 60_000) / 1_000);
@@ -48,6 +53,7 @@ export function WelcomeOfferModal({ offer, onClose, onPurchased }: WelcomeOfferM
   const { display: countdown, expired: timerExpired } = useCountdown(offer.discounted ? offer.expiresAt : null);
   // Once the countdown hits 0, treat as non-discounted so UI matches server price
   const showAsDiscounted = offer.discounted && !timerExpired;
+  const buttonPriceStars = showAsDiscounted ? offer.priceStars : 50;
   const [buying, setBuying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const closedByPurchase = useRef(false);
@@ -160,7 +166,7 @@ export function WelcomeOfferModal({ offer, onClose, onPurchased }: WelcomeOfferM
           >
             {buying
               ? t('shop:welcomeOffer.buying')
-              : t('shop:welcomeOffer.buyButton', { price: showAsDiscounted ? 25 : 100 })}
+              : t('shop:welcomeOffer.buyButton', { price: buttonPriceStars })}
           </motion.button>
         </div>
       </motion.div>
