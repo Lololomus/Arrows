@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Lightbulb, Play } from 'lucide-react';
+import { Lightbulb, Play, CheckCircle2 } from 'lucide-react';
 import { adsApi, authApi } from '../../api/client';
 import { ADSGRAM_BLOCK_IDS } from '../../config/constants';
 import { translate } from '../../i18n';
@@ -40,13 +40,26 @@ export function HintEmptyModal({
   const [error, setError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [pendingIntentId, setPendingIntentId] = useState<string | null>(null);
+  const [succeeded, setSucceeded] = useState(false);
   const hintConsumedRef = useRef(false);
 
   const consumeHintOnce = useCallback(() => {
     if (hintConsumedRef.current) return;
     hintConsumedRef.current = true;
-    onHintEarned();
-  }, [onHintEarned]);
+    // Show success flash first, then fire the real callback after animation
+    setSucceeded(true);
+  }, []);
+
+  // Auto-close after success flash
+  useEffect(() => {
+    if (!succeeded) return;
+    const t = window.setTimeout(() => {
+      setSucceeded(false);
+      onHintEarned();
+      onClose();
+    }, 1300);
+    return () => window.clearTimeout(t);
+  }, [succeeded, onHintEarned, onClose]);
 
   // Progressive status messages while the ad is loading/playing.
   useEffect(() => {
@@ -74,6 +87,7 @@ export function HintEmptyModal({
   useEffect(() => {
     if (open) {
       hintConsumedRef.current = false;
+      setSucceeded(false);
     }
   }, [open]);
 
@@ -110,7 +124,6 @@ export function HintEmptyModal({
         setInfoMessage(null);
         setError(null);
         if (open) {
-          onClose();
           consumeHintOnce();
         }
       } else if (resolvedIntent.status === 'rejected' || resolvedIntent.status === 'expired') {
@@ -126,7 +139,7 @@ export function HintEmptyModal({
     };
 
     void applyResolved();
-  }, [clearResolved, consumeHintOnce, onClose, open, resolvedIntent, syncHintBalance]);
+  }, [clearResolved, consumeHintOnce, open, resolvedIntent, syncHintBalance]);
 
   // Auto-timeout: if pending hint intent lives longer than 60s, cancel and unblock
   useEffect(() => {
@@ -159,7 +172,6 @@ export function HintEmptyModal({
           }
           clearPendingRewardIntent('reward_hint', pendingIntentId);
           setPendingIntentId(null);
-          onClose();
           consumeHintOnce();
           return;
         }
@@ -201,7 +213,6 @@ export function HintEmptyModal({
         }
         const currentBalance = useAppStore.getState().user?.hintBalance ?? 0;
         useAppStore.getState().updateUser({ hintBalance: currentBalance + hintRewardAmount });
-        onClose();
         consumeHintOnce();
         return;
       }
@@ -237,7 +248,6 @@ export function HintEmptyModal({
       if (result.outcome === 'rejected') {
         if (result.failureCode === 'HINT_BALANCE_NOT_ZERO') {
           await syncHintBalance();
-          onClose();
           consumeHintOnce();
           return;
         }
@@ -253,7 +263,6 @@ export function HintEmptyModal({
         await syncHintBalance();
       }
       clearPendingRewardIntent('reward_hint', result.intentId ?? undefined);
-      onClose();
       consumeHintOnce();
     } catch {
       setError(translate('errors:generic.network'));
@@ -276,46 +285,130 @@ export function HintEmptyModal({
             initial={{ scale: 0.9 }}
             animate={{ scale: 1 }}
             exit={{ scale: 0.9 }}
-            className="w-full max-w-xs bg-slate-900 border border-white/10 rounded-3xl p-6 text-center shadow-2xl"
+            className="w-full max-w-xs bg-slate-900 border border-white/10 rounded-3xl overflow-hidden shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Lightbulb size={32} className="text-amber-400" />
-            </div>
-
-            <h3 className="text-xl font-bold text-white mb-2">
-              {translate('game:hintsEmpty.title')}
-            </h3>
-            <p className="text-sm text-white/60 mb-5">
-              {translate('game:hintsEmpty.description', { count: hintRewardAmount })}
-            </p>
-
-            {infoMessage && <p className="text-sm text-amber-300 mb-3">{infoMessage}</p>}
-            {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
-
-            <div className="flex flex-col gap-3">
-              {adAllowed && (
-                <button
-                  onClick={handleWatchAd}
-                  disabled={loading}
-                  className="w-full py-3.5 bg-gradient-to-b from-amber-500 to-orange-600 rounded-xl text-white font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+            <AnimatePresence mode="wait">
+              {succeeded ? (
+                /* ── SUCCESS VIEW ── */
+                <motion.div
+                  key="success"
+                  initial={{ opacity: 0, scale: 0.85 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ type: 'spring', stiffness: 380, damping: 22 }}
+                  className="p-8 flex flex-col items-center text-center"
                 >
-                  <Play size={18} />
-                  {loading
-                    ? (adStatusMessage ?? translate('common:loading'))
-                    : pendingIntentId
-                      ? translate('game:hintsEmpty.checkReward')
-                      : translate('game:hintsEmpty.watchAd')}
-                </button>
-              )}
+                  {/* Burst ring */}
+                  <div className="relative flex items-center justify-center mb-5">
+                    <motion.div
+                      initial={{ scale: 0.5, opacity: 0.7 }}
+                      animate={{ scale: 2.4, opacity: 0 }}
+                      transition={{ duration: 0.85, ease: 'easeOut' }}
+                      className="absolute rounded-full"
+                      style={{ width: 64, height: 64, background: 'radial-gradient(circle, rgba(250,204,21,0.55) 0%, transparent 70%)' }}
+                    />
+                    {/* Floating particles */}
+                    {[0, 72, 144, 216, 288].map((deg, i) => {
+                      const rad = (deg * Math.PI) / 180;
+                      const tx = Math.cos(rad) * 52;
+                      const ty = Math.sin(rad) * 52;
+                      return (
+                        <motion.div
+                          key={deg}
+                          initial={{ opacity: 0, x: 0, y: 0, scale: 0 }}
+                          animate={{ opacity: [0, 1, 0], x: tx, y: ty, scale: [0, 1.1, 0.6] }}
+                          transition={{ duration: 0.7, delay: 0.08 + i * 0.06, ease: 'easeOut' }}
+                          className="absolute"
+                        >
+                          <Lightbulb
+                            size={14}
+                            className="text-yellow-300"
+                            style={{ filter: 'drop-shadow(0 0 5px #fde047)' }}
+                          />
+                        </motion.div>
+                      );
+                    })}
+                    <motion.div
+                      animate={{ scale: [1, 1.15, 1, 1.08, 1] }}
+                      transition={{ duration: 0.7, delay: 0.1, ease: 'easeInOut' }}
+                    >
+                      <Lightbulb
+                        size={64}
+                        className="text-yellow-300 relative z-10"
+                        style={{ filter: 'drop-shadow(0 0 20px rgba(250,204,21,0.8))' }}
+                      />
+                    </motion.div>
+                  </div>
 
-              <button
-                onClick={onClose}
-                className="w-full py-2.5 text-white/50 text-sm"
-              >
-                {translate('game:hintsEmpty.close')}
-              </button>
-            </div>
+                  <motion.p
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="font-black text-xl uppercase tracking-widest text-white mb-2"
+                    style={{ textShadow: '0 0 20px rgba(250,204,21,0.6)' }}
+                  >
+                    {translate('shop:purchaseSuccess.title')}
+                  </motion.p>
+                  <motion.div
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3 }}
+                    className="flex items-center gap-2 text-yellow-200 text-base font-bold"
+                  >
+                    <CheckCircle2 size={18} className="text-emerald-400" />
+                    <span>{translate('shop:purchaseSuccess.hintAdded', { count: hintRewardAmount })}</span>
+                  </motion.div>
+                </motion.div>
+              ) : (
+                /* ── NORMAL VIEW ── */
+                <motion.div
+                  key="normal"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="p-6 text-center"
+                >
+                  <div className="w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Lightbulb size={32} className="text-amber-400" />
+                  </div>
+
+                  <h3 className="text-xl font-bold text-white mb-2">
+                    {translate('game:hintsEmpty.title')}
+                  </h3>
+                  <p className="text-sm text-white/60 mb-5">
+                    {translate('game:hintsEmpty.description', { count: hintRewardAmount })}
+                  </p>
+
+                  {infoMessage && <p className="text-sm text-amber-300 mb-3">{infoMessage}</p>}
+                  {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
+
+                  <div className="flex flex-col gap-3">
+                    {adAllowed && (
+                      <button
+                        onClick={handleWatchAd}
+                        disabled={loading}
+                        className="w-full py-3.5 bg-gradient-to-b from-amber-500 to-orange-600 rounded-xl text-white font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        <Play size={18} />
+                        {loading
+                          ? (adStatusMessage ?? translate('common:loading'))
+                          : pendingIntentId
+                            ? translate('game:hintsEmpty.checkReward')
+                            : translate('game:hintsEmpty.watchAd')}
+                      </button>
+                    )}
+
+                    <button
+                      onClick={onClose}
+                      className="w-full py-2.5 text-white/50 text-sm"
+                    >
+                      {translate('game:hintsEmpty.close')}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         </motion.div>
       )}

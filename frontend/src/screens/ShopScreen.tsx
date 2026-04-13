@@ -14,6 +14,7 @@ import { useWalletConnectionController } from '../hooks/useWalletConnectionContr
 import { useAppStore } from '../stores/store';
 import { CaseOpenModal } from './game-screen/CaseOpenModal';
 import { WithdrawalModal } from './game-screen/WithdrawalModal';
+import { PurchaseSuccessOverlay, type PurchaseSuccessData } from '../components/ui/PurchaseSuccessOverlay';
 
 const CASE_ENABLED = import.meta.env.DEV;
 
@@ -754,6 +755,15 @@ export function ShopScreen() {
   const [confirmBundle, setConfirmBundle] = useState<(BundleConfig & { bundleId: ExtraBundleId }) | null>(null);
   const [offerTimerExpired, setOfferTimerExpired] = useState(false);
 
+  // Purchase success overlay
+  const [purchaseSuccess, setPurchaseSuccess] = useState<(PurchaseSuccessData & { visible: boolean }) | null>(null);
+  const showPurchaseSuccess = useCallback((data: PurchaseSuccessData) => {
+    setPurchaseSuccess({ ...data, visible: true });
+  }, []);
+  const hidePurchaseSuccess = useCallback(() => {
+    setPurchaseSuccess(null);
+  }, []);
+
   useEffect(() => {
     if (!welcomeOffer?.expiresAt) {
       setOfferTimerExpired(false);
@@ -850,6 +860,14 @@ export function ShopScreen() {
       });
 
       setQuantities((prev) => ({ ...prev, [item.id]: 1 }));
+
+      const purchasedHints   = item.id === 'hints_1'  ? quantity : 0;
+      const purchasedRevives = item.id === 'revive_1' ? quantity : 0;
+      showPurchaseSuccess({
+        type:         item.id === 'hints_1' ? 'hints' : 'revives',
+        hintsCount:   purchasedHints,
+        revivesCount: purchasedRevives,
+      });
     } catch (purchaseErr) {
       setPurchaseError(handleApiError(purchaseErr));
     } finally {
@@ -878,6 +896,8 @@ export function ShopScreen() {
         if (status === 'paid') {
           try {
             const freshUser = await authApi.getMe();
+            const addedHints   = Math.max(0, (freshUser.hintBalance   ?? 0) - (user?.hintBalance   ?? 0));
+            const addedRevives = Math.max(0, (freshUser.reviveBalance ?? 0) - (user?.reviveBalance ?? 0));
             updateUser({
               hintBalance: freshUser.hintBalance,
               reviveBalance: freshUser.reviveBalance,
@@ -889,6 +909,11 @@ export function ShopScreen() {
             } else {
               setConfirmBundle(null);
             }
+            showPurchaseSuccess({
+              type: 'bundle',
+              hintsCount:   addedHints,
+              revivesCount: addedRevives,
+            });
           } catch {
             // non-critical
           }
@@ -989,6 +1014,16 @@ export function ShopScreen() {
   const hasStoreContent = items.length > 0 || tonItems.length > 0 || upgrades.length > 0;
 
   return (
+    <>
+    {purchaseSuccess && (
+      <PurchaseSuccessOverlay
+        type={purchaseSuccess.type}
+        hintsCount={purchaseSuccess.hintsCount}
+        revivesCount={purchaseSuccess.revivesCount}
+        visible={purchaseSuccess.visible}
+        onDone={hidePurchaseSuccess}
+      />
+    )}
     <div className="custom-scrollbar relative h-full overflow-y-auto px-4 pb-nav pt-6">
       <AdaptiveParticles
         variant="bg"
@@ -1421,5 +1456,6 @@ export function ShopScreen() {
         />
       )}
     </div>
+    </>
   );
 }
