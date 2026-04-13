@@ -1083,6 +1083,13 @@ async def purchase_bundle(
         raise api_error(502, "INVOICE_CREATION_FAILED", "Could not create invoice")
 
     if not data.get("ok"):
+        logger.error(
+            "purchase_bundle: Telegram createInvoiceLink failed user=%s bundle=%s error_code=%s description=%s",
+            user.id,
+            bundle_id,
+            data.get("error_code"),
+            data.get("description"),
+        )
         raise api_error(502, "INVOICE_CREATION_FAILED", str(data.get("description", "Unknown error")))
 
     invoice_url = data.get("result")

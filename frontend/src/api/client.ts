@@ -567,6 +567,15 @@ export const authApi = {
 
 export const handleApiError = (error: unknown): string => {
   if (error instanceof ApiError) {
+    if (
+      error.code === 'INVOICE_CREATION_FAILED'
+      && error.message?.trim()
+      && error.message !== 'Could not create invoice'
+      && error.message !== 'Unknown error'
+    ) {
+      return error.message;
+    }
+
     const byCode = getErrorCodeMessage(error.code, '');
     if (byCode) {
       return byCode;
