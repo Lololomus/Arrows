@@ -251,7 +251,7 @@ class Transaction(Base):
     status = Column(String(16), default="completed")  # 'pending', 'completed', 'failed'
     
     # Для TON
-    ton_tx_hash = Column(String(128), nullable=True)
+    ton_tx_hash = Column(String(256), nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow)
     
