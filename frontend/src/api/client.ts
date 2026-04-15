@@ -1221,12 +1221,15 @@ export const caseApi = {
     };
   },
 
-  /** Poll for Stars payment result. Returns null while webhook hasn't fired yet. */
-  pollResult: async (): Promise<CaseOpenResult | null> => {
+  /** Poll for case payment result. Returns null while the result is not ready yet. */
+  pollResult: async (paymentCurrency: 'stars' | 'ad' = 'stars'): Promise<CaseOpenResult | null> => {
+    const endpoint = paymentCurrency === 'stars'
+      ? API_ENDPOINTS.cases.result
+      : `${API_ENDPOINTS.cases.result}?payment_currency=${paymentCurrency}`;
     const raw = await request<{
       status: 'pending' | 'ready';
       case_result?: RawCaseOpenResult;
-    }>(API_ENDPOINTS.cases.result);
+    }>(endpoint);
     if (raw.status !== 'ready' || !raw.case_result) return null;
     return normalizeCaseOpenResult(raw.case_result);
   },

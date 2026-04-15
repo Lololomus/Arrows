@@ -137,6 +137,7 @@ def build_case_result_from_opening(opening: CaseOpening, user: User) -> dict[str
         user=user,
     )
     result["opening_id"] = opening.id
+    result["payment_currency"] = opening.payment_currency
     if opening.payment_currency == "ad":
         return _with_nonzero_rewards_only(result)
     return result
@@ -188,6 +189,7 @@ async def grant_case_rewards(
         user=user,
     )
     result["opening_id"] = opening.id
+    result["payment_currency"] = currency
     return _with_nonzero_rewards_only(result)
 
 
@@ -232,6 +234,7 @@ async def grant_ad_case_rewards(
         user=user,
     )
     result["opening_id"] = opening.id
+    result["payment_currency"] = "ad"
     return _with_nonzero_rewards_only(result)
 
 

@@ -18,6 +18,7 @@ import { AdaptiveParticles } from '../../components/ui/AdaptiveParticles';
 import { caseApi } from '../../api/client';
 import type { CaseInfo, CaseOpenResult, CaseRarity } from '../../game/types';
 import { runRewardedFlow, getRewardedFlowMessage } from '../../services/rewardedAds';
+import { clearPendingRewardIntent, rememberPendingRewardIntent } from '../../services/rewardReconciler';
 
 // ============================================================
 // CONSTANTS & HELPERS
@@ -443,7 +444,11 @@ export function CaseOpenModal({
     }
 
     setPhase('watching_ad');
-    const flowResult = await runRewardedFlow(blockId, { placement: 'reward_ad_case' });
+    const flowResult = await runRewardedFlow(
+      blockId,
+      { placement: 'reward_ad_case' },
+      { optimistic: true },
+    );
 
     if (flowResult.outcome === 'not_completed') {
       setPhase('chest_idle');
@@ -456,15 +461,26 @@ export function CaseOpenModal({
       return;
     }
 
+    if (flowResult.intentId) {
+      rememberPendingRewardIntent({
+        intentId: flowResult.intentId,
+        placement: 'reward_ad_case',
+        adCompleted: true,
+      });
+    }
+
     setPhase('polling_ad');
     pollCancelRef.current = false;
 
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 12; i++) {
       if (pollCancelRef.current) return;
-      await sleep(1500);
+      await sleep(i === 0 ? 350 : 1000);
       try {
-        const res = await caseApi.pollResult();
+        const res = await caseApi.pollResult('ad');
         if (res) {
+          if (flowResult.intentId) {
+            clearPendingRewardIntent('reward_ad_case', flowResult.intentId);
+          }
           pendingResultRef.current = res;
           startOpenAnimation();
           return;
@@ -540,6 +556,7 @@ export function CaseOpenModal({
   }, [currency, handleAdOpen, handleDevOpen, handleStarsOpen, handleTonOpen]);
 
   const handleOpenMore = useCallback(() => {
+    pollCancelRef.current = true;
     onOpenMore(currency);
   }, [currency, onOpenMore]);
 
@@ -568,7 +585,11 @@ export function CaseOpenModal({
   const caseTitle = currency === 'ad' ? t('shop:cases.adCase.name') : t('shop:cases.name');
   const caseDescription = currency === 'ad' ? t('shop:cases.adCase.description') : t('shop:cases.description');
 
-  const canDismiss = phase === 'chest_idle' || phase === 'result' || phase === 'error' || phase === 'watching_ad';
+  const canDismiss = phase === 'chest_idle'
+    || phase === 'result'
+    || phase === 'error'
+    || phase === 'watching_ad'
+    || (currency === 'ad' && phase === 'polling_ad');
   const pendingVisibleRewards = getVisibleRewards(pendingResultRef.current);
   const resultVisibleRewards = getVisibleRewards(result);
   const isSinglePendingReward = pendingVisibleRewards.length === 1;

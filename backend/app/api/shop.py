@@ -753,30 +753,35 @@ async def confirm_case_ton(
 
 @router.get("/cases/result")
 async def poll_case_result(
+    payment_currency: Optional[str] = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Опрос результата открытия кейса через Stars.
-    Webhook записывает результат в Redis; фронтенд читает здесь.
-    Возвращает {status: 'pending'} пока webhook ещё не обработан.
+    Poll the latest case opening result.
+    Redis is the primary handoff; DB fallback is scoped by payment_currency.
     """
+    lookup_currency = payment_currency or "stars"
+    if lookup_currency not in {"stars", "ad"}:
+        raise api_error(400, "INVALID_CASE_PAYMENT_CURRENCY", "Unsupported case payment currency")
+
     redis = await get_redis()
     if redis is not None:
         raw = await redis.get(f"case_result:{user.id}")
         if raw:
             result = json.loads(raw)
-            await redis.delete(f"case_result:{user.id}")
-            # Remember the opening_id so DB fallback won't re-serve it
-            opening_id = result.get("opening_id")
-            if opening_id is not None:
-                await redis.setex(
-                    f"case_consumed:{user.id}", 900, str(opening_id),
-                )
-            return {"status": "ready", "case_result": result}
+            if result.get("payment_currency", lookup_currency) == lookup_currency:
+                await redis.delete(f"case_result:{user.id}")
+                # Remember the opening_id so DB fallback won't re-serve it
+                opening_id = result.get("opening_id")
+                if opening_id is not None:
+                    await redis.setex(
+                        f"case_consumed:{user.id}", 900, str(opening_id),
+                    )
+                return {"status": "ready", "case_result": result}
 
     fallback_result = await get_recent_case_result(
-        user=user, payment_currency="stars", db=db,
+        user=user, payment_currency=lookup_currency, db=db,
     )
     if fallback_result is None:
         return {"status": "pending"}
