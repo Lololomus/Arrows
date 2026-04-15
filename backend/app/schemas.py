@@ -69,6 +69,8 @@ class UserResponse(BaseModel):
     onboarding_shown: bool = False
     welcome_offer_opened_at: Optional[str] = None
     welcome_offer_purchased: bool = False
+    # TODO: ВРЕМЕННО для тестирования — убрать после публичного запуска Fragments
+    is_admin: bool = False
 
     class Config:
         from_attributes = True
@@ -570,7 +572,7 @@ class ClaimReviveResponse(BaseModel):
     session_id: str
 
 
-RewardPlacement = Literal["reward_daily_coins", "reward_hint", "reward_revive", "reward_spin_retry", "reward_task"]
+RewardPlacement = Literal["reward_daily_coins", "reward_hint", "reward_revive", "reward_spin_retry", "reward_task", "reward_ad_case"]
 RewardIntentStatus = Literal["pending", "granted", "rejected", "expired"]
 
 
@@ -779,3 +781,75 @@ class UserbotOrderResolveRequest(BaseModel):
     action: Literal["mark_completed", "mark_failed", "retry"]
     note: Optional[str] = Field(default=None, max_length=256)
     telegram_result_json: Optional[dict] = None
+
+
+# ============================================
+# CONTRACTS (Fragment Contracts)
+# ============================================
+
+class ContractStageDto(BaseModel):
+    index: int
+    metric: str
+    target: int
+    title_ru: str = ""
+    title_en: str = ""
+    progress_current: int
+    is_current: bool
+    is_completed: bool
+    is_completable: bool   # True если прогресс >= target (только для текущего активного этапа)
+    snapshot_value: Optional[int] = None
+
+
+class UserContractStateDto(BaseModel):
+    status: str  # active | reward_ready | collecting | completed
+    current_stage_index: int
+    stages: List[ContractStageDto]
+    activated_at: str
+    completed_at: Optional[str] = None
+    reward_claim_status: Optional[str] = None  # None | sending | delivered | failed
+    has_pending_action: bool
+
+
+class ContractDto(BaseModel):
+    id: str
+    type: str                       # simple_gift | nft_gift
+    title_ru: str
+    title_en: str
+    emoji: str
+    gift_star_cost: int
+    total_quantity: int
+    remaining_quantity: int         # total - кол-во активированных/завершённых
+    stages_count: int
+    has_active_elsewhere: bool      # True если у юзера активен другой контракт
+    user_state: Optional[UserContractStateDto] = None
+
+
+class ContractsListResponse(BaseModel):
+    contracts: List[ContractDto]
+    has_pending_action: bool        # True если нужно нажать кнопку
+
+
+class ContractStateResponse(BaseModel):
+    contract: ContractDto
+
+
+class ContractCollectResponse(BaseModel):
+    claim_status: str               # sending | delivered | failed
+
+
+class ContractStatusResponse(BaseModel):
+    status: str
+    claim_status: Optional[str] = None
+
+
+class ContractReadinessItem(BaseModel):
+    id: str
+    title_ru: str
+    emoji: str
+    ready: bool
+    issues: List[str]  # пустой список если ready=True
+
+
+class ContractsReadinessResponse(BaseModel):
+    all_ready: bool
+    contracts: List[ContractReadinessItem]

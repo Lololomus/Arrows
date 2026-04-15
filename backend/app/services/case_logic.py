@@ -28,6 +28,46 @@ REWARDS: dict[str, dict[str, int]] = {
     "epic_stars": {"hints": 10, "revives": 5, "coins": 450, "stars": 250},
 }
 
+# Ad case rewards (free) — one item is picked randomly per rarity
+AD_CASE_STAR_REWARD_AMOUNTS = (1, 3, 5)
+
+AD_CASE_REWARD_POOL: dict[str, list[dict[str, int]]] = {
+    "common": [
+        {"hints": 1, "revives": 0, "coins": 0, "stars": 0},
+        {"hints": 0, "revives": 0, "coins": 25, "stars": 0},
+    ],
+    "rare": [
+        {"hints": 3, "revives": 0, "coins": 0, "stars": 0},
+        {"hints": 0, "revives": 1, "coins": 0, "stars": 0},
+        {"hints": 0, "revives": 0, "coins": 100, "stars": 0},
+    ],
+    "epic": [
+        {"hints": 10, "revives": 0, "coins": 0, "stars": 0},
+        {"hints": 0, "revives": 3, "coins": 0, "stars": 0},
+        {"hints": 0, "revives": 0, "coins": 500, "stars": 0},
+        {"hints": 0, "revives": 0, "coins": 0, "stars": 1},
+    ],
+}
+
+
+def determine_ad_case_rarity() -> str:
+    """
+    Determine the rarity for an ad case opening.
+
+    Drop rates:
+      epic   : 5%
+      rare   : 25%
+      common : 70%
+
+    No pity system for the free ad case.
+    """
+    roll = random.random()
+    if roll < 0.05:
+        return "epic"
+    if roll < 0.30:
+        return "rare"
+    return "common"
+
 
 def determine_rarity(pity_counter: int) -> str:
     """
@@ -82,6 +122,11 @@ def build_case_result(
     }
 
 
+def _with_nonzero_rewards_only(result: dict[str, Any]) -> dict[str, Any]:
+    result["rewards"] = [reward for reward in result["rewards"] if int(reward["amount"]) > 0]
+    return result
+
+
 def build_case_result_from_opening(opening: CaseOpening, user: User) -> dict[str, Any]:
     result = build_case_result(
         rarity=opening.rarity,
@@ -92,6 +137,8 @@ def build_case_result_from_opening(opening: CaseOpening, user: User) -> dict[str
         user=user,
     )
     result["opening_id"] = opening.id
+    if opening.payment_currency == "ad":
+        return _with_nonzero_rewards_only(result)
     return result
 
 
@@ -141,7 +188,51 @@ async def grant_case_rewards(
         user=user,
     )
     result["opening_id"] = opening.id
-    return result
+    return _with_nonzero_rewards_only(result)
+
+
+async def grant_ad_case_rewards(
+    user: User,
+    rarity: str,
+    db: AsyncSession,
+) -> dict[str, Any]:
+    """
+    Apply ad case rewards to user and log the opening.
+    Picks one reward randomly from the pool for the given rarity.
+    Does NOT touch the standard pity counter.
+    """
+    reward = dict(random.choice(AD_CASE_REWARD_POOL[rarity]))
+    if reward["stars"] > 0:
+        reward["stars"] = random.choice(AD_CASE_STAR_REWARD_AMOUNTS)
+
+    user.hint_balance += reward["hints"]
+    user.revive_balance += reward["revives"]
+    user.coins += reward["coins"]
+    user.stars_balance += reward["stars"]
+
+    opening = CaseOpening(
+        user_id=user.id,
+        transaction_id=None,
+        rarity=rarity,
+        hints_given=reward["hints"],
+        revives_given=reward["revives"],
+        coins_given=reward["coins"],
+        stars_given=reward["stars"],
+        payment_currency="ad",
+    )
+    db.add(opening)
+    await db.flush()
+
+    result = build_case_result(
+        rarity=rarity,
+        hints=reward["hints"],
+        revives=reward["revives"],
+        coins=reward["coins"],
+        stars=reward["stars"],
+        user=user,
+    )
+    result["opening_id"] = opening.id
+    return _with_nonzero_rewards_only(result)
 
 
 async def create_stars_case_purchase(

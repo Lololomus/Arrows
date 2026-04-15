@@ -14,7 +14,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
+from ..database import get_redis
 from ..models import AdRewardClaim, AdRewardIntent, Transaction, User
+from .case_logic import (
+    CASE_RESULT_REDIS_TTL_SECONDS,
+    determine_ad_case_rarity,
+    grant_ad_case_rewards,
+    serialize_case_result,
+)
 from ..schemas import (
     RewardIntentCreateResponse,
     RewardIntentStatusResponse,
@@ -25,13 +32,18 @@ PLACEMENT_HINT = "reward_hint"
 PLACEMENT_REVIVE = "reward_revive"
 PLACEMENT_SPIN_RETRY = "reward_spin_retry"
 PLACEMENT_TASK = "reward_task"
+PLACEMENT_AD_CASE = "reward_ad_case"
 REWARDED_PLACEMENTS = {
     PLACEMENT_DAILY_COINS,
     PLACEMENT_HINT,
     PLACEMENT_REVIVE,
     PLACEMENT_SPIN_RETRY,
     PLACEMENT_TASK,
+    PLACEMENT_AD_CASE,
 }
+
+AD_CASE_DAILY_LIMIT: int | None = None
+AD_CASE_DAILY_WINDOW = timedelta(hours=24)
 
 INTENT_STATUS_PENDING = "pending"
 INTENT_STATUS_GRANTED = "granted"
@@ -85,7 +97,7 @@ def ensure_eligible(user: User) -> None:
 
 
 def ensure_eligible_for_placement(user: User, placement: str) -> None:
-    if placement in {PLACEMENT_SPIN_RETRY, PLACEMENT_TASK}:
+    if placement in {PLACEMENT_SPIN_RETRY, PLACEMENT_TASK, PLACEMENT_AD_CASE}:
         return
     ensure_eligible(user)
 
@@ -202,6 +214,54 @@ async def get_task_revive_status(db: AsyncSession, user_id: int) -> dict[str, in
     return {
         "used": 1 if resets_at is not None else 0,
         "limit": 1,
+        "resets_at": resets_at,
+    }
+
+
+async def get_ad_case_daily_status(db: AsyncSession, user_id: int) -> dict[str, int | datetime | None]:
+    if AD_CASE_DAILY_LIMIT is None:
+        return {
+            "used": 0,
+            "limit": None,
+            "window_start": None,
+            "resets_at": None,
+        }
+
+    now = utcnow()
+    lookback_from = now - timedelta(hours=48)
+    result = await db.execute(
+        select(AdRewardClaim.created_at)
+        .where(
+            AdRewardClaim.user_id == user_id,
+            AdRewardClaim.placement == PLACEMENT_AD_CASE,
+            AdRewardClaim.created_at >= lookback_from,
+        )
+        .order_by(AdRewardClaim.created_at.asc(), AdRewardClaim.id.asc())
+    )
+    claim_times = [ct for ct in result.scalars().all() if ct is not None]
+
+    window_start: datetime | None = None
+    used_in_window = 0
+    for ct in claim_times:
+        if window_start is None or ct >= window_start + AD_CASE_DAILY_WINDOW:
+            window_start = ct
+            used_in_window = 1
+        else:
+            used_in_window += 1
+
+    resets_at: datetime | None = None
+    if window_start is not None:
+        candidate = window_start + AD_CASE_DAILY_WINDOW
+        if now < candidate:
+            resets_at = candidate
+        else:
+            window_start = None
+            used_in_window = 0
+
+    return {
+        "used": min(used_in_window, AD_CASE_DAILY_LIMIT),
+        "limit": AD_CASE_DAILY_LIMIT,
+        "window_start": window_start,
         "resets_at": resets_at,
     }
 
@@ -365,6 +425,11 @@ async def create_reward_intent(
         task_status = await get_task_revive_status(db, locked_user.id)
         if int(task_status["used"]) >= 1:
             raise HTTPException(status_code=409, detail={"error": FAILURE_DAILY_LIMIT_REACHED})
+    elif placement == PLACEMENT_AD_CASE:
+        if AD_CASE_DAILY_LIMIT is not None:
+            ad_case_status = await get_ad_case_daily_status(db, locked_user.id)
+            if int(ad_case_status["used"]) >= AD_CASE_DAILY_LIMIT:
+                raise HTTPException(status_code=409, detail={"error": FAILURE_DAILY_LIMIT_REACHED})
     else:
         raise HTTPException(status_code=400, detail={"error": "UNKNOWN_PLACEMENT"})
 
@@ -618,6 +683,69 @@ async def _grant_spin_retry(
     return intent
 
 
+async def _grant_ad_case(
+    db: AsyncSession,
+    user: User,
+    intent: AdRewardIntent,
+    *,
+    ad_reference: str | None,
+) -> AdRewardIntent:
+    now = utcnow()
+    daily_status = None
+    if AD_CASE_DAILY_LIMIT is not None:
+        daily_status = await get_ad_case_daily_status(db, user.id)
+        if int(daily_status["used"]) >= AD_CASE_DAILY_LIMIT:
+            return await reject_intent(db, intent, FAILURE_DAILY_LIMIT_REACHED)
+
+    rarity = determine_ad_case_rarity()
+    case_result = await grant_ad_case_rewards(user, rarity, db)
+
+    used_today = None
+    limit_today = None
+    resets_at = None
+    if daily_status is not None:
+        window_start = daily_status["window_start"] if isinstance(daily_status.get("window_start"), datetime) else None
+        if window_start is None:
+            window_start = now
+        used_today = int(daily_status["used"]) + 1
+        limit_today = AD_CASE_DAILY_LIMIT
+        resets_at = window_start + AD_CASE_DAILY_WINDOW
+
+    claim = AdRewardClaim(
+        user_id=user.id,
+        placement=PLACEMENT_AD_CASE,
+        ad_reference=ad_reference,
+        reward_amount=1,
+        claim_day_msk=today_msk(),
+        created_at=now,
+    )
+    db.add(claim)
+
+    intent.status = INTENT_STATUS_GRANTED
+    intent.failure_code = None
+    intent.fulfilled_at = now
+    intent.hint_balance = user.hint_balance
+    intent.coins = user.coins
+    intent.used_today = used_today
+    intent.limit_today = limit_today
+    intent.resets_at = resets_at
+    intent.claim_day_msk = today_msk()
+
+    await db.commit()
+    await db.refresh(intent)
+
+    # Store case result in Redis for frontend to poll via GET /cases/result
+    redis = await get_redis()
+    if redis is not None:
+        await redis.setex(
+            f"case_result:{user.id}",
+            CASE_RESULT_REDIS_TTL_SECONDS,
+            serialize_case_result(case_result),
+        )
+
+    return intent
+
+
 async def grant_intent(
     db: AsyncSession,
     user: User,
@@ -648,6 +776,8 @@ async def grant_intent(
         return await _grant_spin_retry(db, user, intent, ad_reference=ad_reference)
     if intent.placement == PLACEMENT_TASK:
         return await _grant_task_revive(db, user, intent, ad_reference=ad_reference)
+    if intent.placement == PLACEMENT_AD_CASE:
+        return await _grant_ad_case(db, user, intent, ad_reference=ad_reference)
     return await reject_intent(db, intent, "UNKNOWN_PLACEMENT")
 
 

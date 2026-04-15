@@ -13,7 +13,7 @@ from slowapi.errors import RateLimitExceeded
 
 from .config import settings
 from .database import init_db, close_redis
-from .api import ads, admin_fragments, admin_userbot, auth, fragments, game, onboarding, shop, social, spin, tasks, wallet, webhooks
+from .api import ads, admin_fragments, admin_userbot, auth, contracts, fragments, game, onboarding, shop, social, spin, tasks, wallet, webhooks
 from .middleware.security import (
     limiter,
     add_security_headers,
@@ -23,11 +23,37 @@ from .services.ton_processor import ton_processor_loop
 from .services.fragment_processor import fragment_processor_loop
 from .services.userbot_client import userbot_client
 from .services.userbot_processor import userbot_processor_loop
+from .services.contracts_catalog import CONTRACTS
 
 
 # ============================================
 # LIFESPAN
 # ============================================
+
+def _validate_contracts_catalog() -> None:
+    """Печатает в лог состояние каталога контрактов при старте."""
+    is_prod = settings.is_production
+    all_ok = True
+
+    print("📋 Contracts catalog check:")
+    for c in CONTRACTS:
+        issues = []
+        if is_prod and not c.get("telegram_gift_id"):
+            issues.append("telegram_gift_id не задан")
+        if not c.get("stages"):
+            issues.append("нет этапов")
+
+        if issues:
+            all_ok = False
+            print(f"  ❌ {c['emoji']} {c.get('title_ru', c['id'])} ({c['id']}): {', '.join(issues)}")
+        else:
+            print(f"  ✅ {c['emoji']} {c.get('title_ru', c['id'])} ({c['id']}): готов")
+
+    if not all_ok and is_prod:
+        print("  ⚠️  Контракты выше скрыты от пользователей до настройки")
+    elif all_ok:
+        print("  ✅ Все контракты настроены")
+
 
 def validate_runtime_mode() -> None:
     """Fail fast on unsafe production configuration."""
@@ -59,6 +85,10 @@ async def lifespan(app: FastAPI):
     
     await init_db()
     print("✅ Database initialized")
+
+    # Проверка каталога контрактов
+    _validate_contracts_catalog()
+
 
     _ton_task = asyncio.create_task(ton_processor_loop())
     print("✅ TON processor started")
@@ -171,6 +201,7 @@ app.include_router(social.router, prefix=api_prefix)
 app.include_router(spin.router, prefix=api_prefix)
 app.include_router(tasks.router, prefix=api_prefix)
 app.include_router(fragments.router, prefix=api_prefix)
+app.include_router(contracts.router, prefix=api_prefix)
 app.include_router(admin_fragments.router, prefix=api_prefix)
 app.include_router(admin_userbot.router, prefix=api_prefix)
 app.include_router(wallet.router, prefix=api_prefix)

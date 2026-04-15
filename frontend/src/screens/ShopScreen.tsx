@@ -2,8 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useTonConnectUI } from '@tonconnect/ui-react';
-import { Coins, Diamond, Heart, Lightbulb, Minus, Plus, RefreshCcw, ShoppingBag } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
+import { createPortal } from 'react-dom';
+import { Coins, Diamond, Heart, Info, Lightbulb, Minus, Plus, RefreshCcw, ShoppingBag, Star } from 'lucide-react';
 import { authApi, caseApi, handleApiError, shopApi, type WelcomeOfferData } from '../api/client';
+import { ADS_ENABLED, ADSGRAM_BLOCK_IDS } from '../config/constants';
+import { isValidRewardedBlockId } from '../services/adsgram';
 import { WelcomeOfferModal } from '../components/WelcomeOfferModal';
 import { AdaptiveParticles } from '../components/ui/AdaptiveParticles';
 import { HeaderBar } from '../components/ui/HeaderBar';
@@ -17,6 +21,7 @@ import { WithdrawalModal } from './game-screen/WithdrawalModal';
 import { PurchaseSuccessOverlay, type PurchaseSuccessData } from '../components/ui/PurchaseSuccessOverlay';
 
 const CASE_ENABLED = import.meta.env.DEV;
+const AD_CASE_ENABLED = import.meta.env.DEV || (ADS_ENABLED && isValidRewardedBlockId(ADSGRAM_BLOCK_IDS.rewardAdCase));
 
 function buildCommentPayload(comment: string): string {
   const encoder = new TextEncoder();
@@ -747,6 +752,8 @@ export function ShopScreen() {
   const [caseInfo, setCaseInfo] = useState<CaseInfo | null>(null);
   const [caseModalOpen, setCaseModalOpen] = useState(false);
   const [caseCurrency, setCaseCurrency] = useState<'stars' | 'ton'>('stars');
+  const [adCaseModalOpen, setAdCaseModalOpen] = useState(false);
+  const [showAdCaseInfo, setShowAdCaseInfo] = useState(false);
   const [withdrawalOpen, setWithdrawalOpen] = useState(false);
 
   // Welcome offer
@@ -1119,6 +1126,49 @@ export function ShopScreen() {
               </div>
             )}
 
+            {/* ── Ad Case section ── */}
+            {AD_CASE_ENABLED && (
+              <section className="mb-5">
+                <div className="pl-1 mb-3 text-sm font-bold uppercase tracking-[0.18em] text-[#677086]">
+                  {t('shop:cases.adCase.sectionTitle')}
+                </div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="relative rounded-[24px] border border-white/5 bg-[#18181b]/60 p-5 backdrop-blur-md overflow-hidden"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setShowAdCaseInfo(true)}
+                    className="absolute top-3.5 right-3.5 z-10 w-10 h-10 flex items-center justify-center rounded-xl bg-white/10 border border-white/20 text-white/75 hover:text-white hover:bg-white/15 active:scale-95 transition-all backdrop-blur-sm shadow-[0_4px_14px_rgba(0,0,0,0.28)] focus-visible:outline-none"
+                    aria-label={t('shop:cases.adCase.info.title')}
+                  >
+                    <Info size={21} />
+                  </button>
+
+                  <div className="flex items-start gap-4 pr-12">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-green-500/25 bg-green-500/10 text-3xl">
+                      📺
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h2 className="text-lg font-bold text-[#f7f8fb]">{t('shop:cases.adCase.name')}</h2>
+                      <p className="mt-0.5 text-sm text-[#a7abb8]">{t('shop:cases.adCase.description')}</p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setAdCaseModalOpen(true)}
+                    className="mt-4 w-full py-3 rounded-2xl font-bold text-sm text-white transition-all active:scale-95"
+                    style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)' }}
+                  >
+                    📺 {t('shop:cases.adCase.watchAd')}
+                  </button>
+                </motion.div>
+              </section>
+            )}
+
             {/* ── Case section ── */}
             {CASE_ENABLED && caseInfo && (
               <section className="mb-5">
@@ -1395,6 +1445,155 @@ export function ShopScreen() {
           </div>
         )}
       </div>
+
+      {/* Ad case info sheet */}
+      {AD_CASE_ENABLED && typeof document !== 'undefined' && createPortal(
+        <AnimatePresence>
+          {showAdCaseInfo && (
+            <>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setShowAdCaseInfo(false)}
+                className="fixed inset-0 bg-black/55 backdrop-blur-[2px] z-[2000]"
+              />
+              <motion.div
+                initial={{ y: '100%' }}
+                animate={{ y: 0 }}
+                exit={{ y: '100%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                drag="y"
+                dragConstraints={{ top: 0, bottom: 0 }}
+                dragElastic={0.2}
+                onDragEnd={(_e, info) => {
+                  if (info.offset.y > 100 || info.velocity.y > 500) setShowAdCaseInfo(false);
+                }}
+                className="fixed bottom-0 left-0 right-0 z-[2001] bg-[#1a1a24] rounded-t-[32px] border-t border-green-500/30 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] flex flex-col"
+                style={{ maxHeight: '85vh', paddingBottom: 'var(--app-safe-bottom)' }}
+              >
+                {/* Drag handle */}
+                <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mt-4 mb-3 shrink-0" />
+
+                <div className="text-center px-6 pb-4 shrink-0">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-500/10 border border-green-500/20 mb-4 text-3xl">
+                    📺
+                  </div>
+                  <h3 className="text-2xl font-black text-white uppercase tracking-wide drop-shadow-md">
+                    {t('shop:cases.adCase.info.title')}
+                  </h3>
+                  <p className="mt-1 text-sm text-white/40">{t('shop:cases.adCase.info.dailyLimit')}</p>
+                </div>
+
+                <div className="overflow-y-auto overscroll-contain px-6 pb-6 flex-1 min-h-0">
+                  <div className="space-y-3">
+                    {/* Common */}
+                    <div className="rounded-2xl border border-slate-500/20 bg-slate-500/[0.06] p-4">
+                      <div className="flex items-center gap-2 mb-2.5">
+                        <div className="w-2.5 h-2.5 rounded-full bg-slate-400" />
+                        <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
+                          {t('shop:cases.adCase.info.rarityCommon')}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <span className="flex items-center gap-1.5 rounded-xl border border-slate-500/20 bg-black/20 px-3 py-1.5 text-sm font-medium text-[#d2d7e5]">
+                          <Lightbulb size={14} className="text-cyan-400 shrink-0" /> 1
+                        </span>
+                        <span className="flex items-center gap-1.5 rounded-xl border border-slate-500/20 bg-black/20 px-3 py-1.5 text-sm font-medium text-[#d2d7e5]">
+                          <Coins size={14} className="text-amber-400 shrink-0" /> 25
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Rare */}
+                    <div className="rounded-2xl border border-purple-500/25 bg-purple-500/[0.06] p-4">
+                      <div className="flex items-center gap-2 mb-2.5">
+                        <div className="w-2.5 h-2.5 rounded-full bg-purple-400" />
+                        <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-purple-400">
+                          {t('shop:cases.adCase.info.rarityRare')}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <span className="flex items-center gap-1.5 rounded-xl border border-purple-500/20 bg-black/20 px-3 py-1.5 text-sm font-medium text-[#d2d7e5]">
+                          <Lightbulb size={14} className="text-cyan-400 shrink-0" /> 3
+                        </span>
+                        <span className="flex items-center gap-1.5 rounded-xl border border-purple-500/20 bg-black/20 px-3 py-1.5 text-sm font-medium text-[#d2d7e5]">
+                          <Heart size={14} className="text-rose-400 shrink-0" /> 1
+                        </span>
+                        <span className="flex items-center gap-1.5 rounded-xl border border-purple-500/20 bg-black/20 px-3 py-1.5 text-sm font-medium text-[#d2d7e5]">
+                          <Coins size={14} className="text-amber-400 shrink-0" /> 100
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Epic */}
+                    <div className="rounded-2xl border border-amber-500/30 bg-amber-500/[0.06] p-4">
+                      <div className="flex items-center gap-2 mb-2.5">
+                        <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+                        <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-amber-400">
+                          {t('shop:cases.adCase.info.rarityEpic')}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <span className="flex items-center gap-1.5 rounded-xl border border-amber-500/20 bg-black/20 px-3 py-1.5 text-sm font-medium text-[#d2d7e5]">
+                          <Lightbulb size={14} className="text-cyan-400 shrink-0" /> 10
+                        </span>
+                        <span className="flex items-center gap-1.5 rounded-xl border border-amber-500/20 bg-black/20 px-3 py-1.5 text-sm font-medium text-[#d2d7e5]">
+                          <Heart size={14} className="text-rose-400 shrink-0" /> 3
+                        </span>
+                        <span className="flex items-center gap-1.5 rounded-xl border border-amber-500/20 bg-black/20 px-3 py-1.5 text-sm font-medium text-[#d2d7e5]">
+                          <Coins size={14} className="text-amber-400 shrink-0" /> 500
+                        </span>
+                        <span className="flex items-center gap-1.5 rounded-xl border border-amber-500/20 bg-black/20 px-3 py-1.5 text-sm font-medium text-[#d2d7e5]">
+                          <Star size={14} className="text-yellow-400 shrink-0" /> 1 / 3 / 5
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Jackpot */}
+                    <div className="rounded-2xl border border-yellow-400/40 bg-gradient-to-br from-yellow-500/10 to-amber-600/5 p-4 shadow-[0_0_20px_rgba(234,179,8,0.1)]">
+                      <div className="flex items-center gap-2 mb-2.5">
+                        <span className="text-base leading-none">✨</span>
+                        <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-yellow-400">
+                          {t('shop:cases.adCase.info.rarityJackpot')}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <span className="flex items-center gap-1.5 rounded-xl border border-yellow-400/30 bg-black/20 px-3 py-1.5 text-sm font-bold text-yellow-300">
+                          <Star size={14} className="text-yellow-400 shrink-0" /> 1 000
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>,
+        document.body,
+      )}
+
+      {/* Ad case opening modal */}
+      {AD_CASE_ENABLED && (
+        <CaseOpenModal
+          isOpen={adCaseModalOpen}
+          currency="ad"
+          blockId={ADSGRAM_BLOCK_IDS.rewardAdCase}
+          onClose={() => setAdCaseModalOpen(false)}
+          onOpenMore={() => {
+            setAdCaseModalOpen(false);
+            setTimeout(() => setAdCaseModalOpen(true), 300);
+          }}
+          onRewardGranted={(result: CaseOpenResult) => {
+            updateUser({
+              hintBalance: result.hintBalance,
+              reviveBalance: result.reviveBalance,
+              coins: result.coins,
+              starsBalance: result.starsBalance,
+            });
+          }}
+        />
+      )}
 
       {/* Case opening modal */}
       {CASE_ENABLED && caseInfo && (

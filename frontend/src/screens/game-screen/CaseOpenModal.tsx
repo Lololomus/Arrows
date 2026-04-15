@@ -17,6 +17,7 @@ import { Coins, Heart, Lightbulb, Star } from 'lucide-react';
 import { AdaptiveParticles } from '../../components/ui/AdaptiveParticles';
 import { caseApi } from '../../api/client';
 import type { CaseInfo, CaseOpenResult, CaseRarity } from '../../game/types';
+import { runRewardedFlow, getRewardedFlowMessage } from '../../services/rewardedAds';
 
 // ============================================================
 // CONSTANTS & HELPERS
@@ -144,13 +145,66 @@ const RARITY_THEME: Record<CaseRarity, RarityTheme> = {
 // REWARD ICON
 // ============================================================
 
-function RewardIcon({ type }: { type: string }) {
-  const cls = 'w-5 h-5';
+function RewardIcon({ type, featured = false }: { type: string; featured?: boolean }) {
+  const cls = featured ? 'w-9 h-9' : 'w-5 h-5';
   if (type === 'hints') return <Lightbulb className={`${cls} text-cyan-400`} />;
   if (type === 'revives') return <Heart className={`${cls} text-rose-400`} />;
   if (type === 'coins') return <Coins className={`${cls} text-yellow-400`} />;
   if (type === 'stars') return <Star className={`${cls} text-yellow-300`} />;
   return null;
+}
+
+function getVisibleRewards(result: CaseOpenResult | null | undefined): CaseOpenResult['rewards'] {
+  return (result?.rewards ?? []).filter((item) => item.amount > 0);
+}
+
+function getRewardIconFrameClass(type: string, featured: boolean): string {
+  const sizeClass = featured ? 'h-16 w-16' : 'h-8 w-8';
+  const base = `${sizeClass} flex items-center justify-center rounded-2xl border`;
+
+  if (type === 'hints') return `${base} border-cyan-300/25 bg-cyan-400/10`;
+  if (type === 'revives') return `${base} border-rose-300/25 bg-rose-400/10`;
+  if (type === 'coins') return `${base} border-amber-300/25 bg-amber-400/10`;
+  if (type === 'stars') return `${base} border-yellow-300/30 bg-yellow-400/10`;
+  return `${base} border-white/15 bg-white/10`;
+}
+
+function getRewardCardClass(featured: boolean): string {
+  if (featured) {
+    return (
+      'relative flex w-full max-w-[280px] min-h-[160px] flex-col items-center justify-center ' +
+      'gap-3 overflow-hidden rounded-[28px] border border-white/15 bg-white/[0.12] px-6 py-5 ' +
+      'shadow-[0_18px_45px_rgba(0,0,0,0.28)] backdrop-blur-xl'
+    );
+  }
+  return 'flex flex-col items-center gap-1.5 bg-white/10 rounded-2xl px-4 py-3 min-w-[72px]';
+}
+
+function RewardContent({
+  item,
+  label,
+  featured = false,
+}: {
+  item: CaseOpenResult['rewards'][number];
+  label: string;
+  featured?: boolean;
+}) {
+  return (
+    <>
+      {featured && (
+        <div className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-white/45 to-transparent" />
+      )}
+      <div className={getRewardIconFrameClass(item.type, featured)}>
+        <RewardIcon type={item.type} featured={featured} />
+      </div>
+      <span className={featured ? 'text-4xl font-black leading-none text-white' : 'text-white font-bold text-lg'}>
+        +{item.amount}
+      </span>
+      <span className={featured ? 'text-sm font-bold uppercase tracking-[0.16em] text-white/55' : 'text-gray-400 text-xs'}>
+        {label}
+      </span>
+    </>
+  );
 }
 
 // ============================================================
@@ -162,6 +216,8 @@ type Phase =
   | 'create_invoice'
   | 'polling_stars'
   | 'awaiting_ton'
+  | 'watching_ad'
+  | 'polling_ad'
   | 'opening'
   | 'revealing'
   | 'result'
@@ -173,10 +229,11 @@ type Phase =
 
 export interface CaseOpenModalProps {
   isOpen: boolean;
-  currency: 'stars' | 'ton';
-  caseInfo: CaseInfo;
+  currency: 'stars' | 'ton' | 'ad';
+  caseInfo?: CaseInfo;
+  blockId?: string;
   onClose: () => void;
-  onOpenMore: (currency: 'stars' | 'ton') => void;
+  onOpenMore: (currency: 'stars' | 'ton' | 'ad') => void;
   onRewardGranted?: (result: CaseOpenResult) => void;
 }
 
@@ -184,6 +241,7 @@ export function CaseOpenModal({
   isOpen,
   currency,
   caseInfo,
+  blockId,
   onClose,
   onOpenMore,
   onRewardGranted,
@@ -199,6 +257,7 @@ export function CaseOpenModal({
   const [revealedCount, setRevealedCount] = useState(0);
   const pendingResultRef = useRef<CaseOpenResult | null>(null);
   const pollCancelRef = useRef(false);
+  const rewardGrantedRef = useRef(false);
 
   // Reset when modal opens
   useEffect(() => {
@@ -211,6 +270,7 @@ export function CaseOpenModal({
       setRevealedCount(0);
       pendingResultRef.current = null;
       pollCancelRef.current = false;
+      rewardGrantedRef.current = false;
     }
     return () => { pollCancelRef.current = true; };
   }, [isOpen]);
@@ -327,8 +387,9 @@ export function CaseOpenModal({
         setIsBurst(false);
         setPhase('revealing');
         const res = pendingResultRef.current!;
+        const visibleRewards = getVisibleRewards(res);
         // Stagger reveal items
-        res.rewards.forEach((_, idx) => {
+        visibleRewards.forEach((_, idx) => {
           setTimeout(() => setRevealedCount(idx + 1), idx * 200 + 100);
         });
         // Move to result after all items
@@ -336,13 +397,16 @@ export function CaseOpenModal({
           setResult(res);
           setPhase('result');
           const rarity = res.rarity;
-          onRewardGranted?.(res);
+          if (!rewardGrantedRef.current) {
+            rewardGrantedRef.current = true;
+            onRewardGranted?.(res);
+          }
           if (rarity === 'epic' || rarity === 'epic_stars') {
             triggerHaptic('success');
           } else if (rarity === 'rare') {
             triggerHaptic('light');
           }
-        }, res.rewards.length * 200 + 600);
+        }, visibleRewards.length * 200 + 600);
       }, 800);
     }, 550);
   }
@@ -370,9 +434,57 @@ export function CaseOpenModal({
     return false;
   }
 
+  // ── Ad flow ─────────────────────────────────────────────
+  const handleAdOpen = useCallback(async () => {
+    if (!blockId) {
+      setErrorMsg(t('shop:cases.error.adFailed'));
+      setPhase('error');
+      return;
+    }
+
+    setPhase('watching_ad');
+    const flowResult = await runRewardedFlow(blockId, { placement: 'reward_ad_case' });
+
+    if (flowResult.outcome === 'not_completed') {
+      setPhase('chest_idle');
+      return;
+    }
+
+    if (flowResult.outcome !== 'granted' && flowResult.outcome !== 'completed') {
+      setErrorMsg(getRewardedFlowMessage('reward_ad_case', flowResult));
+      setPhase('error');
+      return;
+    }
+
+    setPhase('polling_ad');
+    pollCancelRef.current = false;
+
+    for (let i = 0; i < 15; i++) {
+      if (pollCancelRef.current) return;
+      await sleep(1500);
+      try {
+        const res = await caseApi.pollResult();
+        if (res) {
+          pendingResultRef.current = res;
+          startOpenAnimation();
+          return;
+        }
+      } catch {
+        // keep polling
+      }
+    }
+
+    setErrorMsg(t('shop:cases.error.timeout'));
+    setPhase('error');
+  }, [blockId, startOpenAnimation, t]);
+
   // ── Retry Stars poll ────────────────────────────────────
   const retryPoll = useCallback(async () => {
     setErrorMsg('');
+    if (currency === 'ad') {
+      void handleAdOpen();
+      return;
+    }
     if (currency === 'ton') {
       const txId = readPendingCaseTxId();
       if (txId == null) {
@@ -406,64 +518,80 @@ export function CaseOpenModal({
     }
     setErrorMsg(t('shop:cases.error.timeout'));
     setPhase('error');
-  }, [currency, pollTonConfirmation, startOpenAnimation, t]);
+  }, [currency, handleAdOpen, pollTonConfirmation, startOpenAnimation, t]);
 
   const handleDevOpen = useCallback(async () => {
-    setPhase('polling_stars'); // reuse polling phase as "loading"
+    setPhase('polling_stars');
     try {
-      const res = await caseApi.openDev();
+      const res = currency === 'ad' ? await caseApi.openDevAd() : await caseApi.openDev();
       pendingResultRef.current = res;
       startOpenAnimation();
     } catch {
       setErrorMsg(t('shop:cases.error.devFailed'));
       setPhase('error');
     }
-  }, [startOpenAnimation, t]);
+  }, [currency, startOpenAnimation, t]);
 
   const handleOpen = useCallback(() => {
     if (import.meta.env.DEV) { void handleDevOpen(); return; }
     if (currency === 'stars') handleStarsOpen();
-    else handleTonOpen();
-  }, [currency, handleDevOpen, handleStarsOpen, handleTonOpen]);
+    else if (currency === 'ton') handleTonOpen();
+    else handleAdOpen();
+  }, [currency, handleAdOpen, handleDevOpen, handleStarsOpen, handleTonOpen]);
 
   const handleOpenMore = useCallback(() => {
     onOpenMore(currency);
   }, [currency, onOpenMore]);
 
+  const handleDismiss = useCallback(() => {
+    pollCancelRef.current = true;
+    setIsShaking(false);
+    setIsBurst(false);
+
+    const grantedResult = result ?? pendingResultRef.current;
+    if (grantedResult && !rewardGrantedRef.current) {
+      rewardGrantedRef.current = true;
+      onRewardGranted?.(grantedResult);
+    }
+
+    onClose();
+  }, [onClose, onRewardGranted, result]);
+
   // ============================================================
   // RENDER
   // ============================================================
-
-  if (!isOpen) return null;
 
   const rarity = result?.rarity ?? 'common';
   const theme = RARITY_THEME[rarity];
   const isResultPhase = phase === 'result';
   const rarityLabel = t(`shop:cases.rarity.${rarity}`);
+  const caseTitle = currency === 'ad' ? t('shop:cases.adCase.name') : t('shop:cases.name');
+  const caseDescription = currency === 'ad' ? t('shop:cases.adCase.description') : t('shop:cases.description');
 
-  const canDismiss = phase === 'chest_idle' || phase === 'result' || phase === 'error';
+  const canDismiss = phase === 'chest_idle' || phase === 'result' || phase === 'error' || phase === 'watching_ad';
+  const pendingVisibleRewards = getVisibleRewards(pendingResultRef.current);
+  const resultVisibleRewards = getVisibleRewards(result);
+  const isSinglePendingReward = pendingVisibleRewards.length === 1;
+  const isSingleResultReward = resultVisibleRewards.length === 1;
 
   const modal = (
     <AnimatePresence>
       {isOpen && (
-        <motion.div
-          key="case-modal-overlay"
-          className="fixed inset-0 z-[2000] flex flex-col items-center justify-end"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
-        >
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/75 backdrop-blur-[2px]"
-            onClick={canDismiss ? onClose : undefined}
+        <>
+          <motion.div
+            key="case-modal-backdrop"
+            className="fixed inset-0 z-[2000] bg-black/55 backdrop-blur-[2px]"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={canDismiss ? handleDismiss : undefined}
           />
 
           {/* Sheet */}
           <motion.div
             key="case-modal-sheet"
-            className={`relative w-full rounded-t-[32px] bg-gradient-to-b ${isResultPhase ? theme.bg : 'from-gray-900 to-slate-900'} overflow-hidden shadow-[0_-10px_40px_rgba(0,0,0,0.5)]`}
+            className={`fixed bottom-0 left-0 right-0 z-[2001] flex flex-col rounded-t-[32px] border-t border-white/10 bg-gradient-to-b ${isResultPhase ? theme.bg : 'from-[#1a1a24] to-[#11131f]'} overflow-hidden shadow-[0_-10px_40px_rgba(0,0,0,0.5)]`}
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
@@ -472,7 +600,11 @@ export function CaseOpenModal({
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={0.2}
             onDragEnd={(_e: never, info: { offset: { y: number }; velocity: { y: number } }) => {
-              if (canDismiss && (info.offset.y > 100 || info.velocity.y > 500)) onClose();
+              const closeOffset = phase === 'result' ? 32 : 100;
+              const closeVelocity = phase === 'result' ? 250 : 500;
+              if (canDismiss && (info.offset.y > closeOffset || info.velocity.y > closeVelocity)) {
+                handleDismiss();
+              }
             }}
             style={{
               maxHeight: '90dvh',
@@ -497,7 +629,7 @@ export function CaseOpenModal({
             <div className="px-6 pb-8 pt-2 flex flex-col items-center gap-5">
 
               {/* ── Chest + status phases ── */}
-              {(phase === 'chest_idle' || phase === 'create_invoice' || phase === 'polling_stars' || phase === 'awaiting_ton' || phase === 'opening') && (
+              {(phase === 'chest_idle' || phase === 'create_invoice' || phase === 'polling_stars' || phase === 'awaiting_ton' || phase === 'watching_ad' || phase === 'polling_ad' || phase === 'opening') && (
                 <>
                   {/* Chest graphic */}
                   <div className="relative flex items-center justify-center w-36 h-36">
@@ -555,8 +687,8 @@ export function CaseOpenModal({
                   <div className="text-center">
                     {phase === 'chest_idle' && (
                       <>
-                        <p className="text-white font-semibold text-lg">{t('shop:cases.name')}</p>
-                        <p className="text-gray-400 text-sm mt-1">{t('shop:cases.description')}</p>
+                        <p className="text-white font-semibold text-lg">{caseTitle}</p>
+                        <p className="text-gray-400 text-sm mt-1">{caseDescription}</p>
                       </>
                     )}
                     {phase === 'create_invoice' && (
@@ -568,10 +700,16 @@ export function CaseOpenModal({
                     {phase === 'awaiting_ton' && (
                       <p className="text-gray-300 text-sm animate-pulse">{t('shop:cases.phase.awaitingTon')}</p>
                     )}
+                    {phase === 'watching_ad' && (
+                      <p className="text-gray-300 text-sm animate-pulse">{t('shop:cases.phase.watchingAd')}</p>
+                    )}
+                    {phase === 'polling_ad' && (
+                      <p className="text-gray-300 text-sm animate-pulse">{t('shop:cases.phase.pollingAd')}</p>
+                    )}
                   </div>
 
-                  {/* Pity bar */}
-                  {phase === 'chest_idle' && (
+                  {/* Pity bar — only for paid cases */}
+                  {phase === 'chest_idle' && currency !== 'ad' && caseInfo && (
                     <div className="w-full">
                       <div className="flex justify-between text-xs text-gray-500 mb-1">
                         <span>
@@ -600,18 +738,22 @@ export function CaseOpenModal({
                       style={{
                         background: currency === 'stars'
                           ? 'linear-gradient(135deg, #7C3AED, #4F46E5)'
-                          : 'linear-gradient(135deg, #0EA5E9, #2563EB)',
+                          : currency === 'ton'
+                            ? 'linear-gradient(135deg, #0EA5E9, #2563EB)'
+                            : 'linear-gradient(135deg, #16a34a, #15803d)',
                       }}
                       whileTap={{ scale: 0.97 }}
                     >
                       {currency === 'stars'
-                        ? `✨ ${t('shop:cases.openButton')} · ${caseInfo.priceStars} ⭐`
-                        : `💎 ${t('shop:cases.openButton')} · ${caseInfo.priceTon} TON`}
+                        ? `✨ ${t('shop:cases.openButton')} · ${caseInfo?.priceStars ?? ''} ⭐`
+                        : currency === 'ton'
+                          ? `💎 ${t('shop:cases.openButton')} · ${caseInfo?.priceTon ?? ''} TON`
+                          : `📺 ${t('shop:cases.adCase.watchAd')}`}
                     </motion.button>
                   )}
 
                   {/* Spinner for processing phases */}
-                  {(phase === 'create_invoice' || phase === 'polling_stars' || phase === 'awaiting_ton') && (
+                  {(phase === 'create_invoice' || phase === 'polling_stars' || phase === 'awaiting_ton' || phase === 'watching_ad' || phase === 'polling_ad') && (
                     <div className="flex gap-1.5">
                       {[0, 1, 2].map((i) => (
                         <motion.div
@@ -630,21 +772,21 @@ export function CaseOpenModal({
               {(phase === 'revealing') && (
                 <div className="flex flex-col items-center gap-5 w-full">
                   <div className="text-5xl">✨</div>
-                  <div className="flex flex-wrap gap-3 justify-center">
-                    {(pendingResultRef.current?.rewards ?? []).map((item, idx) => (
-                      <AnimatePresence key={item.type}>
+                  <div className={isSinglePendingReward ? 'flex w-full justify-center' : 'flex flex-wrap gap-3 justify-center'}>
+                    {pendingVisibleRewards.map((item, idx) => (
+                      <AnimatePresence key={`${item.type}-${idx}`}>
                         {idx < revealedCount && (
                           <motion.div
                             initial={{ y: 30, opacity: 0, scale: 0.7 }}
                             animate={{ y: 0, opacity: 1, scale: 1 }}
                             transition={{ type: 'spring', stiffness: 400, damping: 20 }}
-                            className="flex flex-col items-center gap-1 bg-white/10 rounded-2xl px-4 py-3"
+                            className={getRewardCardClass(isSinglePendingReward)}
                           >
-                            <RewardIcon type={item.type} />
-                            <span className="text-white font-bold text-lg">+{item.amount}</span>
-                            <span className="text-gray-400 text-xs">
-                              {t(`shop:cases.rewards.${item.type}`)}
-                            </span>
+                            <RewardContent
+                              item={item}
+                              label={t(`shop:cases.rewards.${item.type}`)}
+                              featured={isSinglePendingReward}
+                            />
                           </motion.div>
                         )}
                       </AnimatePresence>
@@ -686,23 +828,25 @@ export function CaseOpenModal({
                   )}
 
                   {/* Reward grid */}
-                  <div className="flex flex-wrap gap-3 justify-center w-full">
-                    {result.rewards.map((item, idx) => (
+                  <div className={isSingleResultReward ? 'flex w-full justify-center' : 'flex flex-wrap gap-3 justify-center w-full'}>
+                    {resultVisibleRewards.map((item, idx) => (
                       <motion.div
-                        key={item.type}
+                        key={`${item.type}-${idx}`}
                         initial={{ y: 20, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
                         transition={{ delay: 0.15 + idx * 0.08, type: 'spring', stiffness: 350, damping: 25 }}
-                        className="flex flex-col items-center gap-1.5 bg-white/10 rounded-2xl px-4 py-3 min-w-[72px]"
+                        className={getRewardCardClass(isSingleResultReward)}
                         style={{
                           boxShadow: item.type === 'stars' && rarity === 'epic_stars'
                             ? `0 0 12px 2px rgba(${theme.glowRgb}, 0.5)`
                             : undefined,
                         }}
                       >
-                        <RewardIcon type={item.type} />
-                        <span className="text-white font-bold text-lg">+{item.amount}</span>
-                        <span className="text-gray-400 text-xs">{t(`shop:cases.rewards.${item.type}`)}</span>
+                        <RewardContent
+                          item={item}
+                          label={t(`shop:cases.rewards.${item.type}`)}
+                          featured={isSingleResultReward}
+                        />
                       </motion.div>
                     ))}
                   </div>
@@ -715,17 +859,19 @@ export function CaseOpenModal({
                       style={{
                         background: currency === 'stars'
                           ? 'linear-gradient(135deg, #7C3AED, #4F46E5)'
-                          : 'linear-gradient(135deg, #0EA5E9, #2563EB)',
+                          : currency === 'ton'
+                            ? 'linear-gradient(135deg, #0EA5E9, #2563EB)'
+                            : 'linear-gradient(135deg, #16a34a, #15803d)',
                       }}
                       whileTap={{ scale: 0.97 }}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 0.4 }}
                     >
-                      {t('shop:cases.openMore')}
+                      {currency === 'ad' ? t('shop:cases.adCase.openMore') : t('shop:cases.openMore')}
                     </motion.button>
                     <motion.button
-                      onClick={onClose}
+                      onClick={handleDismiss}
                       className="flex-1 py-3.5 rounded-2xl font-semibold text-sm bg-white/10 text-gray-300 transition-all"
                       whileTap={{ scale: 0.97 }}
                       initial={{ opacity: 0, y: 10 }}
@@ -755,7 +901,7 @@ export function CaseOpenModal({
                       {t('shop:cases.error.retry')}
                     </button>
                     <button
-                      onClick={onClose}
+                      onClick={handleDismiss}
                       className="flex-1 py-3 rounded-2xl bg-white/10 text-gray-300 font-semibold text-sm"
                     >
                       {t('common:close')}
@@ -765,7 +911,7 @@ export function CaseOpenModal({
               )}
             </div>
           </motion.div>
-        </motion.div>
+        </>
       )}
     </AnimatePresence>
   );

@@ -54,6 +54,10 @@ import type {
   CaseOpenResult,
   CaseRarity,
   WithdrawalRequest,
+  ContractDto,
+  ContractsListResponse,
+  UserContractState,
+  ContractStageDto,
 } from '../game/types';
 
 // === NEW: Тип ответа от complete-and-next ===
@@ -1232,10 +1236,19 @@ export const caseApi = {
     return raw.stars_balance;
   },
 
-  /** DEV ONLY — открыть кейс без оплаты */
+  /** DEV ONLY — открыть стандартный кейс без оплаты */
   openDev: async (): Promise<CaseOpenResult> => {
     const raw = await request<{ status: string; case_result: RawCaseOpenResult }>(
       '/shop/cases/open/dev',
+      { method: 'POST' },
+    );
+    return normalizeCaseOpenResult(raw.case_result);
+  },
+
+  /** DEV ONLY — открыть рекламный кейс без просмотра рекламы */
+  openDevAd: async (): Promise<CaseOpenResult> => {
+    const raw = await request<{ status: string; case_result: RawCaseOpenResult }>(
+      '/shop/cases/open/dev-ad',
       { method: 'POST' },
     );
     return normalizeCaseOpenResult(raw.case_result);
@@ -1717,6 +1730,134 @@ export const checkApiHealth = async (): Promise<boolean> => {
   } catch {
     return false;
   }
+};
+
+
+// ============================================
+// CONTRACTS API
+// ============================================
+
+interface RawContractStage {
+  index: number;
+  metric: string;
+  target: number;
+  title_ru: string;
+  title_en: string;
+  progress_current: number;
+  is_current: boolean;
+  is_completed: boolean;
+  is_completable: boolean;
+  snapshot_value: number | null;
+}
+
+interface RawUserContractState {
+  status: string;
+  current_stage_index: number;
+  stages: RawContractStage[];
+  activated_at: string;
+  completed_at: string | null;
+  reward_claim_status: string | null;
+  has_pending_action: boolean;
+}
+
+interface RawContractDto {
+  id: string;
+  type: string;
+  title_ru: string;
+  title_en: string;
+  emoji: string;
+  gift_star_cost: number;
+  total_quantity: number;
+  remaining_quantity: number;
+  stages_count: number;
+  has_active_elsewhere: boolean;
+  user_state: RawUserContractState | null;
+}
+
+interface RawContractsListResponse {
+  contracts: RawContractDto[];
+  has_pending_action: boolean;
+}
+
+function normalizeContractStage(raw: RawContractStage): ContractStageDto {
+  return {
+    index: raw.index,
+    metric: raw.metric,
+    target: raw.target,
+    titleRu: raw.title_ru,
+    titleEn: raw.title_en,
+    progressCurrent: raw.progress_current,
+    isCurrent: raw.is_current,
+    isCompleted: raw.is_completed,
+    isCompletable: raw.is_completable,
+    snapshotValue: raw.snapshot_value,
+  };
+}
+
+function normalizeUserContractState(raw: RawUserContractState): UserContractState {
+  return {
+    status: raw.status as UserContractState['status'],
+    currentStageIndex: raw.current_stage_index,
+    stages: raw.stages.map(normalizeContractStage),
+    activatedAt: raw.activated_at,
+    completedAt: raw.completed_at,
+    rewardClaimStatus: raw.reward_claim_status,
+    hasPendingAction: raw.has_pending_action,
+  };
+}
+
+function normalizeContractDto(raw: RawContractDto): ContractDto {
+  return {
+    id: raw.id,
+    type: raw.type as ContractDto['type'],
+    titleRu: raw.title_ru,
+    titleEn: raw.title_en,
+    emoji: raw.emoji,
+    giftStarCost: raw.gift_star_cost,
+    totalQuantity: raw.total_quantity,
+    remainingQuantity: raw.remaining_quantity,
+    stagesCount: raw.stages_count,
+    hasActiveElsewhere: raw.has_active_elsewhere,
+    userState: raw.user_state ? normalizeUserContractState(raw.user_state) : null,
+  };
+}
+
+export const contractsApi = {
+  getContracts: async (): Promise<ContractsListResponse> => {
+    const raw = await request<RawContractsListResponse>(API_ENDPOINTS.contracts.list);
+    return {
+      contracts: (raw.contracts ?? []).map(normalizeContractDto),
+      hasPendingAction: raw.has_pending_action ?? false,
+    };
+  },
+
+  activate: async (id: string): Promise<ContractDto> => {
+    const raw = await request<{ contract: RawContractDto }>(API_ENDPOINTS.contracts.activate(id), {
+      method: 'POST',
+    });
+    return normalizeContractDto(raw.contract);
+  },
+
+  completeStage: async (id: string): Promise<ContractDto> => {
+    const raw = await request<{ contract: RawContractDto }>(API_ENDPOINTS.contracts.completeStage(id), {
+      method: 'POST',
+    });
+    return normalizeContractDto(raw.contract);
+  },
+
+  collect: async (id: string): Promise<{ claimStatus: string }> => {
+    const raw = await request<{ claim_status: string }>(API_ENDPOINTS.contracts.collect(id), {
+      method: 'POST',
+    });
+    return { claimStatus: raw.claim_status ?? '' };
+  },
+
+  getStatus: async (id: string): Promise<{ status: string; claimStatus: string | null }> => {
+    const raw = await request<{ status: string; claim_status: string | null }>(
+      API_ENDPOINTS.contracts.status(id),
+    );
+    return { status: raw.status, claimStatus: raw.claim_status ?? null };
+  },
 };
 
 const legacyHandleApiError = (error: unknown): string => {

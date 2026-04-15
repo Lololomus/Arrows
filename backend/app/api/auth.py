@@ -52,6 +52,19 @@ def get_jwt_expiration_timestamp(issued_at: int) -> int:
     return issued_at + settings.JWT_EXPIRE_HOURS * 3600
 
 
+# TODO: ВРЕМЕННО для тестирования — убрать после публичного запуска Fragments
+def _parse_admin_ids() -> frozenset[int]:
+    raw = settings.ADMIN_TELEGRAM_ID or ""
+    ids: set[int] = set()
+    for part in raw.split(","):
+        token = part.strip()
+        if token.isdigit():
+            ids.add(int(token))
+    return frozenset(ids)
+
+_ADMIN_IDS = _parse_admin_ids()
+
+
 def serialize_user(user: User) -> dict:
     return {
         "id": user.id,
@@ -79,6 +92,8 @@ def serialize_user(user: User) -> dict:
         "onboarding_shown": bool(getattr(user, "onboarding_shown", False)),
         "welcome_offer_opened_at": getattr(user, "welcome_offer_opened_at", None) and user.welcome_offer_opened_at.isoformat(),
         "welcome_offer_purchased": bool(getattr(user, "welcome_offer_purchased", False)),
+        # TODO: ВРЕМЕННО для тестирования — убрать после публичного запуска Fragments
+        "is_admin": user.telegram_id in _ADMIN_IDS,
     }
 
 

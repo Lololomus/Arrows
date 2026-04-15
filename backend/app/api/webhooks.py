@@ -33,6 +33,7 @@ from ..services.ad_rewards import (
     PLACEMENT_REVIVE,
     PLACEMENT_SPIN_RETRY,
     PLACEMENT_TASK,
+    PLACEMENT_AD_CASE,
     extract_callback_value,
     find_pending_intent_for_callback,
     grant_intent,
@@ -591,6 +592,14 @@ async def handle_adsgram_reward_task(
     db: AsyncSession = Depends(get_db),
 ):
     return await _handle_adsgram_reward_callback(request, PLACEMENT_TASK, db)
+
+
+@router.api_route("/adsgram/reward/ad-case", methods=["GET", "POST"])
+async def handle_adsgram_reward_ad_case(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _handle_adsgram_reward_callback(request, PLACEMENT_AD_CASE, db)
 
 
 @router.api_route("/adsgram/reward", methods=["GET", "POST"])

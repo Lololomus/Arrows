@@ -305,6 +305,13 @@ export const API_ENDPOINTS = {
     claim: (dropId: number) => `/fragments/drops/${dropId}/claim`,
     claimStatus: (dropId: number) => `/fragments/drops/${dropId}/claim/status`,
   },
+  contracts: {
+    list: '/contracts/',
+    activate: (id: string) => `/contracts/${id}/activate`,
+    completeStage: (id: string) => `/contracts/${id}/complete-stage`,
+    collect: (id: string) => `/contracts/${id}/collect`,
+    status: (id: string) => `/contracts/${id}/status`,
+  },
 };
 
 // ============================================
@@ -319,6 +326,7 @@ export const ADSGRAM_BLOCK_IDS = {
   rewardHint: import.meta.env.VITE_ADSGRAM_REWARD_HINT_BLOCK_ID || '',
   rewardRevive: import.meta.env.VITE_ADSGRAM_REWARD_REVIVE_BLOCK_ID || '',
   rewardSpinRetry: import.meta.env.VITE_ADSGRAM_REWARD_SPIN_RETRY_BLOCK_ID || '',
+  rewardAdCase: import.meta.env.VITE_ADSGRAM_REWARD_AD_CASE_BLOCK_ID || '',
   interstitialProgress: import.meta.env.VITE_ADSGRAM_INTERSTITIAL_PROGRESS_BLOCK_ID || '',
   interstitialHard: import.meta.env.VITE_ADSGRAM_INTERSTITIAL_HARD_BLOCK_ID || '',
   task: import.meta.env.VITE_ADSGRAM_TASK_BLOCK_ID || '',

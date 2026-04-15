@@ -9,11 +9,13 @@ from app.database import Base
 from app.models import AdRewardClaim, User
 from app.services.ad_rewards import (
     FAILURE_DAILY_LIMIT_REACHED,
+    PLACEMENT_AD_CASE,
     PLACEMENT_TASK,
     TASK_REVIVE_COOLDOWN,
     create_reward_intent,
     grant_intent,
 )
+from app.services import case_logic
 
 
 @pytest.fixture
@@ -93,3 +95,52 @@ async def test_task_revive_unlocks_after_eight_hours(db_session: AsyncSession) -
 
     assert next_intent.placement == PLACEMENT_TASK
     assert next_intent.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_ad_case_has_no_daily_limit(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+    user = await create_user(db_session, telegram_id=703)
+    monkeypatch.setattr("app.services.ad_rewards.determine_ad_case_rarity", lambda: "common")
+
+    for _ in range(6):
+        intent = await create_reward_intent(db_session, user, PLACEMENT_AD_CASE)
+        granted = await grant_intent(db_session, user, intent)
+
+        assert granted.status == "granted"
+        assert granted.used_today is None
+        assert granted.limit_today is None
+        assert granted.resets_at is None
+
+    claims = (
+        await db_session.execute(
+            select(AdRewardClaim).where(
+                AdRewardClaim.user_id == user.id,
+                AdRewardClaim.placement == PLACEMENT_AD_CASE,
+            )
+        )
+    ).scalars().all()
+
+    assert len(claims) == 6
+
+
+@pytest.mark.asyncio
+async def test_ad_case_star_reward_rolls_one_three_or_five(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await create_user(db_session, telegram_id=704)
+
+    def fake_choice(options):
+        if options == case_logic.AD_CASE_STAR_REWARD_AMOUNTS:
+            return 5
+        return {"hints": 0, "revives": 0, "coins": 0, "stars": 1}
+
+    monkeypatch.setattr(case_logic.random, "choice", fake_choice)
+
+    result = await case_logic.grant_ad_case_rewards(user, "epic", db_session)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    assert len(result["rewards"]) == 1
+    assert {"type": "stars", "amount": 5} in result["rewards"]
+    assert user.stars_balance == 5

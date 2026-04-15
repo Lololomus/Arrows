@@ -34,9 +34,11 @@ from ..services.case_logic import (
     CASE_PRICE_TON,
     PITY_THRESHOLD,
     determine_rarity,
+    determine_ad_case_rarity,
     get_case_result_for_transaction,
     get_recent_case_result,
     grant_case_rewards,
+    grant_ad_case_rewards,
 )
 from .error_utils import api_error
 from .auth import get_current_user
@@ -598,6 +600,27 @@ async def open_case_dev(
 
     rarity = determine_rarity(user.case_pity_counter)
     case_result = await grant_case_rewards(user, rarity, "dev", db)
+    await db.commit()
+
+    return {"status": "completed", "case_result": case_result}
+
+
+@router.post("/cases/open/dev-ad")
+async def open_ad_case_dev(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """DEV ONLY — открыть рекламный кейс без просмотра рекламы."""
+    if settings.ENVIRONMENT != "development":
+        raise api_error(403, "DEV_ONLY", "This endpoint is only available in development")
+
+    user_result = await db.execute(
+        select(User).where(User.id == user.id).with_for_update()
+    )
+    user = user_result.scalar_one()
+
+    rarity = determine_ad_case_rarity()
+    case_result = await grant_ad_case_rewards(user, rarity, db)
     await db.commit()
 
     return {"status": "completed", "case_result": case_result}

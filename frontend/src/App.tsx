@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { TonConnectUIProvider } from '@tonconnect/ui-react';
 import '@fontsource/bungee-inline';
 import { useAppStore } from './stores/store';
-import { authApi, socialApi } from './api/client';
+import { authApi, contractsApi, socialApi } from './api/client';
 import { ADS_ENABLED, UI_ANIMATIONS } from './config/constants';
 import { RewardToastHost } from './components/ui/RewardToastHost';
 import { TunnelDownOverlay } from './components/TunnelDownOverlay';
@@ -68,6 +68,10 @@ function AppInner() {
   } = useAppStore();
   const [activeTab, setActiveTab] = useState<TabId>('play');
   const handleTabChange = useCallback((id: TabId) => setActiveTab(id), []);
+  const [navBadges, setNavBadges] = useState<Partial<Record<TabId, boolean>>>({});
+  const handleFragmentBadgeChange = useCallback((hasPending: boolean) => {
+    setNavBadges((prev) => ({ ...prev, tasks: hasPending }));
+  }, []);
 
   const applyReferralIfPresent = useCallback(async (context: string, isCancelled?: () => boolean) => {
     // Try live extraction first, then fall back to localStorage
@@ -189,6 +193,18 @@ function AppInner() {
     };
   }, []);
 
+  // Инициализируем бейдж фрагментов при запуске, не дожидаясь открытия вкладки Tasks.
+  useEffect(() => {
+    void contractsApi.getContracts()
+      .then((data) => {
+        if (data.hasPendingAction) {
+          setNavBadges((prev) => ({ ...prev, tasks: true }));
+        }
+      })
+      .catch(() => {/* не критично — молча игнорируем */});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (!ENABLE_NON_GAME_BACKGROUND) return;
 
@@ -288,7 +304,7 @@ function AppInner() {
       case 'friends':
         return <FriendsScreen />;
       case 'tasks':
-        return <TasksScreen />;
+        return <TasksScreen onFragmentBadgeChange={handleFragmentBadgeChange} />;
       case 'play':
         return <HomeScreen />;
       case 'leaderboard':
@@ -346,7 +362,7 @@ function AppInner() {
         </div>
 
         <div className="relative z-10">
-          <BottomNav activeTab={activeTab} onTabChange={handleTabChange} />
+          <BottomNav activeTab={activeTab} onTabChange={handleTabChange} badges={navBadges} />
         </div>
       </div>
     </div>

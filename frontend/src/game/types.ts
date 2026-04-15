@@ -178,6 +178,9 @@ export interface User {
   welcomeOfferOpenedAt: string | null;
   welcomeOfferPurchased: boolean;
   isNew?: boolean;
+
+  // TODO: ВРЕМЕННО для тестирования — убрать после публичного запуска Fragments
+  isAdmin?: boolean;
 }
 
 /** Статистика пользователя */
@@ -479,7 +482,7 @@ export interface ClaimReviveResponse {
   sessionId: string;
 }
 
-export type RewardPlacement = 'reward_daily_coins' | 'reward_hint' | 'reward_revive' | 'reward_spin_retry' | 'reward_task';
+export type RewardPlacement = 'reward_daily_coins' | 'reward_hint' | 'reward_revive' | 'reward_spin_retry' | 'reward_task' | 'reward_ad_case';
 export type RewardIntentStatus = 'pending' | 'granted' | 'rejected' | 'expired';
 
 export interface RewardIntentCreateRequest {
@@ -595,4 +598,50 @@ export interface WithdrawalRequest {
   amount: number;
   status: 'pending' | 'completed' | 'rejected';
   createdAt: string;
+}
+
+// ============================================
+// CONTRACTS (Fragment Contracts)
+// ============================================
+
+export interface ContractStageDto {
+  index: number;
+  metric: string;
+  target: number;
+  titleRu: string;
+  titleEn: string;
+  progressCurrent: number;
+  isCurrent: boolean;
+  isCompleted: boolean;
+  isCompletable: boolean;
+  snapshotValue: number | null;
+}
+
+export interface UserContractState {
+  status: 'active' | 'reward_ready' | 'collecting' | 'completed';
+  currentStageIndex: number;
+  stages: ContractStageDto[];
+  activatedAt: string;
+  completedAt: string | null;
+  rewardClaimStatus: string | null;
+  hasPendingAction: boolean;
+}
+
+export interface ContractDto {
+  id: string;
+  type: 'simple_gift' | 'nft_gift';
+  titleRu: string;
+  titleEn: string;
+  emoji: string;
+  giftStarCost: number;
+  totalQuantity: number;
+  remainingQuantity: number;
+  stagesCount: number;
+  hasActiveElsewhere: boolean;
+  userState: UserContractState | null;
+}
+
+export interface ContractsListResponse {
+  contracts: ContractDto[];
+  hasPendingAction: boolean;
 }

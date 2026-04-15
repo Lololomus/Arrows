@@ -45,6 +45,7 @@ type TaskDevState = {
 };
 
 const STAGGER = 0.07;
+
 const DEV_TASKS_ENABLED = import.meta.env.DEV || (
   import.meta.env.MODE !== 'production'
   && ['1', 'true', 'yes', 'on'].includes(String(import.meta.env.VITE_ENABLE_DEV_AUTH || '').toLowerCase())
@@ -911,11 +912,14 @@ function TaskScreenLoader() {
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
-export function TasksScreen() {
+export function TasksScreen({ onFragmentBadgeChange }: { onFragmentBadgeChange?: (hasPending: boolean) => void } = {}) {
   const { user, updateUser } = useAppStore();
   const currentLevel = (user as (typeof user & { current_level?: number }) | null)?.currentLevel
     ?? (user as (typeof user & { current_level?: number }) | null)?.current_level
     ?? 1;
+
+  // TODO: ВРЕМЕННО для тестирования — убрать после публичного запуска Fragments
+  const isFragmentsAdmin = user?.isAdmin === true;
 
   const containerRef       = useRef<HTMLDivElement>(null);
   const coinTargetAnchorRef = useRef<HTMLDivElement>(null);
@@ -923,6 +927,7 @@ export function TasksScreen() {
   const openedTasksUserId = user?.id ?? null;
 
   const [activeTab,          setActiveTab]          = useState<TaskScreenTab>('tasks');
+  const [fragmentHasPending, setFragmentHasPending] = useState(false);
   const [tasks,              setTasks]              = useState<TaskDto[]>([]);
   const [loading,            setLoading]            = useState(true);
   const [screenError,        setScreenError]        = useState<string | null>(null);
@@ -940,6 +945,11 @@ export function TasksScreen() {
   const [taskDevLoaded,      setTaskDevLoaded]      = useState(false);
 
   const userCoins = user?.coins ?? 0;
+
+  const handleFragmentBadgeChange = useCallback((hasPending: boolean) => {
+    setFragmentHasPending(hasPending);
+    onFragmentBadgeChange?.(hasPending);
+  }, [onFragmentBadgeChange]);
 
   const fetchTasks = useCallback(async (showLoader = false) => {
     if (showLoader) setLoading(true);
@@ -1412,8 +1422,11 @@ export function TasksScreen() {
           <ClipboardList size={16} className="mr-1 mb-1 inline" /> {translate('tasks:tabs.tasks')}
         </button>
         <button onClick={() => setActiveTab('fragments')}
-          className={`z-10 flex-1 py-3 text-sm font-bold transition-colors ${activeTab === 'fragments' ? 'text-white' : 'text-white/50'}`}>
+          className={`z-10 flex-1 py-3 text-sm font-bold transition-colors relative ${activeTab === 'fragments' ? 'text-white' : 'text-white/50'}`}>
           <Puzzle size={16} className="mr-1 mb-1 inline" /> {translate('tasks:tabs.fragments')}
+          {fragmentHasPending && (
+            <span className="absolute top-2 right-3 w-2 h-2 bg-red-500 rounded-full" />
+          )}
         </button>
       </div>
 
@@ -1494,7 +1507,7 @@ export function TasksScreen() {
               exit={{ opacity: 0, transition: { duration: 0.08 } }}
               className="w-full"
             >
-              <FragmentsTab />
+              <FragmentsTab onPendingActionChange={handleFragmentBadgeChange} isAdmin={isFragmentsAdmin} />
             </motion.div>
           )}
         </AnimatePresence>

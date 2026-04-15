@@ -9,6 +9,7 @@ export type TabId = 'friends' | 'tasks' | 'play' | 'leaderboard' | 'shop';
 interface BottomNavProps {
   activeTab: TabId;
   onTabChange: (id: TabId) => void;
+  badges?: Partial<Record<TabId, boolean>>;
 }
 
 interface TabConfig {
@@ -29,7 +30,7 @@ const tabs: TabConfig[] = [
 const fadeDuration = UI_ANIMATIONS.fade / 1000;
 const scaleDuration = UI_ANIMATIONS.scale / 1000;
 
-const BottomNavComponent = ({ activeTab, onTabChange }: BottomNavProps) => {
+const BottomNavComponent = ({ activeTab, onTabChange, badges }: BottomNavProps) => {
   const navRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
 
@@ -111,7 +112,7 @@ const BottomNavComponent = ({ activeTab, onTabChange }: BottomNavProps) => {
                 className={
                   tab.isMain
                     ? `w-16 h-16 bg-gradient-to-tr from-blue-600 to-cyan-500 rounded-full flex items-center justify-center shadow-lg shadow-cyan-500/30 border-4 border-slate-900 ${isActive ? 'drop-shadow-glow' : ''}`
-                    : 'w-10 h-10 flex items-center justify-center'
+                    : 'w-10 h-10 flex items-center justify-center relative'
                 }
               >
                 <tab.icon
@@ -119,6 +120,9 @@ const BottomNavComponent = ({ activeTab, onTabChange }: BottomNavProps) => {
                   className={isActive ? 'text-white' : 'text-slate-400'}
                   strokeWidth={isActive ? 2.5 : 2}
                 />
+                {!tab.isMain && badges?.[tab.id] && !isActive && (
+                  <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
+                )}
               </motion.div>
 
               {!tab.isMain && (

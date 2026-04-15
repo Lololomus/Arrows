@@ -632,3 +632,52 @@ class CaseOpening(Base):
 
     user = relationship("User")
 
+
+# ============================================
+# USER CONTRACTS (Fragment Contracts)
+# ============================================
+
+class UserContract(Base):
+    """
+    Активированный контракт пользователя на получение фрагмента/подарка.
+
+    Жизненный цикл:
+      active       — пользователь работает над текущим этапом
+      reward_ready — все этапы завершены, ждёт нажатия «Забрать»
+      collecting   — бот отправляет подарок (асинхронно)
+      completed    — подарок доставлен
+
+    Прогресс каждого этапа вычисляется on-the-fly по snapshot-значениям.
+    """
+
+    __tablename__ = "user_contracts"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    contract_id = Column(String(64), nullable=False, index=True)  # ключ из contracts_catalog.py
+
+    # active | reward_ready | collecting | completed
+    status = Column(String(32), nullable=False, server_default="active")
+
+    current_stage_index = Column(Integer, nullable=False, server_default="0")
+
+    activated_at = Column(DateTime, nullable=False, server_default=func.now())
+    completed_at = Column(DateTime, nullable=True)
+
+    # Снапшоты для вычисления дельта-прогресса.
+    # {"0": {"snapshot_value": 150, "started_at": "2026-04-15T10:00:00"},
+    #  "1": {"snapshot_value": 3,   "started_at": "2026-04-15T10:05:00"}}
+    stage_snapshots = Column(JSON, nullable=False, server_default="{}")
+
+    # Список индексов завершённых этапов: [0, 1]
+    stages_completed = Column(JSON, nullable=False, server_default="[]")
+
+    # {"status": "sending"|"delivered"|"failed", "created_at": "..."}
+    reward_claim = Column(JSON, nullable=True)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "contract_id", name="uq_user_contract"),
+    )
+
