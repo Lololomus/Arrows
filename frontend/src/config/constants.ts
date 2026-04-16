@@ -255,6 +255,7 @@ export const API_ENDPOINTS = {
   cases: {
     info: '/shop/cases/info',
     invoiceStars: '/shop/cases/invoice/stars',
+    openAd: '/shop/cases/open/ad',
     openTon: '/shop/cases/open/ton',
     confirmTon: (txId: number) => `/shop/cases/ton/${txId}/confirm`,
     result: '/shop/cases/result',

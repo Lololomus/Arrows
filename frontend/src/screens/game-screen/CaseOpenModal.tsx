@@ -17,6 +17,7 @@ import { Coins, Heart, Lightbulb, Star } from 'lucide-react';
 import { AdaptiveParticles } from '../../components/ui/AdaptiveParticles';
 import { caseApi } from '../../api/client';
 import type { CaseInfo, CaseOpenResult, CaseRarity } from '../../game/types';
+import { cleanupAdsgramResidue } from '../../services/adsgram';
 import { runRewardedFlow, getRewardedFlowMessage } from '../../services/rewardedAds';
 import { clearPendingRewardIntent, rememberPendingRewardIntent } from '../../services/rewardReconciler';
 
@@ -461,37 +462,27 @@ export function CaseOpenModal({
       return;
     }
 
-    if (flowResult.intentId) {
-      rememberPendingRewardIntent({
-        intentId: flowResult.intentId,
-        placement: 'reward_ad_case',
-        adCompleted: true,
-      });
+    if (!flowResult.intentId) {
+      setErrorMsg(t('shop:cases.error.adFailed'));
+      setPhase('error');
+      return;
     }
 
-    setPhase('polling_ad');
-    pollCancelRef.current = false;
+    rememberPendingRewardIntent({
+      intentId: flowResult.intentId,
+      placement: 'reward_ad_case',
+      adCompleted: true,
+    });
 
-    for (let i = 0; i < 12; i++) {
-      if (pollCancelRef.current) return;
-      await sleep(i === 0 ? 350 : 1000);
-      try {
-        const res = await caseApi.pollResult('ad');
-        if (res) {
-          if (flowResult.intentId) {
-            clearPendingRewardIntent('reward_ad_case', flowResult.intentId);
-          }
-          pendingResultRef.current = res;
-          startOpenAnimation();
-          return;
-        }
-      } catch {
-        // keep polling
-      }
+    try {
+      const res = await caseApi.openAd(flowResult.intentId);
+      clearPendingRewardIntent('reward_ad_case', flowResult.intentId);
+      pendingResultRef.current = res;
+      startOpenAnimation();
+    } catch {
+      setErrorMsg(t('shop:cases.error.adFailed'));
+      setPhase('error');
     }
-
-    setErrorMsg(t('shop:cases.error.timeout'));
-    setPhase('error');
   }, [blockId, startOpenAnimation, t]);
 
   // ── Retry Stars poll ────────────────────────────────────
@@ -564,6 +555,9 @@ export function CaseOpenModal({
     pollCancelRef.current = true;
     setIsShaking(false);
     setIsBurst(false);
+    if (currency === 'ad') {
+      cleanupAdsgramResidue();
+    }
 
     const grantedResult = result ?? pendingResultRef.current;
     if (grantedResult && !rewardGrantedRef.current) {
@@ -572,7 +566,7 @@ export function CaseOpenModal({
     }
 
     onClose();
-  }, [onClose, onRewardGranted, result]);
+  }, [currency, onClose, onRewardGranted, result]);
 
   // ============================================================
   // RENDER
@@ -603,8 +597,8 @@ export function CaseOpenModal({
             key="case-modal-backdrop"
             className="fixed inset-0 z-[2000] bg-black/55 backdrop-blur-[2px]"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            animate={{ opacity: 1, pointerEvents: 'auto' }}
+            exit={{ opacity: 0, pointerEvents: 'none' }}
             transition={{ duration: 0.2 }}
             onClick={canDismiss ? handleDismiss : undefined}
           />
@@ -614,8 +608,8 @@ export function CaseOpenModal({
             key="case-modal-sheet"
             className={`fixed bottom-0 left-0 right-0 z-[2001] flex flex-col rounded-t-[32px] border-t border-white/10 bg-gradient-to-b ${isResultPhase ? theme.bg : 'from-[#1a1a24] to-[#11131f]'} overflow-hidden shadow-[0_-10px_40px_rgba(0,0,0,0.5)]`}
             initial={{ y: '100%' }}
-            animate={{ y: 0 }}
-            exit={{ y: '100%' }}
+            animate={{ y: 0, pointerEvents: 'auto' }}
+            exit={{ y: '100%', pointerEvents: 'none' }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
             drag={canDismiss ? 'y' : false}
             dragConstraints={{ top: 0, bottom: 0 }}

@@ -753,6 +753,20 @@ async def grant_intent(
     *,
     ad_reference: str | None = None,
 ) -> AdRewardIntent:
+    locked_intent_result = await db.execute(
+        select(AdRewardIntent)
+        .where(
+            AdRewardIntent.id == intent.id,
+            AdRewardIntent.user_id == user.id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    locked_intent = locked_intent_result.scalar_one_or_none()
+    if locked_intent is None:
+        return intent
+    intent = locked_intent
+
     await db.execute(select(User.id).where(User.id == user.id).with_for_update())
 
     if is_expired(intent):

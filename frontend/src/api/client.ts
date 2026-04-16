@@ -1221,6 +1221,17 @@ export const caseApi = {
     };
   },
 
+  openAd: async (intentId: string): Promise<CaseOpenResult> => {
+    const raw = await request<{ status: string; case_result: RawCaseOpenResult }>(
+      API_ENDPOINTS.cases.openAd,
+      {
+        method: 'POST',
+        body: JSON.stringify({ intent_id: intentId }),
+      },
+    );
+    return normalizeCaseOpenResult(raw.case_result);
+  },
+
   /** Poll for case payment result. Returns null while the result is not ready yet. */
   pollResult: async (paymentCurrency: 'stars' | 'ad' = 'stars'): Promise<CaseOpenResult | null> => {
     const endpoint = paymentCurrency === 'stars'

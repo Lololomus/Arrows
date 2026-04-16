@@ -5,8 +5,9 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.api import shop
 from app.database import Base
-from app.models import AdRewardClaim, User
+from app.models import AdRewardClaim, CaseOpening, User
 from app.services.ad_rewards import (
     FAILURE_DAILY_LIMIT_REACHED,
     PLACEMENT_AD_CASE,
@@ -144,3 +145,43 @@ async def test_ad_case_star_reward_rolls_one_three_or_five(
     assert len(result["rewards"]) == 1
     assert {"type": "stars", "amount": 5} in result["rewards"]
     assert user.stars_balance == 5
+
+
+@pytest.mark.asyncio
+async def test_open_ad_case_endpoint_grants_once_for_intent(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = await create_user(db_session, telegram_id=705)
+    monkeypatch.setattr("app.services.ad_rewards.determine_ad_case_rarity", lambda: "common")
+
+    intent = await create_reward_intent(db_session, user, PLACEMENT_AD_CASE)
+    request = shop.OpenAdCaseRequest(intent_id=intent.intent_id)
+
+    first = await shop.open_ad_case(request, user=user, db=db_session)
+    second = await shop.open_ad_case(request, user=user, db=db_session)
+
+    assert first["status"] == "completed"
+    assert second["status"] == "completed"
+    assert first["case_result"]["payment_currency"] == "ad"
+    assert second["case_result"]["payment_currency"] == "ad"
+
+    claims = (
+        await db_session.execute(
+            select(AdRewardClaim).where(
+                AdRewardClaim.user_id == user.id,
+                AdRewardClaim.placement == PLACEMENT_AD_CASE,
+            )
+        )
+    ).scalars().all()
+    openings = (
+        await db_session.execute(
+            select(CaseOpening).where(
+                CaseOpening.user_id == user.id,
+                CaseOpening.payment_currency == "ad",
+            )
+        )
+    ).scalars().all()
+
+    assert len(claims) == 1
+    assert len(openings) == 1

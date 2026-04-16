@@ -65,6 +65,7 @@ const INTERSTITIAL_PREFIX = 'int-';
 const REWARDED_BLOCK_ID_PATTERN = /^\d+$/;
 const INTERSTITIAL_BLOCK_ID_PATTERN = /^int-\d+$/;
 const TASK_BLOCK_ID_PATTERN = /^task-\d+$/;
+const ADSGRAM_CLEANUP_DELAYS_MS = [0, 150, 600];
 
 function normalizeBlockId(rawBlockId: string): string {
   return rawBlockId.trim();
@@ -93,6 +94,57 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
       (e) => { clearTimeout(timer); reject(e); },
     );
   });
+}
+
+function elementLooksLikeAdsgramResidue(element: Element): boolean {
+  const values: string[] = [];
+  const collect = (node: Element) => {
+    values.push(node.id);
+    const className = node.getAttribute('class');
+    if (className) values.push(className);
+    const src = node.getAttribute('src');
+    if (src) values.push(src);
+    const dataName = Array.from(node.attributes)
+      .filter((attr) => attr.name.toLowerCase().includes('adsgram') || attr.value.toLowerCase().includes('adsgram'))
+      .map((attr) => `${attr.name}=${attr.value}`);
+    values.push(...dataName);
+  };
+
+  collect(element);
+  for (const child of Array.from(element.querySelectorAll('[id], [class], [src], iframe'))) {
+    collect(child);
+  }
+
+  return values.join(' ').toLowerCase().includes('adsgram');
+}
+
+function runAdsgramResidueCleanup(): void {
+  if (typeof document === 'undefined' || !document.body) return;
+
+  document.documentElement.style.removeProperty('pointer-events');
+  document.body.style.removeProperty('pointer-events');
+  document.body.removeAttribute('inert');
+
+  const appRoot = document.getElementById('root');
+  appRoot?.removeAttribute('inert');
+  if (appRoot?.getAttribute('aria-hidden') === 'true') {
+    appRoot.removeAttribute('aria-hidden');
+  }
+
+  for (const child of Array.from(document.body.children)) {
+    if (child.id === 'root') continue;
+    if (child.tagName === 'SCRIPT' || child.tagName === 'STYLE' || child.tagName === 'LINK') continue;
+    if (elementLooksLikeAdsgramResidue(child)) {
+      child.remove();
+    }
+  }
+}
+
+export function cleanupAdsgramResidue(): void {
+  if (typeof window === 'undefined') return;
+  for (const delay of ADSGRAM_CLEANUP_DELAYS_MS) {
+    window.setTimeout(runAdsgramResidueCleanup, delay);
+  }
 }
 
 export function preflightAdsgramAd(kind: AdsgramAdKind, rawBlockId: string): AdsgramPreflightResult {
@@ -162,6 +214,7 @@ async function showAd(kind: AdsgramAdKind, rawBlockId: string): Promise<AdsgramR
     return { success: false, outcome: 'provider_error', error: msg };
   } finally {
     controller?.destroy();
+    cleanupAdsgramResidue();
   }
 }
 

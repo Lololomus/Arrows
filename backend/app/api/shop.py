@@ -40,11 +40,21 @@ from ..services.case_logic import (
     grant_case_rewards,
     grant_ad_case_rewards,
 )
+from ..services.ad_rewards import (
+    INTENT_STATUS_GRANTED,
+    PLACEMENT_AD_CASE,
+    get_intent_by_public_id,
+    grant_intent,
+)
 from .error_utils import api_error
 from .auth import get_current_user
 
 
 router = APIRouter(prefix="/shop", tags=["shop"])
+
+
+class OpenAdCaseRequest(BaseModel):
+    intent_id: str
 
 
 # ============================================
@@ -622,6 +632,42 @@ async def open_ad_case_dev(
     rarity = determine_ad_case_rarity()
     case_result = await grant_ad_case_rewards(user, rarity, db)
     await db.commit()
+
+    return {"status": "completed", "case_result": case_result}
+
+
+@router.post("/cases/open/ad")
+async def open_ad_case(
+    request: OpenAdCaseRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Open the ad case immediately after the client-side rewarded ad completes.
+    This mirrors the optimistic reward-ad flows: the intent is used for
+    idempotency, while the UI does not wait on /cases/result polling.
+    """
+    intent = await get_intent_by_public_id(db, user.id, request.intent_id)
+    if intent is None:
+        raise api_error(404, "AD_CASE_INTENT_NOT_FOUND", "Ad case intent not found")
+    if intent.placement != PLACEMENT_AD_CASE:
+        raise api_error(400, "INVALID_AD_CASE_INTENT", "Intent is not for ad case")
+
+    intent = await grant_intent(db, user, intent)
+    if intent.status != INTENT_STATUS_GRANTED:
+        raise api_error(
+            409,
+            intent.failure_code or "AD_CASE_INTENT_NOT_GRANTED",
+            "Ad case intent could not be granted",
+        )
+
+    case_result = await get_recent_case_result(
+        user=user,
+        payment_currency="ad",
+        db=db,
+    )
+    if case_result is None:
+        raise api_error(404, "AD_CASE_RESULT_NOT_FOUND", "Ad case result not found")
 
     return {"status": "completed", "case_result": case_result}
 
