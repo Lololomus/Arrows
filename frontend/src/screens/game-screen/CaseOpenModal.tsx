@@ -15,6 +15,8 @@ import { useTranslation } from 'react-i18next';
 import { useTonConnectUI } from '@tonconnect/ui-react';
 import { Coins, Heart, Lightbulb, Star } from 'lucide-react';
 import { AdaptiveParticles } from '../../components/ui/AdaptiveParticles';
+import { GiftBoxGraphic } from '../../components/ui/GiftBoxGraphic';
+import type { GiftBoxPhase } from '../../components/ui/GiftBoxGraphic';
 import { caseApi } from '../../api/client';
 import type { CaseInfo, CaseOpenResult, CaseRarity } from '../../game/types';
 import { cleanupAdsgramResidue } from '../../services/adsgram';
@@ -156,8 +158,32 @@ function RewardIcon({ type, featured = false }: { type: string; featured?: boole
   return null;
 }
 
+function LargeRewardIcon({ type }: { type: string }) {
+  const cls = 'h-20 w-20';
+  if (type === 'hints') return <Lightbulb className={`${cls} text-cyan-300`} strokeWidth={2.2} />;
+  if (type === 'revives') return <Heart className={`${cls} text-rose-300`} strokeWidth={2.2} />;
+  if (type === 'coins') return <Coins className={`${cls} text-amber-300`} strokeWidth={2.2} />;
+  if (type === 'stars') return <Star className={`${cls} text-yellow-200`} strokeWidth={2.2} />;
+  return null;
+}
+
 function getVisibleRewards(result: CaseOpenResult | null | undefined): CaseOpenResult['rewards'] {
   return (result?.rewards ?? []).filter((item) => item.amount > 0);
+}
+
+function selectPrimaryReward(
+  result: CaseOpenResult | null | undefined
+): CaseOpenResult['rewards'][number] | null {
+  const visible = getVisibleRewards(result);
+  if (!visible.length) return null;
+  const priority: Record<string, number> = { stars: 4, revives: 3, hints: 2, coins: 1 };
+  return visible.reduce((best, cur) => {
+    const bp = priority[best.type] ?? 0;
+    const cp = priority[cur.type] ?? 0;
+    if (cp > bp) return cur;
+    if (cp === bp && cur.amount > best.amount) return cur;
+    return best;
+  });
 }
 
 function getRewardIconFrameClass(type: string, featured: boolean): string {
@@ -209,6 +235,32 @@ function RewardContent({
   );
 }
 
+function FloatingRewardPrize({
+  item,
+}: {
+  item: CaseOpenResult['rewards'][number];
+}) {
+  return (
+    <div className="pointer-events-none relative flex flex-col items-center">
+      <div className="relative drop-shadow-[0_0_28px_rgba(255,255,255,0.30)]">
+        <LargeRewardIcon type={item.type} />
+      </div>
+    </div>
+  );
+}
+
+const FLYING_REWARD_INITIAL = { y: 38, scale: 0.16, opacity: 0 };
+const FLYING_REWARD_ANIMATE = {
+  y: -62,
+  scale: 1,
+  opacity: 1,
+};
+const FLYING_REWARD_TRANSITION = {
+  y: { type: 'spring', stiffness: 92, damping: 17, mass: 0.95, delay: 0.18 },
+  scale: { type: 'spring', stiffness: 118, damping: 18, mass: 0.82, delay: 0.18 },
+  opacity: { duration: 0.22, delay: 0.18, ease: 'easeOut' },
+};
+
 // ============================================================
 // PHASE STATE MACHINE
 // ============================================================
@@ -256,7 +308,7 @@ export function CaseOpenModal({
   const [result, setResult] = useState<CaseOpenResult | null>(null);
   const [isShaking, setIsShaking] = useState(false);
   const [isBurst, setIsBurst] = useState(false);
-  const [revealedCount, setRevealedCount] = useState(0);
+  const [flyingReward, setFlyingReward] = useState<CaseOpenResult['rewards'][number] | null>(null);
   const pendingResultRef = useRef<CaseOpenResult | null>(null);
   const pollCancelRef = useRef(false);
   const rewardGrantedRef = useRef(false);
@@ -269,7 +321,7 @@ export function CaseOpenModal({
       setResult(null);
       setIsShaking(false);
       setIsBurst(false);
-      setRevealedCount(0);
+      setFlyingReward(null);
       pendingResultRef.current = null;
       pollCancelRef.current = false;
       rewardGrantedRef.current = false;
@@ -381,35 +433,35 @@ export function CaseOpenModal({
   function startOpenAnimation() {
     triggerHaptic('medium');
     setIsShaking(true);
+    setIsBurst(false);
     setTimeout(() => {
       setIsShaking(false);
-      setIsBurst(true);
+      setFlyingReward(selectPrimaryReward(pendingResultRef.current));
       setPhase('opening');
       setTimeout(() => {
-        setIsBurst(false);
-        setPhase('revealing');
-        const res = pendingResultRef.current!;
-        const visibleRewards = getVisibleRewards(res);
-        // Stagger reveal items
-        visibleRewards.forEach((_, idx) => {
-          setTimeout(() => setRevealedCount(idx + 1), idx * 200 + 100);
-        });
-        // Move to result after all items
+        setIsBurst(true);
+        triggerHaptic('heavy');
         setTimeout(() => {
-          setResult(res);
-          setPhase('result');
-          const rarity = res.rarity;
-          if (!rewardGrantedRef.current) {
-            rewardGrantedRef.current = true;
-            onRewardGranted?.(res);
-          }
-          if (rarity === 'epic' || rarity === 'epic_stars') {
-            triggerHaptic('success');
-          } else if (rarity === 'rare') {
-            triggerHaptic('light');
-          }
-        }, visibleRewards.length * 200 + 600);
-      }, 800);
+          setIsBurst(false);
+          setPhase('revealing');
+          const res = pendingResultRef.current!;
+          setTimeout(() => {
+            setFlyingReward(null);
+            setResult(res);
+            setPhase('result');
+            const rarity = res.rarity;
+            if (!rewardGrantedRef.current) {
+              rewardGrantedRef.current = true;
+              onRewardGranted?.(res);
+            }
+            if (rarity === 'epic' || rarity === 'epic_stars') {
+              triggerHaptic('success');
+            } else if (rarity === 'rare') {
+              triggerHaptic('light');
+            }
+          }, 320);
+        }, 260);
+      }, 1250);
     }, 550);
   }
 
@@ -578,17 +630,19 @@ export function CaseOpenModal({
   const rarityLabel = t(`shop:cases.rarity.${rarity}`);
   const caseTitle = currency === 'ad' ? t('shop:cases.adCase.name') : t('shop:cases.name');
   const caseDescription = currency === 'ad' ? t('shop:cases.adCase.description') : t('shop:cases.description');
+  const rewardGlowTheme = RARITY_THEME[pendingResultRef.current?.rarity ?? result?.rarity ?? 'common'];
+
+  const giftBoxPhase: GiftBoxPhase =
+    phase === 'chest_idle' ? 'idle'
+    : phase === 'opening' ? 'opening'
+    : phase === 'revealing' ? 'open'
+    : 'processing';
 
   const canDismiss = phase === 'chest_idle'
     || phase === 'result'
     || phase === 'error'
     || phase === 'watching_ad'
     || (currency === 'ad' && phase === 'polling_ad');
-  const pendingVisibleRewards = getVisibleRewards(pendingResultRef.current);
-  const resultVisibleRewards = getVisibleRewards(result);
-  const isSinglePendingReward = pendingVisibleRewards.length === 1;
-  const isSingleResultReward = resultVisibleRewards.length === 1;
-
   const modal = (
     <AnimatePresence>
       {isOpen && (
@@ -643,85 +697,71 @@ export function CaseOpenModal({
 
             <div className="px-6 pb-8 pt-2 flex flex-col items-center gap-5">
 
-              {/* ── Chest + status phases ── */}
-              {(phase === 'chest_idle' || phase === 'create_invoice' || phase === 'polling_stars' || phase === 'awaiting_ton' || phase === 'watching_ad' || phase === 'polling_ad' || phase === 'opening') && (
+              {/* ── Chest + revealing phases ── */}
+              {(phase === 'chest_idle' || phase === 'create_invoice' || phase === 'polling_stars' || phase === 'awaiting_ton' || phase === 'watching_ad' || phase === 'polling_ad' || phase === 'opening' || phase === 'revealing') && (
                 <>
                   {/* Chest graphic */}
-                  <div className="relative flex items-center justify-center w-36 h-36">
-                    {/* Glow ring */}
-                    <motion.div
-                      className="absolute inset-0 rounded-full"
-                      animate={phase === 'chest_idle' ? {
-                        boxShadow: [
-                          '0 0 20px 4px rgba(250,204,21,0.15)',
-                          '0 0 40px 10px rgba(250,204,21,0.30)',
-                          '0 0 20px 4px rgba(250,204,21,0.15)',
-                        ],
-                      } : {}}
-                      transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-                    />
-
-                    {/* Chest emoji / icon */}
-                    <motion.div
-                      className="text-7xl select-none"
-                      animate={phase === 'chest_idle' ? {
-                        scale: [1, 1.04, 1],
-                      } : isShaking ? {
-                        x: [0, -10, 10, -8, 8, -5, 5, 0],
-                      } : isBurst ? {
-                        scale: [1, 1.3, 0],
-                        opacity: [1, 1, 0],
-                      } : {}}
-                      transition={phase === 'chest_idle' ? {
-                        duration: 2,
-                        repeat: Infinity,
-                        ease: 'easeInOut',
-                      } : isShaking ? {
-                        duration: 0.55,
-                        ease: 'easeInOut',
-                      } : {
-                        duration: 0.4,
-                      }}
-                    >
-                      🎁
-                    </motion.div>
-
-                    {/* Light burst */}
-                    {isBurst && (
+                  <div className="relative flex items-center justify-center w-48 h-48">
+                    {flyingReward && (
                       <motion.div
-                        className="absolute inset-0 rounded-full"
-                        style={{ background: 'radial-gradient(circle, rgba(255,255,255,0.9) 0%, transparent 70%)' }}
-                        initial={{ scale: 0, opacity: 0.9 }}
-                        animate={{ scale: 5, opacity: 0 }}
-                        transition={{ duration: 0.6, ease: 'easeOut' }}
+                        className="pointer-events-none absolute -inset-8 rounded-full blur-md"
+                        style={{
+                          background: `radial-gradient(circle, rgba(${rewardGlowTheme.glowRgb},0.58) 0%, rgba(${rewardGlowTheme.glowRgb},0.34) 36%, rgba(${rewardGlowTheme.glowRgb},0.14) 58%, transparent 78%)`,
+                        }}
+                        initial={{ opacity: 0, scale: 0.42 }}
+                        animate={{ opacity: [0, 1, 0.9], scale: [0.42, 1.28, 1.12] }}
+                        transition={{ duration: 0.9, delay: 0.18, ease: [0.16, 1, 0.3, 1] }}
                       />
                     )}
+
+                    {/* Gift box */}
+                    <motion.div
+                      className="w-full h-full flex items-center justify-center"
+                      animate={isShaking ? { x: [0, -10, 10, -8, 8, -5, 5, 0] } : { x: 0 }}
+                      transition={isShaking ? { duration: 0.55, ease: 'easeInOut' } : { duration: 0.2 }}
+                    >
+                      <GiftBoxGraphic phase={giftBoxPhase} isBurst={isBurst} />
+                    </motion.div>
+
+                    {/* Reward starts inside the gift and jumps out of its center */}
+                    {flyingReward && (
+                      <motion.div
+                        className="absolute inset-0 z-20 flex items-center justify-center"
+                        initial={FLYING_REWARD_INITIAL}
+                        animate={FLYING_REWARD_ANIMATE}
+                        transition={FLYING_REWARD_TRANSITION}
+                      >
+                        <FloatingRewardPrize item={flyingReward} />
+                      </motion.div>
+                    )}
                   </div>
 
-                  {/* Status text */}
-                  <div className="text-center">
-                    {phase === 'chest_idle' && (
-                      <>
-                        <p className="text-white font-semibold text-lg">{caseTitle}</p>
-                        <p className="text-gray-400 text-sm mt-1">{caseDescription}</p>
-                      </>
-                    )}
-                    {phase === 'create_invoice' && (
-                      <p className="text-gray-300 text-sm animate-pulse">{t('shop:ton.createTx')}</p>
-                    )}
-                    {phase === 'polling_stars' && (
-                      <p className="text-gray-300 text-sm animate-pulse">{t('shop:cases.phase.polling')}</p>
-                    )}
-                    {phase === 'awaiting_ton' && (
-                      <p className="text-gray-300 text-sm animate-pulse">{t('shop:cases.phase.awaitingTon')}</p>
-                    )}
-                    {phase === 'watching_ad' && (
-                      <p className="text-gray-300 text-sm animate-pulse">{t('shop:cases.phase.watchingAd')}</p>
-                    )}
-                    {phase === 'polling_ad' && (
-                      <p className="text-gray-300 text-sm animate-pulse">{t('shop:cases.phase.pollingAd')}</p>
-                    )}
-                  </div>
+                  {/* Status text — pre-opening only */}
+                  {phase !== 'opening' && phase !== 'revealing' && (
+                    <div className="text-center">
+                      {phase === 'chest_idle' && (
+                        <>
+                          <p className="text-white font-semibold text-lg">{caseTitle}</p>
+                          <p className="text-gray-400 text-sm mt-1">{caseDescription}</p>
+                        </>
+                      )}
+                      {phase === 'create_invoice' && (
+                        <p className="text-gray-300 text-sm animate-pulse">{t('shop:ton.createTx')}</p>
+                      )}
+                      {phase === 'polling_stars' && (
+                        <p className="text-gray-300 text-sm animate-pulse">{t('shop:cases.phase.polling')}</p>
+                      )}
+                      {phase === 'awaiting_ton' && (
+                        <p className="text-gray-300 text-sm animate-pulse">{t('shop:cases.phase.awaitingTon')}</p>
+                      )}
+                      {phase === 'watching_ad' && (
+                        <p className="text-gray-300 text-sm animate-pulse">{t('shop:cases.phase.watchingAd')}</p>
+                      )}
+                      {phase === 'polling_ad' && (
+                        <p className="text-gray-300 text-sm animate-pulse">{t('shop:cases.phase.pollingAd')}</p>
+                      )}
+                    </div>
+                  )}
 
                   {/* Pity bar — only for paid cases */}
                   {phase === 'chest_idle' && currency !== 'ad' && caseInfo && (
@@ -780,34 +820,8 @@ export function CaseOpenModal({
                       ))}
                     </div>
                   )}
-                </>
-              )}
 
-              {/* ── Revealing phase ── */}
-              {(phase === 'revealing') && (
-                <div className="flex flex-col items-center gap-5 w-full">
-                  <div className="text-5xl">✨</div>
-                  <div className={isSinglePendingReward ? 'flex w-full justify-center' : 'flex flex-wrap gap-3 justify-center'}>
-                    {pendingVisibleRewards.map((item, idx) => (
-                      <AnimatePresence key={`${item.type}-${idx}`}>
-                        {idx < revealedCount && (
-                          <motion.div
-                            initial={{ y: 30, opacity: 0, scale: 0.7 }}
-                            animate={{ y: 0, opacity: 1, scale: 1 }}
-                            transition={{ type: 'spring', stiffness: 400, damping: 20 }}
-                            className={getRewardCardClass(isSinglePendingReward)}
-                          >
-                            <RewardContent
-                              item={item}
-                              label={t(`shop:cases.rewards.${item.type}`)}
-                              featured={isSinglePendingReward}
-                            />
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    ))}
-                  </div>
-                </div>
+                </>
               )}
 
               {/* ── Result phase ── */}
@@ -829,42 +843,30 @@ export function CaseOpenModal({
                     {rarityLabel}
                   </motion.div>
 
-                  {/* Stars shimmer for epic_stars */}
-                  {rarity === 'epic_stars' && (
-                    <motion.div
-                      className="text-4xl font-black text-yellow-300"
-                      initial={{ scale: 0, opacity: 0 }}
-                      animate={{ scale: [0, 1.2, 1], opacity: 1 }}
-                      transition={{ duration: 0.5, delay: 0.2 }}
-                      style={{ textShadow: '0 0 20px rgba(250,204,21,0.8)' }}
-                    >
-                      +250 ⭐
-                    </motion.div>
-                  )}
-
-                  {/* Reward grid */}
-                  <div className={isSingleResultReward ? 'flex w-full justify-center' : 'flex flex-wrap gap-3 justify-center w-full'}>
-                    {resultVisibleRewards.map((item, idx) => (
-                      <motion.div
-                        key={`${item.type}-${idx}`}
-                        initial={{ y: 20, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: 0.15 + idx * 0.08, type: 'spring', stiffness: 350, damping: 25 }}
-                        className={getRewardCardClass(isSingleResultReward)}
-                        style={{
-                          boxShadow: item.type === 'stars' && rarity === 'epic_stars'
-                            ? `0 0 12px 2px rgba(${theme.glowRgb}, 0.5)`
-                            : undefined,
-                        }}
-                      >
-                        <RewardContent
-                          item={item}
-                          label={t(`shop:cases.rewards.${item.type}`)}
-                          featured={isSingleResultReward}
-                        />
-                      </motion.div>
-                    ))}
-                  </div>
+                  {/* Featured reward */}
+                  {(() => {
+                    const primary = selectPrimaryReward(result);
+                    if (!primary) return null;
+                    return (
+                      <div className="flex w-full justify-center">
+                        <motion.div
+                          initial={{ y: 20, opacity: 0 }}
+                          animate={{ y: 0, opacity: 1 }}
+                          transition={{ delay: 0.15, type: 'spring', stiffness: 350, damping: 25 }}
+                          className={getRewardCardClass(true)}
+                          style={primary.type === 'stars' && rarity === 'epic_stars'
+                            ? { boxShadow: `0 0 12px 2px rgba(${theme.glowRgb}, 0.5)` }
+                            : undefined}
+                        >
+                          <RewardContent
+                            item={primary}
+                            label={t(`shop:cases.rewards.${primary.type}`)}
+                            featured
+                          />
+                        </motion.div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Action buttons */}
                   <div className="flex gap-3 w-full">
