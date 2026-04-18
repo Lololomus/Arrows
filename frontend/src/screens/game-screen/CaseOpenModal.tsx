@@ -508,7 +508,15 @@ export function CaseOpenModal({
       return;
     }
 
-    if (flowResult.outcome !== 'granted' && flowResult.outcome !== 'completed') {
+    // Ad cases are granted by /shop/cases/open/ad. If AdsGram returns a provider
+    // error after creating an intent, do not strand the user in "checking reward".
+    const shouldOpenOptimistically = Boolean(
+      flowResult.outcome === 'granted'
+      || flowResult.outcome === 'completed'
+      || ((flowResult.outcome === 'provider_error' || flowResult.outcome === 'timeout') && flowResult.intentId),
+    );
+
+    if (!shouldOpenOptimistically) {
       setErrorMsg(getRewardedFlowMessage('reward_ad_case', flowResult));
       setPhase('error');
       return;
