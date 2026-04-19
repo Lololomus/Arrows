@@ -66,6 +66,7 @@ async def dev_reset_onboarding_state(
     if payload.mode == "new_user":
         locked.welcome_offer_opened_at = None
         locked.welcome_offer_purchased = False
+        locked.current_level = 1
 
     await db.commit()
     await db.refresh(locked)

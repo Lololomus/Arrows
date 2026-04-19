@@ -38,10 +38,11 @@ const titleLine = {
 
 export function HomeScreen() {
   const { t } = useTranslation();
-  const { setScreen, user, spinAvailable, loginStreak, setSpinStatus, setDailyMode, locale, setLocaleManually, setUser, spinStreakLostAt, spinStreakLostCount, staticBackground, setStaticBackground, onboardingPending, setOnboardingPending } = useAppStore();
+  const { setScreen, user, spinAvailable, spinPendingPrize, loginStreak, setSpinStatus, setDailyMode, locale, setLocaleManually, setUser, spinStreakLostAt, spinStreakLostCount, staticBackground, setStaticBackground, onboardingPending, setOnboardingPending } = useAppStore();
   const isNewUserOnboarding = onboardingPending === 'new_user';
   const [showSpin, setShowSpin] = useState(isNewUserOnboarding);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [spinStatusResolved, setSpinStatusResolved] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState(false);
   const [showDevLauncher, setShowDevLauncher] = useState(false);
@@ -93,7 +94,9 @@ export function HomeScreen() {
         const s = await spinApi.getStatus();
         if (cancelled) return;
         setSpinStatus(s.available, s.streak, s.retryAvailable, s.pendingPrize, s.nextAvailableAt, s.streakLostAt, s.streakLostCount);
+        setSpinStatusResolved(true);
       } catch {
+        if (!cancelled) setSpinStatusResolved(true);
         // not critical
       }
     };
@@ -130,6 +133,15 @@ export function HomeScreen() {
       setShowOnboarding(false);
     }
   }, [onboardingPending]);
+
+  useEffect(() => {
+    if (onboardingPending !== 'new_user') return;
+    if (!showSpin || !spinStatusResolved) return;
+    if (spinAvailable || spinPendingPrize) return;
+
+    setShowSpin(false);
+    setShowOnboarding(true);
+  }, [onboardingPending, showSpin, spinAvailable, spinPendingPrize, spinStatusResolved]);
 
   const handlePlayArcade = () => {
     setDailyMode(false);

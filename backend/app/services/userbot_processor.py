@@ -27,6 +27,10 @@ from .userbot_gift_sender import (
 logger = logging.getLogger(__name__)
 
 
+# TODO: Когда USERBOT_API_ID и USERBOT_API_HASH будут добавлены в .env,
+#       установи USERBOT_ENABLED=True — этот цикл возьмёт на себя обработку
+#       заказов автоматически вместо ручных уведомлений в manual_gift_notifier.py.
+#       Поток UserbotGiftOrder остаётся неизменным: pending → processing → completed/failed.
 async def userbot_processor_loop() -> None:
     logger.info(
         "userbot_processor: started (interval=%ds)",

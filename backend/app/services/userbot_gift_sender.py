@@ -380,6 +380,9 @@ async def _resolve_recipient_peer(
         raise UserbotActivationRequired("recipient_activation_required")
 
 
+# TODO: При USERBOT_ENABLED=True заказы, созданные здесь, обрабатываются
+#       автоматически через userbot_processor_loop — ручное участие администраторов
+#       не требуется. Удали manual_gift_notifier.py и связанный код в bot.py.
 async def queue_userbot_send_gift(
     db: AsyncSession,
     user_id: int,

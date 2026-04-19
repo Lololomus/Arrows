@@ -145,11 +145,15 @@ function AppInner() {
       const currentUser = useAppStore.getState().user;
       if (currentUser) {
         console.log('Authenticated:', currentUser.id);
+        const pendingNewUserId = localStorage.getItem(PENDING_NEW_USER_KEY);
+        const hasPendingNewUserRecovery = pendingNewUserId === String(currentUser.id);
+
         if (currentUser.isNew) {
-          localStorage.setItem(PENDING_NEW_USER_KEY, '1');
+          localStorage.setItem(PENDING_NEW_USER_KEY, String(currentUser.id));
           useAppStore.getState().setOnboardingPending('new_user');
-        } else if (localStorage.getItem(PENDING_NEW_USER_KEY) === '1' && !currentUser.onboardingShown) {
-          // Crash recovery: was a new user but onboarding/complete never reached server
+        } else if (hasPendingNewUserRecovery && !currentUser.onboardingShown) {
+          // Crash recovery: this same user started registration onboarding but
+          // /onboarding/complete did not reach the server before the app closed.
           useAppStore.getState().setOnboardingPending('new_user');
         } else if (!currentUser.onboardingShown) {
           useAppStore.getState().setOnboardingPending('existing_user');

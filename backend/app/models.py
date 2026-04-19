@@ -587,6 +587,7 @@ class UserbotGiftOrder(Base):
     processing_started_at = Column(DateTime, nullable=True, index=True)
     completed_at = Column(DateTime, nullable=True)
     failed_at = Column(DateTime, nullable=True)
+    admin_notified_at = Column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User")
 

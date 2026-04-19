@@ -20,7 +20,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from app.config import settings
 from app.database import AsyncSessionLocal, close_redis, get_redis
-from app.models import Transaction, User, StarsWithdrawal
+from app.models import Transaction, User, StarsWithdrawal, UserbotGiftOrder
 from app.services.ad_rewards import utcnow
 from app.services.admin_stars_topup import (
     ADMIN_TOPUP_PACKS,
@@ -50,6 +50,11 @@ from app.services.admin_stats import (
 )
 from app.services.bot_notifications import notify_spin_ready, notify_spin_streak_reset, notify_streak_warning
 from app.services.i18n import bot_text, normalize_locale
+from app.services.manual_gift_notifier import (
+    GIFT_CONFIRM_PREFIX,
+    GIFT_FAIL_PREFIX,
+    notify_admins_of_order,
+)
 from app.services.referrals import extract_referral_code, store_pending_referral_code
 
 SPIN_READY_DELAY = timedelta(hours=24)
@@ -1493,6 +1498,104 @@ async def _send_personal_spin_notifications() -> None:
     )
 
 
+# ============================================================
+# MANUAL NFT GIFT ADMIN NOTIFICATIONS
+# TODO: Удалить блок ниже (loop + callbacks) когда будут настроены
+#       USERBOT_API_ID и USERBOT_API_HASH в .env и установлен
+#       USERBOT_ENABLED=True — userbot_processor_loop обработает
+#       всё автоматически.
+# ============================================================
+
+
+async def _sweep_pending_gift_orders() -> None:
+    """Notify admins about pending gift orders that haven't been announced yet."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(UserbotGiftOrder).where(
+                UserbotGiftOrder.status == "pending",
+                UserbotGiftOrder.admin_notified_at.is_(None),
+            )
+        )
+        orders = result.scalars().all()
+        for order in orders:
+            await notify_admins_of_order(bot, db, order.id)
+
+
+async def manual_gift_notifier_loop() -> None:
+    """Background loop: notifies admins about new pending gift orders every minute.
+
+    TODO: Remove this loop when USERBOT_ENABLED=True is configured —
+          userbot_processor_loop in userbot_processor.py takes over automatically.
+    """
+    while True:
+        started = datetime.now(timezone.utc)
+        try:
+            await _sweep_pending_gift_orders()
+        except Exception as e:
+            logger.error("manual gift notifier error: %s", e)
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+        await asyncio.sleep(max(5, NOTIFICATIONS_SWEEP_INTERVAL_SECONDS - elapsed))
+
+
+@dp.callback_query(F.data.startswith(GIFT_CONFIRM_PREFIX + ":"))
+async def on_gift_confirm(callback: types.CallbackQuery) -> None:
+    """Admin confirmed manual gift delivery."""
+    if not is_admin_telegram_id(callback.from_user.id if callback.from_user else None):
+        await callback.answer("Нет прав.", show_alert=True)
+        return
+
+    order_id = int(callback.data.split(":")[1])  # type: ignore[union-attr]
+    now = datetime.now(timezone.utc)
+
+    async with AsyncSessionLocal() as db:
+        order = await db.get(UserbotGiftOrder, order_id)
+        if not order:
+            await callback.answer("Заказ не найден.", show_alert=True)
+            return
+        if order.status != "pending":
+            await callback.answer(f"Статус уже: {order.status}", show_alert=True)
+            return
+
+        order.status = "completed"
+        order.completed_at = now
+        await db.commit()
+
+    await callback.answer("Отмечено как доставлено.")
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.reply(f"✅ Заказ #{order_id} отмечен как доставленный.")
+
+
+@dp.callback_query(F.data.startswith(GIFT_FAIL_PREFIX + ":"))
+async def on_gift_fail(callback: types.CallbackQuery) -> None:
+    """Admin cancelled manual gift delivery."""
+    if not is_admin_telegram_id(callback.from_user.id if callback.from_user else None):
+        await callback.answer("Нет прав.", show_alert=True)
+        return
+
+    order_id = int(callback.data.split(":")[1])  # type: ignore[union-attr]
+    now = datetime.now(timezone.utc)
+
+    async with AsyncSessionLocal() as db:
+        order = await db.get(UserbotGiftOrder, order_id)
+        if not order:
+            await callback.answer("Заказ не найден.", show_alert=True)
+            return
+        if order.status != "pending":
+            await callback.answer(f"Статус уже: {order.status}", show_alert=True)
+            return
+
+        order.status = "failed"
+        order.failure_reason = "admin_cancelled"
+        order.failed_at = now
+        await db.commit()
+
+    await callback.answer("Заказ отменён.")
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.reply(f"❌ Заказ #{order_id} отменён.")
+
+
 async def personal_notifications_scheduler() -> None:
     """Background loop: checks due notifications every minute."""
     while True:
@@ -1513,6 +1616,8 @@ async def main():
     await bot.delete_webhook(drop_pending_updates=True)
 
     asyncio.create_task(personal_notifications_scheduler())
+    if not settings.USERBOT_ENABLED:
+        asyncio.create_task(manual_gift_notifier_loop())
 
     logger.info("Bot is running")
     try:
