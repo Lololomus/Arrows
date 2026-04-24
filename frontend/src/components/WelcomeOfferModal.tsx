@@ -135,7 +135,7 @@ export function WelcomeOfferModal({ offer, onClose, onPurchased }: WelcomeOfferM
 
           {/* Timer */}
           {showAsDiscounted && countdown && (
-            <div className="mb-4 rounded-2xl border border-white/8 bg-white/5 px-4 py-3 flex items-center justify-between">
+            <div className="mb-4 rounded-2xl bg-white/5 px-4 py-3 flex items-center justify-between">
               <span className="text-xs text-white/50">{t('shop:welcomeOffer.timerLabel')}</span>
               <span className="font-mono text-sm font-bold text-amber-300">{countdown}</span>
             </div>

@@ -17,7 +17,8 @@ import { formatNumber, translate } from '../i18n';
 import { useWalletConnectionController } from '../hooks/useWalletConnectionController';
 import { useAppStore } from '../stores/store';
 import { CaseOpenModal } from './game-screen/CaseOpenModal';
-import { WithdrawalModal } from './game-screen/WithdrawalModal';
+import { WithdrawUnifiedModal } from './game-screen/WithdrawUnifiedModal';
+import usdtLogoUrl from '../assets/usdt-logo-circle.svg';
 import { PurchaseSuccessOverlay, type PurchaseSuccessData } from '../components/ui/PurchaseSuccessOverlay';
 
 const CASE_ENABLED = import.meta.env.DEV;
@@ -204,19 +205,19 @@ function BoostCard({
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold text-[#8d93a3]">
-        <span className="rounded-full border border-white/8 bg-white/[0.04] px-2.5 py-1">
+        <span className="rounded-full bg-white/[0.04] px-2.5 py-1">
           {t('shop:pricing.perUnit', { price: formatNumber(unitPrice) })}
         </span>
         {discountTiers.map((tier) => (
           <span
             key={`${boostId}-${tier.minQuantity}-${tier.percent}`}
-            className="rounded-full border border-amber-400/20 bg-amber-500/10 px-2.5 py-1 text-amber-100"
+            className="rounded-full bg-amber-500/10 px-2.5 py-1 text-amber-100"
           >
             {t('shop:pricing.discountTier', { quantity: formatNumber(tier.minQuantity), percent: tier.percent })}
           </span>
         ))}
         {discountPercent > 0 && (
-          <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1 text-emerald-200">
+          <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-200">
             {t('shop:pricing.discountApplied', { percent: discountPercent })}
           </span>
         )}
@@ -1188,26 +1189,6 @@ export function ShopScreen() {
                     <div className="min-w-0 flex-1">
                       <h2 className="text-lg font-bold text-[#f7f8fb]">{t('shop:cases.name')}</h2>
                       <p className="mt-0.5 text-sm text-[#a7abb8]">{t('shop:cases.description')}</p>
-                      {(user?.starsBalance ?? 0) > 0 && (
-                        <div className="mt-1 flex items-center gap-2">
-                          <p className="text-xs text-yellow-400/80">
-                            ⭐ {t('shop:cases.starsBalance', { count: user?.starsBalance ?? 0 })}
-                          </p>
-                          {(user?.starsBalance ?? 0) >= 50 && (
-                            <button
-                              onClick={() => setWithdrawalOpen(true)}
-                              className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold transition-opacity hover:opacity-80 active:opacity-60"
-                              style={{
-                                background: 'linear-gradient(135deg,rgba(251,191,36,0.22),rgba(245,158,11,0.14))',
-                                border: '1px solid rgba(251,191,36,0.35)',
-                                color: 'rgba(251,191,36,0.95)',
-                              }}
-                            >
-                              ↑ {t('shop:cases.withdrawLink')}
-                            </button>
-                          )}
-                        </div>
-                      )}
                     </div>
                   </div>
 
@@ -1250,6 +1231,50 @@ export function ShopScreen() {
                       💎 {caseInfo.priceTon} TON
                     </button>
                   </div>
+                </motion.div>
+              </section>
+            )}
+
+            {/* ── Withdrawal section ── */}
+            {(user?.starsBalance ?? 0) > 0 && (
+              <section className="mb-5">
+                <div className="pl-1 mb-3 text-sm font-bold uppercase tracking-[0.18em] text-[#677086]">
+                  {t('shop:withdrawal.sectionTitle')}
+                </div>
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-[24px] border border-white/5 bg-[#18181b]/60 p-5 backdrop-blur-md"
+                >
+                  {/* Balances row */}
+                  <div className="flex gap-3 mb-4">
+                    {/* Stars balance */}
+                    <div className="flex-1 flex items-center gap-2.5 rounded-2xl bg-white/4 px-3 py-2.5">
+                      <span className="text-3xl leading-none shrink-0">⭐</span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-[#f7f8fb] leading-tight">{user?.starsBalance ?? 0}</p>
+                        <p className="text-[11px] text-[#677086] leading-tight mt-0.5">Stars</p>
+                      </div>
+                    </div>
+                    {/* USDT balance */}
+                    <div className="flex-1 flex items-center gap-2.5 rounded-2xl bg-white/4 px-3 py-2.5">
+                      <img src={usdtLogoUrl} alt="USDT" className="w-8 h-8 object-contain shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-[#f7f8fb] leading-tight">0.00</p>
+                        <p className="text-[11px] text-[#677086] leading-tight mt-0.5">USDT</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Single withdraw button */}
+                  <button
+                    type="button"
+                    onClick={() => setWithdrawalOpen(true)}
+                    className="w-full py-3 rounded-2xl font-bold text-sm text-white transition-all active:scale-95"
+                    style={{ background: 'linear-gradient(135deg, #7C3AED, #4F46E5)' }}
+                  >
+                    ↑ {t('shop:cases.withdrawLink')}
+                  </button>
                 </motion.div>
               </section>
             )}
@@ -1625,13 +1650,11 @@ export function ShopScreen() {
         />
       )}
 
-      {/* Stars withdrawal modal */}
-      {CASE_ENABLED && (
-        <WithdrawalModal
-          isOpen={withdrawalOpen}
-          onClose={() => setWithdrawalOpen(false)}
-        />
-      )}
+      {/* Unified withdrawal modal */}
+      <WithdrawUnifiedModal
+        isOpen={withdrawalOpen}
+        onClose={() => setWithdrawalOpen(false)}
+      />
 
       {/* Welcome offer popup */}
       {showWelcomePopup && welcomeOffer && (

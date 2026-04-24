@@ -141,7 +141,7 @@ class Settings(BaseSettings):
     FRAGMENT_STARS_LOW_THRESHOLD: int = 100
 
     # Stars Withdrawal
-    STARS_WITHDRAWAL_MIN: int = 50
+    STARS_WITHDRAWAL_MIN: int = 100
 
     # Telegram Userbot Gifts (MTProto)
     USERBOT_ENABLED: bool = False

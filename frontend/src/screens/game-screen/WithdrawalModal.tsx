@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { caseApi } from '../../api/client';
 import { useAppStore } from '../../stores/store';
 
-const MIN_WITHDRAWAL = 50;
+const MIN_WITHDRAWAL = 100;
 
 type Phase = 'idle' | 'submitting' | 'success' | 'error';
 
