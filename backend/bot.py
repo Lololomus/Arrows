@@ -82,6 +82,8 @@ if _proxy_url:
         "proxy_type": ProxyType.SOCKS5,
         "host": _parsed.hostname,
         "port": _parsed.port or 1080,
+        "username": _parsed.username,
+        "password": _parsed.password,
         "rdns": True,
     }
     bot = Bot(token=settings.TELEGRAM_BOT_TOKEN, session=_session)
