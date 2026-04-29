@@ -895,7 +895,7 @@ export function LeaderboardScreen() {
   const stickyBottomPx = bottomNavHeight + CARD_GAP_PX;
   const shouldAnimateListEnter = listRenderVersion > 0;
 
-  // Подключаем таймер (по умолчанию будет 1 мая 2026 03:00 МСК, пока бэк не отдаст реальное)
+  // Подключаем таймер (по умолчанию будет 21 мая 2026 03:00 МСК, пока бэк не отдаст реальное)
   const { days, hours, minutes, isFinished } = useCountdown(seasonEndsAt);
 
   const applyLeaderboardMeta = useCallback((data: Awaited<ReturnType<typeof socialApi.getLeaderboard>>) => {
@@ -904,7 +904,7 @@ export function LeaderboardScreen() {
     setMyInTop(data.myInTop);
     setTotalParticipants(data.totalParticipants);
     // Берем с бэкенда или используем фоллбэк дату
-    setSeasonEndsAt((data as any).seasonEndsAt || '2026-05-01T00:00:00Z');
+    setSeasonEndsAt((data as any).seasonEndsAt || '2026-05-21T00:00:00Z');
   }, []);
 
   const resetLeaderboardMeta = useCallback(() => {

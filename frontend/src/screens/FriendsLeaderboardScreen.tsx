@@ -531,8 +531,8 @@ export function FriendsLeaderboardScreen({ embedded = false }: FriendsLeaderboar
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   
-  // Добавляем состояние для таймера (по умолчанию 1 мая 2026, пока бэк не отдает реальное время)
-  const [seasonEndsAt, setSeasonEndsAt] = useState<string | null>('2026-05-01T00:00:00Z');
+  // Добавляем состояние для таймера (по умолчанию 21 мая 2026, пока бэк не отдает реальное время)
+  const [seasonEndsAt, setSeasonEndsAt] = useState<string | null>('2026-05-21T00:00:00Z');
   
   const { user } = useAppStore();
   const scrollRef = useRef<HTMLDivElement>(null);
